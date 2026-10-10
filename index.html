@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/10 22:05';
+var GTO_BUILD = '10/10 22:28';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -22873,6 +22873,40 @@ function paPeriodoHoje(){
   renderCascata();
 }
 
+// ── Como o backlog fecha cada dia — REGRA ÚNICA ──────────────────
+// Ordem de prioridade, do mais confiável para o menos:
+//   1. marco do dia em _paHistorico = o AG. Tratamento real contado no
+//      upload do Radar daquele dia. É número medido, não estimado.
+//   2. âncora no Radar ao vivo, só no último dia do período.
+//   3. a conta: backlog de ontem − saídas + entradas.
+// Isso vivia copiado em três lugares (Plano de Ação e os dois geradores
+// de slide) e as cópias dos slides tinham ficado sem o passo 1 — por isso
+// o mesmo slide mostrava Ag. Tratamento 446 no gráfico e "Backlog Atual
+// 340" no card. Agora é uma função só.
+function paFecharBacklogDias(dias, backlogBase, saidasPorDia, entradasPorDia, opts){
+  opts = opts || {};
+  var hist = opts.historico
+    || ((typeof _paHistorico !== 'undefined' && Array.isArray(_paHistorico)) ? _paHistorico : []);
+  var linhas = [], atual = backlogBase || 0;
+  (dias || []).forEach(function(d, idx){
+    var s = (saidasPorDia && saidasPorDia[d]) || 0;
+    var e = (entradasPorDia && entradasPorDia[d]) || 0;
+    var marco = hist.find(function(h){ return h && h.dt === d; });
+    var fim;
+    if (marco) fim = marco.val;
+    else if (idx === dias.length - 1 && opts.ancorar) fim = opts.valorAncora;
+    else fim = Math.max(0, atual - s + e);
+    linhas.push({ data:d, backlogInicio:atual, saidas:s, entrada:e, saldo:e - s, backlogFim:fim });
+    atual = fim;
+  });
+  return {
+    linhas: linhas,
+    backlogAtual: atual,
+    totalSaidas:   linhas.reduce(function(n,l){ return n + l.saidas;  }, 0),
+    totalEntradas: linhas.reduce(function(n,l){ return n + l.entrada; }, 0)
+  };
+}
+
 function renderCascata(){
   const dtInicioEl = document.getElementById('pa-dt-inicio');
   const dtFimEl    = document.getElementById('pa-dt-fim');
@@ -22950,28 +22984,12 @@ function renderCascata(){
   const anchorarRadar = dtFim >= hojeISO && _backlogRealRadar !== null
                         && (typeof _pmRadarEhDeHoje==='function' ? _pmRadarEhDeHoje() : true);
 
-  let backlogAtual = backlogBase;
-  diasUteis.forEach((d, idx)=>{
-    const saidas  = saidasPorDia[d]||0;
-    const entrada = (_paEntradas.find(e=>e.dt===d)?.val)||0;
-    const saldo   = entrada - saidas;
-    const isUltimo = idx === diasUteis.length - 1;
-    // Backlog Fim do dia: se existir um marco "Backlog Auto — AG. Tratamento" para
-    // essa data (snapshot real do 1º upload do dia), usar ele como valor oficial —
-    // isso mantém o gráfico fiel ao Ag. Tratamento do Radar de cada dia.
-    const marcoDia = _paHistorico.find(h=>h.dt===d);
-    let backlogFim;
-    if(marcoDia){
-      backlogFim = marcoDia.val;
-    } else if(isUltimo && anchorarRadar){
-      // Último dia sem marco salvo ainda hoje: ancorar no radar ao vivo
-      backlogFim = _backlogRealRadar;
-    } else {
-      backlogFim = Math.max(0, backlogAtual + saldo);
-    }
-    linhas.push({data:d, backlogInicio:backlogAtual, saidas, entrada, saldo, backlogFim});
-    backlogAtual = backlogFim;
-  });
+  const _entradasPorDia = {};
+  (_paEntradas||[]).forEach(e=>{ if(e && e.dt) _entradasPorDia[e.dt] = e.val||0; });
+  const _fech = paFecharBacklogDias(diasUteis, backlogBase, saidasPorDia, _entradasPorDia,
+    { ancorar: anchorarRadar, valorAncora: _backlogRealRadar });
+  _fech.linhas.forEach(l=>linhas.push(l));
+  let backlogAtual = _fech.backlogAtual;
 
   const fmtDptBR = iso=>{ const p=iso.split('-'); return p[2]+'/'+p[1]; };
 
@@ -38058,17 +38076,13 @@ async function admApresentacaoGerar(){
       : (typeof _backlogAtualGlobal === 'number' && _backlogAtualGlobal > 0 ? _backlogAtualGlobal : null);
     const _anchorarRadar = dtFimPA >= _hojeISO && _backlogRealRadar !== null;
 
-    let backlogAtual = backlogBase;
-    let totalSaidas = 0, totalEntradas = 0;
-    diasUteis.forEach((d, idx)=>{
-      const s = _saidasPorDia[d]||0;
-      const e = (_paEntradas||[]).find(x=>x.dt===d)?.val||0;
-      totalSaidas += s; totalEntradas += e;
-      const isUltimo = idx === diasUteis.length - 1;
-      backlogAtual = (isUltimo && _anchorarRadar)
-        ? _backlogRealRadar
-        : Math.max(0, backlogAtual - s + e);
-    });
+    const _entradasPorDiaSlide = {};
+    (_paEntradas||[]).forEach(x=>{ if(x && x.dt) _entradasPorDiaSlide[x.dt] = x.val||0; });
+    const _fechSlide = paFecharBacklogDias(diasUteis, backlogBase, _saidasPorDia, _entradasPorDiaSlide,
+      { ancorar: _anchorarRadar, valorAncora: _backlogRealRadar });
+    const backlogAtual   = _fechSlide.backlogAtual;
+    const totalSaidas    = _fechSlide.totalSaidas;
+    const totalEntradas  = _fechSlide.totalEntradas;
 
     // Entradas acumuladas no período
     // Prioridade: variação real do L3+L4 do Mapa (mapa_diario Firebase)
@@ -45316,17 +45330,13 @@ async function admApresFastGerar(){
       : (typeof _backlogAtualGlobal === 'number' && _backlogAtualGlobal > 0 ? _backlogAtualGlobal : null);
     const _anchorarRadar = dtFimPA >= _hojeISO && _backlogRealRadar !== null;
 
-    let backlogAtual = backlogBase;
-    let totalSaidas = 0, totalEntradas = 0;
-    diasUteis.forEach((d, idx)=>{
-      const s = _saidasPorDia[d]||0;
-      const e = (_paEntradas||[]).find(x=>x.dt===d)?.val||0;
-      totalSaidas += s; totalEntradas += e;
-      const isUltimo = idx === diasUteis.length - 1;
-      backlogAtual = (isUltimo && _anchorarRadar)
-        ? _backlogRealRadar
-        : Math.max(0, backlogAtual - s + e);
-    });
+    const _entradasPorDiaSlide = {};
+    (_paEntradas||[]).forEach(x=>{ if(x && x.dt) _entradasPorDiaSlide[x.dt] = x.val||0; });
+    const _fechSlide = paFecharBacklogDias(diasUteis, backlogBase, _saidasPorDia, _entradasPorDiaSlide,
+      { ancorar: _anchorarRadar, valorAncora: _backlogRealRadar });
+    const backlogAtual   = _fechSlide.backlogAtual;
+    const totalSaidas    = _fechSlide.totalSaidas;
+    const totalEntradas  = _fechSlide.totalEntradas;
 
     // Entradas acumuladas no período
     // Prioridade: variação real do L3+L4 do Mapa (mapa_diario Firebase)
