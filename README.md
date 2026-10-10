@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GTO — Gestão Tática de Operações</title>
+<script>
+// Carimbo da versão: aparece embaixo do login e no console. Serve para
+// saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
+// guarda o index antigo em cache e isso confunde o diagnóstico.
+var GTO_BUILD = '10/10 14:22';
+</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -18,6 +24,15 @@ function usrCadastrar(){ if(typeof window._usrCadastrarReal==='function') window
 function usrResetarSenha(e,n,m){ if(typeof window._usrResetarSenhaReal==='function') window._usrResetarSenhaReal(e,n,m); }
 function usrRemover(u,n){ if(typeof window._usrRemoverReal==='function') window._usrRemoverReal(u,n); }
 function usrEditarPerms(u,n,p,m,pf,cn){ if(typeof window._usrEditarPermsReal==='function') window._usrEditarPermsReal(u,n,p,m,pf,cn); }
+
+// Carimbo da versão na tela de login e no console
+try {
+  console.log('%cGTO build ' + GTO_BUILD, 'font-weight:700;color:#1F4E9C');
+  document.addEventListener('DOMContentLoaded', function(){
+    var el = document.getElementById('gto-build');
+    if (el) el.textContent = 'build ' + GTO_BUILD;
+  });
+} catch(e){}
 
 // Estado global de autenticação — acessível antes do módulo auth carregar
 window._authUser   = null;
@@ -563,6 +578,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
       <h2>GTO</h2>
       <p>Gestão Tática de Operações</p>
     </div>
+    <div id="gto-build" style="text-align:center;font-size:9.5px;color:#9AA3AE;
+         margin:-4px 0 10px"></div>
     <div class="login-err" id="login-err"></div>
     <div class="login-ok" id="login-ok"></div>
     <input type="email" id="login-email" placeholder="E-mail" autocomplete="email"
@@ -39560,6 +39577,7 @@ async function _autenticarModulo(mod, senhaOverride){
     const jaApp = firebase.apps.find(a => a.name === appNome)
                || firebase.initializeApp(cfg, appNome);
     const jaUser = await _sessaoDoApp(jaApp, 2500);
+    console.log('[' + mod + '] sessão guardada:', jaUser ? jaUser.email : 'nenhuma');
     if(jaUser && (!email || String(jaUser.email||'').toLowerCase() === String(email).toLowerCase())){
       return { ok:true, restaurada:true };
     }
@@ -39599,13 +39617,19 @@ async function _autenticarFast(senhaOverride){
     const jaApp = firebase.apps.find(a => a.name === 'fastApp')
                || firebase.initializeApp(FIREBASE_CONFIG_FAST, 'fastApp');
     const jaUser = await _sessaoDoApp(jaApp, 2500);
+    console.log('[FAST] sessão guardada:', jaUser ? jaUser.email : 'nenhuma',
+                '| esperado:', email || '(sem e-mail)');
     if(jaUser && (!email || String(jaUser.email||'').toLowerCase() === String(email).toLowerCase())){
       return { ok:true, restaurada:true };
     }
   } catch(e){ console.warn('_autenticarFast (sessão):', e); }
 
   const senha = senhaOverride || window._loginSenhaTemp;
-  if(!email || !senha) return { ok:false, motivo:'sem_senha' };
+  if(!email || !senha) {
+    console.log('[FAST] vai pedir senha — senha em memória:', !!window._loginSenhaTemp,
+                '| e-mail:', email || '(nenhum)');
+    return { ok:false, motivo:'sem_senha' };
+  }
   try{
     await loadFirebaseSDK();
     const fastApp = firebase.apps.find(a => a.name === 'fastApp') || firebase.initializeApp(FIREBASE_CONFIG_FAST, 'fastApp');
