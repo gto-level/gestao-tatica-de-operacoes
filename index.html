@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/10 14:41';
+var GTO_BUILD = '10/10 15:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -31,6 +31,8 @@ try {
   document.addEventListener('DOMContentLoaded', function(){
     var el = document.getElementById('gto-build');
     if (el) el.textContent = 'build ' + GTO_BUILD;
+    var sb = document.getElementById('gto-build-sb');
+    if (sb) sb.textContent = 'build ' + GTO_BUILD;
   });
 } catch(e){}
 
@@ -670,7 +672,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
 
 <button id="hbg" onclick="document.getElementById('sb').classList.toggle('mob-open')">☰</button>
 <nav id="sb">
-  <div class="sb-logo"><h1>GTO</h1><p>Gestão Tática de Operações</p></div>
+  <div class="sb-logo"><h1>GTO</h1><p>Gestão Tática de Operações</p><p id="gto-build-sb" style="font-size:9px;color:rgba(255,255,255,.22);margin-top:3px"></p></div>
 
   <!-- Mini Meta/Gap no sidebar -->
   <div id="sb-cards-ciclo" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:.625rem .75rem;border-bottom:1px solid rgba(255,255,255,.07)">
@@ -1254,11 +1256,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
             </div>
             <div style="margin-bottom:10px">
               <div style="font-size:10px;font-weight:600;color:var(--tx2);margin-bottom:6px">Módulos com acesso</div>
-              <div id="usr-novo-modulos" style="display:flex;flex-wrap:wrap;gap:6px">
-                <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;background:#fff;padding:4px 10px;border-radius:6px;border:1px solid var(--brd)"><input type="checkbox" id="usr-novo-mod-adlv" value="adlv"> 🏢 ADLV</label>
-                <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;background:#fff;padding:4px 10px;border-radius:6px;border:1px solid var(--brd)"><input type="checkbox" id="usr-novo-mod-fast" value="fast"> ⚡ FAST</label>
-                <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;background:#fff;padding:4px 10px;border-radius:6px;border:1px solid var(--brd)"><input type="checkbox" id="usr-novo-mod-pedidos" value="pedidos"> 📦 PEDIDOS</label>
-              </div>
+              <div id="usr-novo-modulos"></div>
               <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;background:var(--amc);padding:6px 10px;border-radius:6px;border:1px solid var(--am);margin-top:6px;width:fit-content">
                 <input type="checkbox" id="usr-novo-admfast" onchange="usrToggleAdmFastNovo()"> 🛠️ Admin do FAST (acesso total ao ADM do FAST, exceto Usuários — não dá acesso ao ADLV)
               </label>
@@ -7300,6 +7298,39 @@ function modIco(m){
   });
   return r;
 }
+// Os quadradinhos de "Módulos com acesso" saem da mesma lista que monta a
+// tela de escolha — assim, frente nova entra aqui sozinha, sem ninguém
+// precisar lembrar de acrescentar um checkbox à mão.
+function usrModulosHTML(prefixo, marcados, desabilitado){
+  marcados = marcados || [];
+  var trava = desabilitado ? ' disabled' : '';
+  var h = '';
+  PROJETO_BLOCOS.forEach(function(b){
+    h += '<div style="margin-bottom:8px">'
+      + '<div style="font-size:9.5px;font-weight:700;color:var(--tx2);'
+      +   'text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">'
+      +   b.ico + ' ' + cpEsc(b.nome) + '</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+    PROJETO_FRENTES.forEach(function(f){
+      var ch = modChave(b.chave, f.chave);
+      var temTela = (typeof modTemTela === 'function') && modTemTela(ch);
+      var onch = (ch === 'fast')
+        ? ' onchange="if(typeof usrAtualizarSenhaFastVisivel===\'function\')usrAtualizarSenhaFastVisivel()"' : '';
+      h += '<label title="' + (temTela ? '' : 'tela ainda em construção')
+        + '" style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;'
+        + 'background:#fff;padding:4px 10px;border-radius:6px;border:1px solid var(--brd);'
+        + (temTela ? '' : 'opacity:.6') + '">'
+        + '<input type="checkbox" id="' + prefixo + ch + '" value="' + ch + '"'
+        + (marcados.indexOf(ch) !== -1 ? ' checked' : '') + trava + onch + '> '
+        + f.ico + ' ' + cpEsc(f.nome)
+        + (temTela ? '' : ' <span style="font-size:9px;color:var(--tx2)">(em construção)</span>')
+        + '</label>';
+    });
+    h += '</div></div>';
+  });
+  return h;
+}
+
 function modTodos(){
   var out = [];
   PROJETO_BLOCOS.forEach(function(b){
@@ -40753,6 +40784,11 @@ async function usrCadastrar(){
 
 async function usrCarregarLista(){
   window._usrCarregarListaReal = usrCarregarLista;
+  // o card de cadastro é preenchido pelo mesmo gerador do modal
+  const novoMods = document.getElementById('usr-novo-modulos');
+  if(novoMods && !novoMods.children.length){
+    try{ novoMods.innerHTML = usrModulosHTML('usr-novo-mod-', [], false); }catch(e){}
+  }
   const listaEl = document.getElementById('usr-lista');
   const loadEl  = document.getElementById('usr-lista-loading');
   if(!listaEl) return;
@@ -40862,16 +40898,8 @@ function usrEditarPerms(uid, nome, permsAtual, modulosAtual, perfilAtual, colabN
       <div style="font-size:10px;font-weight:600;color:var(--tx2);margin-bottom:6px">Nome de colaborador (usado pra registrar produção)</div>
       <input type="text" id="usr-perms-colabnome" value="${(colabNomeAtual||'').replace(/"/g,'&quot;')}" placeholder="Ex: Aline, Herina, Lory..." style="width:100%;padding:6px 10px;border-radius:6px;border:1px solid var(--brd);font-size:12px;margin-bottom:1rem">
       <div style="font-size:10px;font-weight:600;color:var(--tx2);margin-bottom:6px">Módulos com acesso</div>
-      <div id="usr-perms-modulos" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">
-        <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;background:var(--cin);padding:6px 12px;border-radius:6px;border:1px solid var(--brd)">
-          <input type="checkbox" id="usr-perms-mod-adlv" value="adlv" ${modulosAtual.includes('adlv')?'checked':''} ${isAdmFastAtual?'disabled':''}> 🏢 ADLV
-        </label>
-        <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;background:var(--cin);padding:6px 12px;border-radius:6px;border:1px solid var(--brd)">
-          <input type="checkbox" id="usr-perms-mod-fast" value="fast" onchange="usrAtualizarSenhaFastVisivel()" ${modulosAtual.includes('fast')?'checked':''} ${isAdmFastAtual?'disabled':''}> ⚡ FAST
-        </label>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-          <input type="checkbox" id="usr-perms-mod-pedidos" value="pedidos" ${modulosAtual.includes('pedidos')?'checked':''} ${isAdmFastAtual?'disabled':''}> 📦 PEDIDOS
-        </label>
+      <div id="usr-perms-modulos" style="margin-bottom:8px">
+        ${usrModulosHTML('usr-perms-mod-', modulosAtual, isAdmFastAtual)}
       </div>
       <div id="usr-perms-senha-fast-box" style="display:none;margin-bottom:8px;background:var(--amc);border:1px solid var(--am);border-radius:8px;padding:8px 10px">
         <div style="font-size:10px;color:var(--am);font-weight:600;margin-bottom:4px">🔑 Senha de acesso ao FAST (opcional)</div>
