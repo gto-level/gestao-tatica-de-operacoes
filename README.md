@@ -39496,6 +39496,16 @@ function mostrarSeletorModulo(){
 // Mesma lógica do FAST, valendo para qualquer módulo com projeto
 // próprio: tenta entrar; se não der, cria a conta no projeto do módulo
 // com o mesmo e-mail e senha do login.
+// Ele acabou de digitar a senha num modal. Guardo na memória da sessão e
+// mando abrir a sessão nas outras frentes também — assim ele digita uma
+// vez por navegador, e não uma vez por frente.
+function _aproveitarSenha(senha){
+  if (!senha) return;
+  window._loginSenhaTemp = senha;
+  _prepFrentesFeito = false;
+  setTimeout(_prepararFrentes, 400);
+}
+
 // Abre a sessão, em segundo plano, nos projetos das frentes liberadas
 // para esta pessoa. Roda uma vez por carregamento e não trava a tela:
 // se algum projeto falhar, aquela frente simplesmente volta a pedir a
@@ -39692,19 +39702,23 @@ async function selecionarModulo(mod){
   if(mod === 'fast'){
     let r = await _autenticarFast();
     if(!r.ok){
-      const senhaConfirm = await _pedirSenhaModal('Confirme sua senha para acessar o FAST:');
+      const senhaConfirm = await _pedirSenhaModal('Confirme sua senha — é só desta vez, '
+        + 'depois disso nenhuma frente pede senha de novo neste navegador:');
       if(!senhaConfirm) return;
       r = await _autenticarFast(senhaConfirm);
       if(!r.ok){
         alert('Não foi possível autenticar no FAST (' + (r.motivo||'erro desconhecido') + '). Se isso persistir, anota essa mensagem e avisa quem administra o sistema.');
         return;
       }
+      _aproveitarSenha(senhaConfirm);
     }
   } else if(mod !== 'adlv'){
     let rp = await _autenticarModulo(mod);
     if(!rp.ok){
-      const senhaConfirm = await _pedirSenhaModal('Confirme sua senha para acessar ' + modNome(mod) + ':');
+      const senhaConfirm = await _pedirSenhaModal('Confirme sua senha — é só desta vez, '
+        + 'depois disso nenhuma frente pede senha de novo neste navegador:');
       if(!senhaConfirm) return;
+      _aproveitarSenha(senhaConfirm);
       rp = await _autenticarModulo(mod, senhaConfirm);
       if(!rp.ok){
         alert('Não foi possível autenticar em ' + modNome(mod)
