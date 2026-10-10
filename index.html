@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/10 15:05';
+var GTO_BUILD = '10/10 21:26';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1253,6 +1253,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 <div style="font-size:10px;font-weight:600;color:var(--tx2);margin-bottom:4px">Senha inicial</div>
                 <input type="text" id="usr-novo-senha" placeholder="Ex: Patec@2026" style="width:100%;font-size:12px;padding:7px 10px;border:1.5px solid var(--brd);border-radius:7px">
               </div>
+            </div>
+            <div style="margin-bottom:10px">
+              <div style="font-size:10px;font-weight:600;color:var(--tx2);margin-bottom:4px">Nome de colaborador <span style="font-weight:400">(nome curto que aparece na equipe e registra produção)</span></div>
+              <input type="text" id="usr-novo-colabnome" placeholder="Ex: Gustavo — em branco usa o primeiro nome acima" style="width:100%;font-size:12px;padding:7px 10px;border:1.5px solid var(--brd);border-radius:7px">
             </div>
             <div style="margin-bottom:10px">
               <div style="font-size:10px;font-weight:600;color:var(--tx2);margin-bottom:6px">Módulos com acesso</div>
@@ -9992,7 +9996,7 @@ let COLABS = (_moduloAtivo === 'fast') ? COLABS_FAST : COLABS_ADLV;
 // conteúdo. Não confundir com COLABS, que continua trocando por módulo e é
 // usada por meta/produção/RT.
 // ════════════════════════════════════════════
-const COLABS_JORNADA = ['André','Lory','Ludy','Wanessa','Aline'];
+let COLABS_JORNADA = ['André','Lory','Ludy','Wanessa','Aline']; // semente; equipeAplicarListas() substitui pela equipe salva em Admin > Equipe (Metas RT)
 
 // Chave de localStorage única (sem sufixo de módulo) — o cache precisa ser o
 // mesmo nos dois módulos, senão cada um guardaria uma versão diferente.
@@ -10030,6 +10034,37 @@ function _jornadaAlinharEquipe(lista, criarVazio){
     const base = criarVazio(c,i);
     return porColab[c] ? Object.assign(base, porColab[c], {colab:c}) : base;
   });
+}
+
+// A Gestão de Jornada (Férias, Banco de Horas e Banco HE) segue a mesma
+// equipe cadastrada em Admin > Equipe (Metas RT). Antes a lista era fixa no
+// código, então quem entrava na equipe aparecia na Produção em Tempo Real mas
+// nunca nas três telas da Jornada. Agora é a união das equipes ADLV + FAST,
+// recalculada toda vez que a config é carregada ou salva.
+function _jornadaSincronizarEquipe(){
+  try{
+    var uni = [], vistos = {};
+    [].concat(COLABS_ADLV||[], COLABS_FAST||[]).forEach(function(n){
+      n = String(n||'').trim(); if(!n) return;
+      var k = n.toLowerCase(); if(vistos[k]) return;
+      vistos[k] = 1; uni.push(n);
+    });
+    if(!uni.length) return;                               // config vazia: mantém o que está
+    if(uni.join('|') === COLABS_JORNADA.join('|')) return; // nada mudou
+    COLABS_JORNADA = uni;
+    // Quem entrou agora ganha uma linha vazia nas três bases. Aqui nada é
+    // apagado — quem saiu só some no próximo carregamento, como sempre foi.
+    uni.forEach(function(c){
+      try{ if(!FERIAS_DATA.some(function(r){ return r && r.colab===c; }))
+             FERIAS_DATA.push(_FERIAS_VAZIO(c, FERIAS_DATA.length)); }catch(e){}
+      try{ if(!BANCO_HORAS.some(function(r){ return r && r.colab===c; }))
+             BANCO_HORAS.push(_BANCO_VAZIO(c)); }catch(e){}
+      try{ if(!BANCO_HE.some(function(r){ return r && r.colab===c; }))
+             BANCO_HE.push({ colab:c, periodos:[] }); }catch(e){}
+    });
+    try{ if(typeof renderFerias === 'function') renderFerias(); }catch(e){}
+    try{ if(typeof renderBanco  === 'function') renderBanco();  }catch(e){}
+  }catch(e){ console.warn('_jornadaSincronizarEquipe:', e); }
 }
 
 function _atualizarColabsPorModulo(){
@@ -40700,8 +40735,16 @@ async function usrCadastrar(){
   // pessoa do FAST cadastrada (Aline, Herina, etc.) ficava sem colabNome
   // preenchido, e sem isso o sistema não reconhece a pessoa como "logada"
   // pra registrar produção (mesmo estando autenticada normalmente).
+  // O colabNome é o que liga a conta de login à pessoa na equipe: sem ele,
+  // quem é cadastrado não aparece em Admin > Equipe (Metas RT) nem consegue
+  // registrar produção. Antes ele só era preenchido quando o nome digitado
+  // batia com alguém que JÁ estava na equipe — então ninguém novo entrava.
+  // Agora: o que o ADM digitar; se deixar em branco, o nome que já existe na
+  // equipe; se não houver, o primeiro nome.
   const colabNomes = [...COLABS_ADLV, ...COLABS_FAST];
-  const colabNome = colabNomes.find(n => nome.toLowerCase().includes(n.toLowerCase())) || '';
+  const colabNome = (document.getElementById('usr-novo-colabnome')?.value || '').trim()
+    || colabNomes.find(n => nome.toLowerCase().includes(n.toLowerCase()))
+    || nome.split(/\s+/)[0];
 
   try{
     const apiKey = FIREBASE_CONFIG.apiKey;
@@ -40770,6 +40813,7 @@ async function usrCadastrar(){
     document.getElementById('usr-novo-nome').value = '';
     document.getElementById('usr-novo-email').value = '';
     document.getElementById('usr-novo-senha').value = '';
+    var _cn = document.getElementById('usr-novo-colabnome'); if(_cn) _cn.value = '';
     setTimeout(()=>usrCarregarLista(), 500);
   } catch(e){
     const msgs = {
@@ -41103,6 +41147,7 @@ function equipeAplicarListas(){
         META_ANALISTA_RT_BRUTA_FAST = metaBruta; COLABS_LIDER_RT_FAST = lider;
       }
     });
+    if(typeof _jornadaSincronizarEquipe === 'function') _jornadaSincronizarEquipe();
     if(typeof _atualizarColabsPorModulo === 'function') _atualizarColabsPorModulo();
   } catch(e){ console.warn('equipeAplicarListas:', e); }
 }
