@@ -39496,12 +39496,67 @@ function mostrarSeletorModulo(){
 // Mesma lógica do FAST, valendo para qualquer módulo com projeto
 // próprio: tenta entrar; se não der, cria a conta no projeto do módulo
 // com o mesmo e-mail e senha do login.
+// Abre a sessão, em segundo plano, nos projetos das frentes liberadas
+// para esta pessoa. Roda uma vez por carregamento e não trava a tela:
+// se algum projeto falhar, aquela frente simplesmente volta a pedir a
+// senha quando ela entrar nele.
+var _prepFrentesFeito = false;
+async function _prepararFrentes(){
+  if (_prepFrentesFeito) return;
+  _prepFrentesFeito = true;
+  try{
+    if (!window._loginSenhaTemp) return;   // sem senha em mãos, não há o que fazer
+    var liberadas = (typeof _modulosPermitidos === 'function') ? _modulosPermitidos() : [];
+    for (var i = 0; i < liberadas.length; i++) {
+      var mod = liberadas[i];
+      // o ADLV é o app [DEFAULT], já autenticado pelo próprio login
+      if (mod === 'adlv' || mod === _moduloAtivo) continue;
+      if (typeof modConfigPronta === 'function' && !modConfigPronta(mod)) continue;
+      try{
+        var r = await _autenticarModulo(mod);
+        if (!r.ok) console.warn('frente ' + mod + ' não preparada:', r.motivo);
+      } catch(e){ console.warn('frente ' + mod + ':', e); }
+    }
+    console.log('✓ frentes preparadas');
+  } catch(e){ console.warn('_prepararFrentes:', e); }
+}
+
+// Espera o Firebase devolver a sessão que ele guardou para ESTE app.
+// Cada projeto tem o seu próprio estado de Auth, persistido no navegador;
+// ele não vem pronto no instante em que o app é criado, chega no primeiro
+// disparo do onAuthStateChanged.
+function _sessaoDoApp(app, ms){
+  return new Promise(function(resolve){
+    var pronto = false;
+    var fim = function(u){ if(!pronto){ pronto = true; resolve(u || null); } };
+    try {
+      var off = app.auth().onAuthStateChanged(function(u){ try{ off(); }catch(e){} fim(u); });
+    } catch(e){ fim(null); }
+    setTimeout(function(){ fim(app.auth && app.auth().currentUser); }, ms || 2500);
+  });
+}
+
 async function _autenticarModulo(mod, senhaOverride){
   const email = _authUser?.email || window._authUser?.email;
-  const senha = senhaOverride || window._loginSenhaTemp;
-  if(!email || !senha) return { ok:false, motivo:'sem_senha' };
   const cfg = modConfig(mod);
   const appNome = modAppNome(mod);
+
+  // Antes de pedir senha: este projeto já tem sessão guardada do mesmo
+  // e-mail? Se tem, não precisa de senha nenhuma — era isso que fazia a
+  // tela perguntar a senha toda vez que ele trocava de módulo, já que
+  // trocar recarrega a página e a senha só vivia em memória.
+  try{
+    await loadFirebaseSDK();
+    const jaApp = firebase.apps.find(a => a.name === appNome)
+               || firebase.initializeApp(cfg, appNome);
+    const jaUser = await _sessaoDoApp(jaApp, 2500);
+    if(jaUser && (!email || String(jaUser.email||'').toLowerCase() === String(email).toLowerCase())){
+      return { ok:true, restaurada:true };
+    }
+  } catch(e){ console.warn('_autenticarModulo (sessão):', e); }
+
+  const senha = senhaOverride || window._loginSenhaTemp;
+  if(!email || !senha) return { ok:false, motivo:'sem_senha' };
   try{
     await loadFirebaseSDK();
     const app = firebase.apps.find(a => a.name === appNome) || firebase.initializeApp(cfg, appNome);
@@ -39515,7 +39570,9 @@ async function _autenticarModulo(mod, senhaOverride){
         throw eCreate;
       }
     }
-    window._loginSenhaTemp = null;
+    // A senha NÃO é apagada aqui: ela continua só em memória, para dar
+    // conta dos outros projetos sem perguntar de novo. Sai da memória no
+    // logout e, naturalmente, ao fechar a aba.
     return { ok:true };
   } catch(e){
     return { ok:false, motivo:e.code || e.message };
@@ -39548,7 +39605,6 @@ async function _autenticarFast(senhaOverride){
         throw eCreate;
       }
     }
-    window._loginSenhaTemp = null; // não manter a senha em memória além do necessário
     return { ok:true };
   } catch(e){
     return { ok:false, motivo:e.code || e.message };
@@ -39873,6 +39929,12 @@ function _entrarNoApp(){
   const _soPcpApp = (typeof modSoPcp === 'function') && modSoPcp(_moduloAtivo);
 
   if(!_soPcpApp) rtIniciarListener();
+
+  // Assim que ele entra, abro a sessão em segundo plano nos projetos das
+  // frentes que ELE pode usar, enquanto a senha ainda está em memória.
+  // É isso que faz a troca de módulo deixar de pedir senha: quando ele
+  // chega lá, aquele projeto já tem sessão.
+  setTimeout(_prepararFrentes, 1200);
 
   // A tela inicial era Indicadores de Mercado, que foi para o ADM. Agora o
   // app abre no Direcionamento da Equipe, o primeiro item do menu — e no
@@ -40316,6 +40378,14 @@ async function authEsqueciSenha(){
 async function authLogout(){
   if(_rtUnsubscribe) { _rtUnsubscribe(); _rtUnsubscribe = null; }
   if(_rtUnsubProd)   { _rtUnsubProd();   _rtUnsubProd = null; }
+  window._loginSenhaTemp = null;   // a senha sai da memória
+  // sai também dos projetos das outras frentes, senão a sessão deles
+  // continuaria de pé depois do logout
+  try{
+    (firebase.apps || []).forEach(function(app){
+      if(app.name !== '[DEFAULT]'){ try{ app.auth().signOut(); }catch(e){} }
+    });
+  } catch(e){}
   try{ await firebase.auth().signOut(); } catch(e){}
 }
 
