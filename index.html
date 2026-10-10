@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/10 21:26';
+var GTO_BUILD = '10/10 22:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -37000,6 +37000,172 @@ function pnrSeta(d){
     + (sobe ? '▲ +' : '▼ ') + cpNum(d) + ' vs dia ant.</span>';
 }
 
+// ── Gravar o Panorama direto no Histórico do Mapa ─────────────────
+// O mapa diário que sobe aqui tem EXATAMENTE os seis números do
+// "Lançamento diário — dados do Mapa" (ADM > Hist. Mapa):
+//   L3 PATEC Finalizado · L4 Ag. PATEC Finalizar · L5 100% Reprovado
+//   L6 PATEC Cancelado  · L7 Abrir ID Não        · L8 Abrir PATEC Obrig.
+// Antes era preciso digitar tudo de novo lá — a mesma informação subia
+// duas vezes. Agora grava daqui, na MESMA coleção (mapa_diario) e no
+// mesmo formato de sempre, que é o que a Apresentação do ADM lê. Nada
+// muda do outro lado, e nenhum lançamento já existente é sobrescrito
+// sem o André mandar.
+var _pnrLancDia = null;
+
+function pnrDataLanc(){ return _pnrLancDia || cpHojeISO(); }
+
+function pnrParaLancamento(c){
+  if(!c) return null;
+  return { l3:c.fin|0, l4:c.agfin|0, l5:c.reprov|0, l6:c.canc|0, l7:c.iden|0, l8:c.gm|0 };
+}
+
+var PNR_LS = [
+  ['l3','L3 PATEC Finalizado'], ['l4','L4 Ag. PATEC Finalizar'],
+  ['l5','L5 100% Reprovado'],   ['l6','L6 PATEC Cancelado'],
+  ['l7','L7 Abrir ID Não'],     ['l8','L8 Abrir PATEC Obrig.']
+];
+
+function pnrLancamentoEmMemoria(dia){
+  try{
+    if (typeof mapaFirebase === 'undefined' || !Array.isArray(mapaFirebase)) return null;
+    return mapaFirebase.find(function(r){ return r && r.data === dia; }) || null;
+  }catch(e){ return null; }
+}
+
+function pnrMesmoLancamento(a, b){
+  if(!a || !b) return false;
+  return PNR_LS.every(function(x){ return ((a[x[0]]|0) === (b[x[0]]|0)); });
+}
+
+function pnrDiferencas(atual, novo){
+  return PNR_LS.filter(function(x){ return (atual[x[0]]|0) !== (novo[x[0]]|0); })
+    .map(function(x){ return x[1] + ': ' + cpNum(atual[x[0]]|0) + ' → ' + cpNum(novo[x[0]]|0); });
+}
+
+// Confere no Firebase antes de gravar. A lista em memória pode estar vazia
+// porque a leitura falhou — e aí "não existe lançamento" seria mentira, e
+// gravaríamos por cima de um dia já preenchido.
+async function pnrLancamentoNoBanco(dia){
+  var mem = pnrLancamentoEmMemoria(dia);
+  if (mem) return mem;
+  try{
+    var db = getDB(); if(!db) return null;
+    var doc = await db.collection('mapa_diario').doc(dia.replace(/-/g,'')).get();
+    return (doc && doc.exists) ? (doc.data() || null) : null;
+  }catch(e){ console.warn('pnrLancamentoNoBanco:', e); return undefined; } // undefined = não deu pra conferir
+}
+
+async function pnrGravarNoHistorico(forcar){
+  var c = pnrContar();
+  var novo = pnrParaLancamento(c);
+  if(!novo) return { ok:false, motivo:'sem_mapa' };
+  var dia = pnrDataLanc();
+  var atual = await pnrLancamentoNoBanco(dia);
+  if (atual === undefined) return { ok:false, motivo:'sem_conferir', dia:dia };
+  if (atual && pnrMesmoLancamento(atual, novo)) return { ok:true, motivo:'igual', dia:dia };
+  if (atual && !forcar) return { ok:false, motivo:'conflito', dia:dia, atual:atual, novo:novo };
+  var reg = { data:dia, l3:novo.l3, l4:novo.l4, l5:novo.l5, l6:novo.l6, l7:novo.l7, l8:novo.l8,
+              ts:new Date().toISOString(), origem:'montar_base' };
+  try{
+    var okSet = await fbSet('mapa_diario', dia.replace(/-/g,''), reg);
+    if (okSet === false) return { ok:false, motivo:'erro', erro:'Firebase recusou a gravação' };
+  }catch(e){ return { ok:false, motivo:'erro', erro:e.message }; }
+  try{
+    var i = mapaFirebase.findIndex(function(r){ return r && r.data === dia; });
+    if(i >= 0) mapaFirebase[i] = reg; else mapaFirebase.push(reg);
+    mapaFirebase.sort(function(a,b){ return a.data.localeCompare(b.data); });
+  }catch(e){}
+  try{ if(typeof mapaAtualizarGlobais === 'function') mapaAtualizarGlobais(); }catch(e){}
+  try{ if(typeof renderAdmMapaHistorico === 'function') renderAdmMapaHistorico(); }catch(e){}
+  return { ok:true, motivo: atual ? 'substituido' : 'gravado', dia:dia };
+}
+
+function pnrAutoLigado(){
+  try{ return localStorage.getItem(_lsMod('gto_pnr_lanc_auto')) === '1'; }catch(e){ return false; }
+}
+function pnrAutoTrocar(el){
+  try{ localStorage.setItem(_lsMod('gto_pnr_lanc_auto'), el && el.checked ? '1' : '0'); }catch(e){}
+  if (el && el.checked) pnrLancAuto();
+}
+
+// Modo automático: só preenche dia VAZIO. Dia que já tem lançamento nunca é
+// tocado sozinho — se os números divergirem, o card pede confirmação.
+var _pnrAutoFeito = {};
+async function pnrLancAuto(){
+  if(!pnrAutoLigado()) return;
+  var dia = pnrDataLanc();
+  if(_pnrAutoFeito[dia]) return;
+  var r = await pnrGravarNoHistorico(false);
+  if(r && (r.ok || r.motivo === 'conflito')) _pnrAutoFeito[dia] = true;
+  pnrLancAtualizar();
+}
+
+async function pnrLancClicar(){
+  var dia = pnrDataLanc();
+  var r = await pnrGravarNoHistorico(false);
+  if(r.motivo === 'conflito'){
+    var dif = pnrDiferencas(r.atual, r.novo).join('\n');
+    if(!confirm('Já existe lançamento do Mapa em ' + cpDataBR(dia) + ' com números diferentes:\n\n'
+                + dif + '\n\nSubstituir pelos números do mapa que você acabou de subir?')){
+      pnrLancAtualizar(); return;
+    }
+    r = await pnrGravarNoHistorico(true);
+  }
+  _pnrLancMsg = r.ok
+    ? (r.motivo === 'igual' ? '' : '✓ ' + (r.motivo === 'substituido' ? 'Substituído' : 'Gravado')
+        + ' no Histórico do Mapa em ' + cpDataBR(r.dia))
+    : (r.motivo === 'sem_conferir' ? '✗ Não consegui ler o Histórico do Mapa agora — não gravei pra não correr o risco de apagar o que já existe.'
+       : r.motivo === 'sem_mapa'   ? '✗ Suba o mapa diário primeiro.'
+       : '✗ Não consegui gravar: ' + (r.erro || r.motivo));
+  pnrLancAtualizar();
+}
+
+var _pnrLancMsg = '';
+
+function pnrLancInnerHTML(){
+  var c = pnrContar();
+  var novo = pnrParaLancamento(c);
+  if(!novo) return '';
+  var dia = pnrDataLanc();
+  var atual = pnrLancamentoEmMemoria(dia);
+  var igual = pnrMesmoLancamento(atual, novo);
+  var estado, botao;
+  if(!atual){
+    estado = '<span style="color:var(--am);font-weight:600">nenhum lançamento guardado em '
+           + cpDataBR(dia) + ' ainda</span>';
+    botao  = '<button class="btn btn-p" style="font-size:11px" onclick="pnrLancClicar()">💾 Gravar no Histórico do Mapa</button>';
+  } else if(igual){
+    estado = '<span style="color:var(--vd);font-weight:600">✓ já gravado em ' + cpDataBR(dia)
+           + ', com estes mesmos números</span>';
+    botao  = '';
+  } else {
+    estado = '<span style="color:var(--vm);font-weight:600">⚠ ' + cpDataBR(dia)
+           + ' já tem lançamento com números diferentes ('
+           + pnrDiferencas(atual, novo).join(' · ') + ')</span>';
+    botao  = '<button class="btn btn-r" style="font-size:11px" onclick="pnrLancClicar()">↻ Substituir pelo mapa de agora</button>';
+  }
+  return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+    + '<span style="font-size:11px;color:var(--tx2)">Dia do lançamento</span>'
+    + '<input type="date" id="pnr-lanc-dt" value="' + dia + '" style="font-size:11px;padding:4px 6px"'
+    + ' onchange="_pnrLancDia=this.value;_pnrLancMsg=\'\';pnrLancAtualizar()">'
+    + botao
+    + '<label style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--tx2);cursor:pointer">'
+    +   '<input type="checkbox"' + (pnrAutoLigado() ? ' checked' : '')
+    +   ' onchange="pnrAutoTrocar(this)"> gravar sozinho ao subir o mapa</label>'
+    + (_pnrLancMsg ? '<span style="font-size:11px;font-weight:600;color:'
+        + (_pnrLancMsg.charAt(0) === '✓' ? 'var(--vd)' : 'var(--vm)') + '">' + cpEsc(_pnrLancMsg) + '</span>' : '')
+    + '</div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-top:6px">'
+    +   PNR_LS.map(function(x){ return cpEsc(x[1]) + ' <strong>' + cpNum(novo[x[0]]) + '</strong>'; }).join(' · ')
+    + '</div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-top:4px">' + estado + '</div>';
+}
+
+function pnrLancAtualizar(){
+  var el = document.getElementById('pnr-lanc');
+  if(el) el.innerHTML = pnrLancInnerHTML();
+}
+
 async function pnrRender(){
   var box = document.getElementById('aag-panorama');
   if (!box) return;
@@ -37066,8 +37232,12 @@ async function pnrRender(){
       + fora.map(function(k){ return cpEsc(k) + ' <strong>' + cpNum(c._outros[k]) + '</strong>'; })
           .join(' · ') + '</div>';
   }
+  // Gravar no Histórico do Mapa sem redigitar os seis números lá
+  h += '<div id="pnr-lanc" style="margin-top:.9rem;border-top:1px solid var(--brd);padding-top:.8rem"></div>';
   h += '</div>';
   box.innerHTML = h;
+  pnrLancAtualizar();
+  pnrLancAuto();
   // guarda o dia depois de desenhar, para o delta de hoje não comparar consigo mesmo
   pnrGravar(c, hoje);
 }
