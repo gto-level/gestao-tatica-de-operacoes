@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/10 22:28';
+var GTO_BUILD = '10/10 22:47';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -33411,7 +33411,9 @@ function pcpRenderFinCards(){
         'var(--vm)')
     + card(corpo(pcpMoeda(rec), 'RECEITA DA MEDIÇÃO',
         cpNum(pcpReceitas().length) + ' linha(s) de receita', 'var(--vd)'), 'var(--vd)')
-    + card(corpo(pcpMoeda(res), res >= 0 ? 'LUCRO' : 'PREJUÍZO',
+    // O rótulo não troca mais de palavra: vermelho com sinal de menos já
+    // diz prejuízo, verde já diz lucro.
+    + card(corpo(pcpMoeda(res), 'MARGEM',
         custo ? 'a receita cobre ' + (Math.round(cobertura * 10) / 10).toString()
                 .replace('.', ',') + '% do custo'
               : 'preencha o custo da operação', corRes), corRes)
@@ -33474,9 +33476,9 @@ function pcpRenderEquilibrio(){
         : '<strong style="color:' + (faltam > 0 ? 'var(--vm)' : 'var(--vd)') + '">'
           + cpNum(Math.abs(faltam)) + '</strong> itens') + '</div>'
     + '<div><div style="color:var(--tx2);font-size:10px;font-weight:700;'
-    +   'text-transform:uppercase">' + (res >= 0 ? 'Lucro' : 'Prejuízo') + ' até agora</div>'
+    +   'text-transform:uppercase">Margem até agora</div>'
     +   '<strong style="color:' + (res >= 0 ? 'var(--vd)' : 'var(--vm)') + '">'
-    +   pcpMoeda(Math.abs(res)) + '</strong></div>'
+    +   pcpMoeda(res) + '</strong></div>'
     + '</div></div>';
 }
 
