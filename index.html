@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/10 22:47';
+var GTO_BUILD = '11/10 00:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -32577,13 +32577,15 @@ function pcpEmitidos(){ return pcpRealTotal('emissao'); }
 //    convertido  — o que foi liberado, cada tipo pelo seu peso
 //
 //  Os pesos vêm da planilha dele: Pedido Petronect conta inteiro,
-//  Pedido Reap e Devolução contam metade. A tabela é editável porque
-//  ele ainda vai levantar os outros tipos (há um de 0,8, por exemplo).
+//  Pedido Reap e Devolução contam metade, Pedido por Catálogo conta 0,8.
+//  A tabela continua editável, e o André ainda está levantando os tipos
+//  que faltam — por isso tudo aqui é só o valor de partida.
 // ══════════════════════════════════════════════════════════════════
 var PCP_PESOS_PADRAO = [
   { chave:'petronect', nome:'Pedido Petronect', peso:1 },
   { chave:'reap',      nome:'Pedido Reap',      peso:0.5 },
   { chave:'procureon', nome:'Pedido Procureon', peso:0.5 },
+  { chave:'catalogo',  nome:'Pedido por Catálogo', peso:0.8 },
   { chave:'devolucao', nome:'Devolução',        peso:0.5 }
 ];
 // Quem já tem a medição guardada não perde o que lançou: o tipo novo é
@@ -33727,7 +33729,8 @@ function pcpRenderPesos(){
     + (_pcp.fechada ? '' : '<button class="btn btn-s" onclick="pcpAddPeso()">+ tipo</button>')
     + '</div>'
     + '<div style="font-size:11px;color:var(--tx2);margin-bottom:.7rem">'
-    + 'Um pedido Petronect conta inteiro; Reap e Devolução contam metade. '
+    + 'Um pedido Petronect conta inteiro; Reap e Devolução contam metade; '
+    + 'um pedido por catálogo conta 0,8. '
     + 'É esse peso que transforma o lançado do dia na linha <strong>convertido</strong>.</div>'
     + '<table style="border-collapse:collapse;font-size:11.5px">'
     + '<thead><tr><th style="text-align:left;padding:4px 10px">Tipo</th>'
