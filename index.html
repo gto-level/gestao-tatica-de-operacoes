@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '12/10 12:02';
+var GTO_BUILD = '12/10 16:25';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -35583,6 +35583,9 @@ function aagProcessar(){
     dentroAA.forEach(function(i){ itensAA[i.chave] = 1; });
     _aagBase = { linhas: linhas, plataforma: plataforma, modelo: modelo,
                  por: por, geradoEm: new Date().toISOString(),
+                 // retrato da distribuição que entrou NESTA base — é com ele
+                 // que o passo 4 sabe avisar "você distribuiu depois de montar"
+                 escolhas: aagAssinaturaEscolhas(),
                  itens: Object.keys(itensAA).length,
                  itensBase: Object.keys(grupos).length,
                  propostas: itens.length,
@@ -36116,6 +36119,7 @@ function aagEscolherAnalista(chave, nome){
   if (linha) linha.style.background = nome ? 'var(--vdc)' : '';
   aagPintarContaSemAnalista();
   aagPintarBarraGravar();
+  try { aagRenderPassos(); } catch (e) {}   // acende o aviso de remontar
   if (juntos) {
     var st = document.getElementById('aag-status');
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ ' + cpEsc(nome) + ' também ficou '
@@ -36233,6 +36237,20 @@ var AAG_SAIDAS = [
   { chave:'backlog',  nome:'Upload Backlog',  obs:'alimenta o Tirar do Fluxo' }
 ];
 var _aagEnvios = {};
+
+// Retrato de quem está com o quê. Serve só para comparar: se mudou depois
+// que a base foi montada, os três envios sairiam sem a distribuição nova.
+function aagAssinaturaEscolhas(){
+  try {
+    return Object.keys(_aagEscolhas || {}).filter(function(k){ return _aagEscolhas[k]; })
+      .sort().map(function(k){ return k + '=' + _aagEscolhas[k]; }).join(';');
+  } catch (e) { return ''; }
+}
+// true quando ele distribuiu (ou mexeu na distribuição) depois de montar.
+function aagPrecisaRemontar(){
+  return !!_aagBase && _aagBase.escolhas !== undefined
+      && _aagBase.escolhas !== aagAssinaturaEscolhas();
+}
 
 async function aagCarregarEnvios(){
   try {
@@ -36498,10 +36516,12 @@ function aagDistribuirAuto(){
   Object.keys(r.plano).forEach(function(k){ _aagEscolhas[k] = r.plano[k]; });
   aagSalvarEscolhas();
   aagRenderAnalistas();
+  try { aagRenderPassos(); } catch (e) {}   // acende o aviso de remontar
   var st = document.getElementById('aag-status');
   if (st) st.innerHTML = '<span style="color:var(--vd)">✓ ' + cpNum(r.faltam.length)
     + ' item(ns) distribuído(s) em ' + cpNum(r.grupos) + ' oportunidade(s). '
-    + 'Clique em <strong>💾 Gravar na RC em tratamento</strong> para valer.</span>';
+    + 'Grave na RC em tratamento e clique de novo em <strong>Montar tudo</strong> '
+    + 'antes de mandar para as três telas.</span>';
 }
 
 // ── dar o mesmo analista a todos os itens da página ───────────────
@@ -36902,18 +36922,46 @@ function aagEnvioDeHoje(chave){
   return !!e && e.dia === cpHojeISO();
 }
 function aagSaidasTodasHoje(){
+  if (aagPrecisaRemontar()) return false;
   return AAG_SAIDAS.every(function(s){ return aagEnvioDeHoje(s.chave); });
 }
 function aagSaidasAviso(){
+  if (aagPrecisaRemontar()) return 'monte tudo de novo antes de enviar';
   var faltam = AAG_SAIDAS.filter(function(s){ return !aagEnvioDeHoje(s.chave); });
   if (!faltam.length) return '';
   if (faltam.length === AAG_SAIDAS.length) return 'nenhuma enviada hoje';
   return 'faltam ' + cpNum(faltam.length) + ' de ' + cpNum(AAG_SAIDAS.length);
 }
+// O roteiro curto do passo 4, com o aviso que mais custa esquecer: montar
+// de novo depois de distribuir. Sem isso os três envios saem com a base de
+// antes, sem os analistas que ele acabou de escolher.
+function aagRoteiroSaidasHTML(){
+  var remontar = aagPrecisaRemontar();
+  var passo = function(n, txt, alerta){
+    return '<div style="display:flex;gap:6px;align-items:baseline">'
+      + '<span style="font-size:10px;font-weight:800;color:' + (alerta ? 'var(--vm)' : 'var(--az)')
+      +   ';flex:none">' + n + '.</span>'
+      + '<span style="font-size:10.5px;color:' + (alerta ? 'var(--vm)' : 'var(--tx2)')
+      +   (alerta ? ';font-weight:700' : '') + '">' + txt + '</span></div>';
+  };
+  return '<div style="display:grid;gap:3px;margin-top:6px;padding:7px 9px;'
+    + 'background:var(--bg);border:1px dashed ' + (remontar ? 'var(--vm)' : 'var(--brd)')
+    + ';border-radius:7px">'
+    + passo(1, 'Clique em <strong>💾 Gravar na RC em tratamento</strong>, ali na distribuição.')
+    + passo(2, 'Clique <strong>de novo em Montar tudo</strong> — é isso que leva os analistas '
+             + 'que você escolheu para as três saídas.'
+             + (remontar ? ' <strong>Você distribuiu depois de montar: remonte antes de enviar.</strong>' : ''),
+             remontar)
+    + passo(3, 'No card <strong>📋 Base montada</strong>, clique nos três botões, um de cada vez. '
+             + 'A ordem não importa.')
+    + '</div>';
+}
+
 // Uma linha por saída: enviada hoje (verde, com a hora e quantos itens),
 // enviada antes (âmbar, com a data) ou nunca enviada (cinza).
 function aagSaidasHTML(){
-  return '<div style="display:grid;gap:5px;margin-top:5px">'
+  return aagRoteiroSaidasHTML()
+    + '<div style="display:grid;gap:5px;margin-top:7px">'
     + AAG_SAIDAS.map(function(sd){
         var e = _aagEnvios[sd.chave];
         var hoje = aagEnvioDeHoje(sd.chave);
