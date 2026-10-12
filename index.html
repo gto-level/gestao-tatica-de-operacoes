@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/10 00:10';
+var GTO_BUILD = '12/10 12:02';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -34786,6 +34786,7 @@ function aagAbrir(){
   aagCarregarGuardadas();
   aagCarregarEscolhas();
   aagCarregarEquipe().then(function(){ aagRenderAnalistas(); });
+  aagCarregarEnvios().then(function(){ aagRenderPassos(); });
 }
 
 function aagPintarUploads(){
@@ -36005,6 +36006,7 @@ async function aagEnviarRadar(){
       + cpHojeISO().replace(/-/g, '') + '.xlsx',
       { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     await radarOnFile(arq);
+    aagMarcarEnvio('radar', _aagBase.modelo.length);
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ Radar Estratégico atualizado com '
       + cpNum(_aagBase.modelo.length) + ' itens.</span>';
   } catch (e) {
@@ -36221,6 +36223,39 @@ function aagSemAnalista(escopo){
   return aagParaDistribuir(escopo).filter(function(m){ return !aagAnalistaDe(m); });
 }
 
+// ── quando cada saída recebeu os itens ────────────────────────────
+// O passo 4 dizia só "Mande para as três telas" e nunca ficava verde: não
+// dava para saber se os itens já tinham ido. Agora cada envio deixa marca
+// (dia, hora e quantos itens), e o passo mostra as três separadas.
+var AAG_SAIDAS = [
+  { chave:'radar',    nome:'Radar Estratégico' },
+  { chave:'completo', nome:'Analista Completo' },
+  { chave:'backlog',  nome:'Upload Backlog',  obs:'alimenta o Tirar do Fluxo' }
+];
+var _aagEnvios = {};
+
+async function aagCarregarEnvios(){
+  try {
+    var db = getDB(); if (!db) return;
+    var doc = await db.collection('config').doc('aag_envios').get();
+    if (doc && doc.exists) _aagEnvios = (doc.data() || {}).envios || {};
+  } catch (e) { console.warn('aagCarregarEnvios:', e); }
+}
+
+async function aagMarcarEnvio(chave, n){
+  var agora = new Date();
+  _aagEnvios[chave] = { dia: cpHojeISO(),
+                        hora: String(agora.getHours()).padStart(2,'0') + ':'
+                            + String(agora.getMinutes()).padStart(2,'0'),
+                        itens: n | 0, por: cpQuem(), ts: agora.toISOString() };
+  try { aagRenderPassos(); } catch (e) {}
+  try {
+    var db = getDB(); if (!db) return;
+    await db.collection('config').doc('aag_envios').set({
+      envios:_aagEnvios, atualizadoEm:agora.toISOString() }, { merge:true });
+  } catch (e) { console.warn('aagMarcarEnvio:', e); }
+}
+
 // ── a equipe desta distribuição ───────────────────────────────────
 // Ele digita quem entra no rateio. Fica guardado, então amanhã já vem
 // preenchido — e só muda quando ele quiser tirar ou colocar alguém.
@@ -36249,14 +36284,41 @@ async function aagSalvarEquipe(){
   } catch (e) { console.warn('aagSalvarEquipe:', e); }
 }
 var _aagEquipeTimer = null;
-// Salva enquanto ele digita (sem redesenhar, para não tirar o cursor do
-// campo) e só redesenha a prévia quando ele para de digitar.
+var _aagEquipeDesenhada = null;   // a lista que está desenhada na tela agora
+
+function _aagChaveEquipe(l){
+  return (l || []).map(function(n){ return cpNormNome(n); }).join('|');
+}
+
+// Redesenha o bloco e devolve o campo exatamente como ele estava: o texto
+// cru e o cursor no mesmo lugar.
+// BUG (11/10): o redesenho trocava o que ele estava digitando pela lista já
+// interpretada — "Aline, " virava "Aline" — e ainda tirava o cursor do
+// campo. Resultado: dava para escrever um nome só; na vírgula do segundo,
+// tudo sumia.
+function aagRedesenharComCampo(){
+  var el = document.getElementById('aag-equipe');
+  var txt = el ? el.value : null;
+  var ini = el ? el.selectionStart : 0;
+  var fim = el ? el.selectionEnd : 0;
+  var focado = !!el && document.activeElement === el;
+  aagRenderAnalistas();
+  if (txt === null) return;
+  var novo = document.getElementById('aag-equipe');
+  if (!novo) return;
+  novo.value = txt;
+  if (focado) { try { novo.focus(); novo.setSelectionRange(ini, fim); } catch (e) {} }
+}
+
+// Salva enquanto ele digita e só redesenha quando a lista mudou DE VERDADE.
+// Digitar a vírgula depois do primeiro nome não muda lista nenhuma — e era
+// justamente aí que o redesenho atrapalhava.
 function aagDigitouEquipe(txt){
   _aagEquipe = aagLerEquipe(txt);
   if (_aagEquipeTimer) clearTimeout(_aagEquipeTimer);
   _aagEquipeTimer = setTimeout(function(){
     aagSalvarEquipe();
-    aagRenderAnalistas();
+    if (_aagChaveEquipe(_aagEquipe) !== _aagEquipeDesenhada) aagRedesenharComCampo();
   }, 700);
 }
 function aagDefinirEquipe(txt){
@@ -36667,6 +36729,7 @@ function aagBarraGravarHtml(pend){
 function aagRenderAnalistas(){
   var box = document.getElementById('aag-analistas');
   if (!box) return;
+  _aagEquipeDesenhada = _aagChaveEquipe(_aagEquipe);
   if (!_aagBase || !_aagBase.modelo) { box.innerHTML = ''; return; }
   var faltam = aagSemAnalista();
   var nomes = aagNomesAnalistas();
@@ -36833,6 +36896,50 @@ function aagRenderAnalistas(){
   box.innerHTML = h;
 }
 
+// ── o estado das três saídas, dentro do passo 4 ───────────────────
+function aagEnvioDeHoje(chave){
+  var e = _aagEnvios[chave];
+  return !!e && e.dia === cpHojeISO();
+}
+function aagSaidasTodasHoje(){
+  return AAG_SAIDAS.every(function(s){ return aagEnvioDeHoje(s.chave); });
+}
+function aagSaidasAviso(){
+  var faltam = AAG_SAIDAS.filter(function(s){ return !aagEnvioDeHoje(s.chave); });
+  if (!faltam.length) return '';
+  if (faltam.length === AAG_SAIDAS.length) return 'nenhuma enviada hoje';
+  return 'faltam ' + cpNum(faltam.length) + ' de ' + cpNum(AAG_SAIDAS.length);
+}
+// Uma linha por saída: enviada hoje (verde, com a hora e quantos itens),
+// enviada antes (âmbar, com a data) ou nunca enviada (cinza).
+function aagSaidasHTML(){
+  return '<div style="display:grid;gap:5px;margin-top:5px">'
+    + AAG_SAIDAS.map(function(sd){
+        var e = _aagEnvios[sd.chave];
+        var hoje = aagEnvioDeHoje(sd.chave);
+        var cor, selo;
+        if (hoje) {
+          cor = 'var(--vd)';
+          selo = '✓ enviado hoje às ' + cpEsc(e.hora || '—')
+               + ' · ' + cpNum(e.itens || 0) + ' ' + (sd.chave === 'radar' ? 'itens' : 'linhas');
+        } else if (e && e.dia) {
+          cor = 'var(--am)';
+          selo = '⚠ último envio em ' + cpDataBR(e.dia)
+               + (e.hora ? ' às ' + cpEsc(e.hora) : '') + ' — ainda não foi hoje';
+        } else {
+          cor = 'var(--tx2)';
+          selo = 'ainda não enviado';
+        }
+        return '<div style="display:flex;gap:7px;align-items:baseline;flex-wrap:wrap">'
+          + '<span style="font-size:11px;font-weight:700;color:var(--tx)">'
+          +   cpEsc(sd.nome) + '</span>'
+          + (sd.obs ? '<span style="font-size:10px;color:var(--tx2)">(' + cpEsc(sd.obs) + ')</span>' : '')
+          + '<span style="font-size:10.5px;font-weight:600;color:' + cor + '">' + selo + '</span>'
+          + '</div>';
+      }).join('')
+    + '</div>';
+}
+
 // ── o passo a passo ───────────────────────────────────────────────
 function aagRenderPassos(){
   var box = document.getElementById('aag-passos');
@@ -36854,8 +36961,9 @@ function aagRenderPassos(){
       aviso: !_aagBase ? '' : (!_aagArq.mapa ? 'falta o mapa diário'
              : (aagSemAnalista().length ? cpNum(aagSemAnalista().length) + ' sem analista' : '')) },
     { n:4, t:'Mande para as três telas',
-      d:'Radar Estratégico, Analista Completo e Upload Backlog (que alimenta o Tirar do Fluxo).',
-      ok: false }
+      d: aagSaidasHTML(),
+      ok: aagSaidasTodasHoje(),
+      aviso: aagSaidasAviso() }
   ];
   box.innerHTML = '<div style="display:grid;gap:8px">' + passos.map(function(p){
     var cor = p.ok ? 'var(--vd)' : (p.aviso ? 'var(--am)' : 'var(--brd)');
@@ -36910,6 +37018,7 @@ async function aagEnviarBacklog(){
     if (typeof aaVerificarDados === 'function') aaVerificarDados();
     if (typeof aaProcessar === 'function') { try { aaProcessar(); } catch (e) {} }
     await bkSalvarFirebase();
+    aagMarcarEnvio('backlog', linhas.length);
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ Upload Backlog atualizado com '
       + cpNum(linhas.length) + ' linhas · '
       + cpNum(linhas.filter(function(l){ return /LIBERAR/i.test(l[AAG_CAB_BACKLOG.indexOf('TIRAR DO FLUXO')]); }).length)
@@ -37604,6 +37713,7 @@ async function aagEnviar(){
   try {
     await aaCompletoSalvar();
     _aacDados = [];
+    aagMarcarEnvio('completo', _aagBase.linhas.length);
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ Base no Analista Completo. '
       + 'Abra a aba <strong>Analista Completo</strong> para trabalhar nela.</span>';
   } catch (e) {
