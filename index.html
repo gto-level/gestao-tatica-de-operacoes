@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '13/10 22:39';
+var GTO_BUILD = '13/10 23:46';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -20705,13 +20705,33 @@ async function radarOnFile(file){
 
     const _radarCols = raw.length > 0 ? Object.keys(raw[0]) : [];
     const _colN = _radarCols[13]; // Coluna N = Item OP
-    const _colM = _radarCols[12]; // Coluna M = Oportunidade
+    // BUG (13/10): quando o arquivo não traz uma coluna CHAMADA oportunidade,
+    // o leitor caía na coluna M pela POSIÇÃO. Num arquivo com outro layout a
+    // coluna M é a própria RC — e aí todo item ficava com oportunidade = RC.
+    // A chave da Governança é RC|SEQ|OPORTUNIDADE, então nenhuma casava com a
+    // base de status e a tela inteira virava "AG. AÇÃO", como se o histórico
+    // tivesse sumido. Agora a posição só vale se o cabeçalho dela falar em
+    // oportunidade.
+    const _colMbruta = _radarCols[12];
+    const _colM = (_colMbruta && /OPORTUNIDADE/.test(cpNormCab(_colMbruta))) ? _colMbruta : null;
+    const _colOpNome = _radarCols.find(function(c){ return /OPORTUNIDADE/.test(cpNormCab(c)); }) || null;
     console.log('[RADAR] Todas colunas:', JSON.stringify(_radarCols));
+    if (!_colOpNome) {
+      console.warn('[RADAR] Nenhuma coluna de OPORTUNIDADE encontrada — a Governança '
+        + 'não vai conseguir casar os status. Colunas lidas: ' + _radarCols.join(' · '));
+    }
     const rows=raw.filter(r=>r['RC']&&r['RC']!=='RC').map(r=>({
       analista_auto: String(r['STATUS MAPA ']||r['ANALISTA_AUTOMATICO']||'').trim(),
       rc:            String(r['RC']||'').trim(),
       seq:           String(r['SEQ']||'').trim(),
-      num_oport:     String(r['OPORTUNIDADE']||r['NUMERO_OPORTUNIDADE']||(_colM?r[_colM]:'')||'').trim(),
+      num_oport:     (function(){
+                       var v = String(r['OPORTUNIDADE'] || r['NUMERO_OPORTUNIDADE']
+                               || (_colOpNome ? r[_colOpNome] : '')
+                               || (_colM ? r[_colM] : '') || '').trim();
+                       // oportunidade igual à RC é sinal de coluna errada:
+                       // melhor vazio do que uma chave que não casa com nada
+                       return (v && v === String(r['RC'] || '').trim()) ? '' : v;
+                     })(),
       item_rc:       String(r['Item da RC']||'').trim(),  // col L (SEQ) — não é a col N
       item_op:       String(r['Item']||(_colN?r[_colN]:'')||'').trim(), // col N = Item OP
       sla:           Number(r['SLA']||r['SLA LevelBoard']||0),
@@ -49684,10 +49704,36 @@ function _gnvDesenhar(){
   if (!wrap) return;
 
   if (resumo) {
-    resumo.innerHTML = (_gnvResumo && _gnvResumo.qtdDuplicadas)
-      ? '<div style="margin-top:8px;font-size:10.5px;color:#b45309">⚠ ' + _gnvResumo.qtdDuplicadas
-        + ' linha(s) repetida(s) na planilha foram ignoradas (mesma RC + item + oportunidade).</div>'
-      : '';
+    // Conferência: a planilha tem N linhas, a tela mostra M em andamento —
+    // a diferença tem nome e dá para ver quem é. Sem isso o André contava à
+    // mão e ficava sem saber quais RCs tinham "ficado de fora".
+    var _conc = _gnvBase.filter(_gnvEhConcluido);
+    var _and  = _gnvBase.length - _conc.length;
+    var _rcs  = _conc.slice(0, 40).map(function(r){
+      return cpEsc(String(r.rc || '')) + (r.itemRc ? '/' + cpEsc(String(r.itemRc)) : '');
+    });
+    var h = '<div style="margin-top:8px;font-size:10.5px;color:var(--tx2)">'
+      + '<strong>' + cpNum(_gnvBase.length) + '</strong> item(ns) na base · '
+      + '<strong>' + cpNum(_and) + '</strong> em andamento'
+      + (_conc.length ? ' · <strong>' + cpNum(_conc.length) + '</strong> em Concluídos' : '')
+      + (_gnvResumo && _gnvResumo.linhas && _gnvResumo.linhas !== _gnvBase.length
+          ? ' · a planilha tinha ' + cpNum(_gnvResumo.linhas) + ' linha(s)' : '')
+      + '</div>';
+    if (_conc.length) {
+      h += '<div style="margin-top:3px;font-size:10px;color:var(--tx2)">'
+        + 'Em Concluídos (RC/item): ' + _rcs.join(' · ')
+        + (_conc.length > 40 ? ' … e mais ' + cpNum(_conc.length - 40) : '')
+        + ' — eles estão na aba <strong>Concluídos</strong>, não sumiram.</div>';
+    }
+    if (_gnvResumo && _gnvResumo.qtdDuplicadas) {
+      h += '<div style="margin-top:3px;font-size:10.5px;color:#b45309">⚠ ' + _gnvResumo.qtdDuplicadas
+        + ' linha(s) repetida(s) na planilha foram ignoradas (mesma RC + item + oportunidade).</div>';
+    }
+    if (_gnvResumo && _gnvResumo.semRc) {
+      h += '<div style="margin-top:3px;font-size:10.5px;color:#b45309">⚠ ' + _gnvResumo.semRc
+        + ' linha(s) sem RC foram ignoradas.</div>';
+    }
+    resumo.innerHTML = h;
   }
 
   if (!_gnvBase.length) {
@@ -50219,6 +50265,26 @@ function govNovaUpload(ev){
         var noUpload = {};
         for (var k = 0; k < registros.length; k++) noUpload[registros[k].id] = true;
 
+        // ── reencontrar o histórico quando a chave muda ──────────────
+        // A chave é RC + Item RC + Oportunidade + Item OP. Quando a coluna
+        // Oportunidade muda de uma planilha para a outra (veio vazia antes,
+        // veio preenchida agora, ou o contrário), a chave do MESMO item muda
+        // — e ele entrava como item novo, em Ag. Ação, deixando fila, envio
+        // e datas presas na chave antiga. Nada era apagado, mas sumia da
+        // vista, e a tela inteira parecia ter perdido os status.
+        // Agora: item novo cuja RC + Item RC bate com exatamente UM que saiu
+        // herda as edições dele. Dois candidatos = ambíguo, não herda.
+        var _porRcItem = {};
+        Object.keys(jaEditado).forEach(function(idAntigo){
+          if (noUpload[idAntigo]) return;              // continua na planilha
+          var p = String(idAntigo).split('|');
+          var curto = (p[0] || '') + '|' + (p[1] || '');
+          if (!p[0]) return;
+          if (_porRcItem[curto] === undefined) _porRcItem[curto] = idAntigo;
+          else _porRcItem[curto] = null;               // mais de um: ambíguo
+        });
+        var nHerdados = 0;
+
         // Some da planilha = saiu da lista de trabalho, mas continua no
         // histórico (aba Concluídos). Se voltar num upload futuro com a mesma
         // chave RC+Item RC+OP+Item OP, o registro é regravado inteiro (sem a
@@ -50241,6 +50307,28 @@ function govNovaUpload(ev){
         // Carga inicial dos campos do dashboard.
         // REGRA: só entra no campo que ainda está em branco. Se a equipe já
         // preencheu (inclusive com 0), a planilha não encosta.
+        // herança por RC + Item RC, antes da carga inicial
+        for (j = 0; j < registros.length; j++) {
+          var idNovo = registros[j].id;
+          if (jaEditado[idNovo] && Object.keys(jaEditado[idNovo]).length) continue;
+          var curtoN = registros[j].rc + '|' + registros[j].itemRc;
+          var idVelho = _porRcItem[curtoN];
+          if (!idVelho || idVelho === idNovo) continue;
+          var velho = jaEditado[idVelho] || {};
+          var copia = {};
+          Object.keys(velho).forEach(function(c){
+            if (c === 'saiuDaBase' || c === 'saiuEm') return;
+            copia[c] = velho[c];
+          });
+          if (!Object.keys(copia).length) continue;
+          copia.herdadoDe = idVelho;
+          copia.atualizadoEm = new Date().toISOString();
+          lote.set(db.collection(_GNV_COL_EDIT).doc(idNovo), copia, { merge: true });
+          jaEditado[idNovo] = copia;          // a carga inicial respeita isso
+          nHerdados++; n++;
+          if (n % 400 === 0) { lotes.push(lote); lote = db.batch(); }
+        }
+
         for (j = 0; j < registros.length; j++) {
           var ini = iniciais[registros[j].id];
           if (!ini) continue;
@@ -50261,6 +50349,7 @@ function govNovaUpload(ev){
         lotes.push(lote);
         var seq = Promise.resolve();
         lotes.forEach(function(b){ seq = seq.then(function(){ return b.commit(); }); });
+        resumo.herdados = nHerdados;
         return seq;
       }).then(function(){
         // o resumo é só a conferência do upload: se ele falhar, os itens já
@@ -50269,6 +50358,8 @@ function govNovaUpload(ev){
           .catch(function(e){ console.warn('resumo do upload não gravou:', e); });
       }).then(function(){
         _gnvMsg('✅ ' + registros.length + ' itens carregados'
+          + (resumo.herdados ? ' — ' + resumo.herdados
+              + ' item(ns) reencontraram o histórico pela RC + Item RC (a oportunidade mudou)' : '')
           + (nEntrada ? ' — ' + nEntrada + ' item(ns) novo(s) entraram em Ag. Ação' : '')
           + (nIniciais - nEntrada > 0 ? ' — ' + (nIniciais - nEntrada) + ' com fila/cobrança/prazo da planilha' : '')
           + (nSairam ? ' — ' + nSairam + ' item(ns) saíram da planilha e foram para Concluídos' : '')
