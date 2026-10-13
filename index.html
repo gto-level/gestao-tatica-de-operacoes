@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '13/10 21:04';
+var GTO_BUILD = '13/10 21:25';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -13966,10 +13966,13 @@ function mdLerMapa(linhas, forcar){
     acomp: ix(['N_ACOMPANHAMENTO']), nm: ix(['NM_MATERIAL']), centro: ix(['CENTRO']),
     valor: ix(['VALOR_PEDIDO']), texto: ix(['TEXTO_BREVE']), forn: ix(['NOME_FORNECEDOR']),
     familia: ix(['FAMILIA']),
-    // Coluna H das abas Emitir pedido patec/manual. É dela que sai a regra
-    // dos 2 dias úteis para o item ficar apto a pedido. A aba MAPA não tem
-    // essa coluna, então ali isto fica vazio e nada muda.
-    neg: ix(['NEGOCIACAO'])
+    // As três colunas das abas Emitir pedido patec/manual, que até agora só
+    // vinham do upload do levelboard — e por isso apareciam vazias ou com
+    // dado velho. A aba MAPA não tem nenhuma delas, então ali tudo isto fica
+    // vazio e nada muda nos outros cards.
+    neg:      ix(['NEGOCIACAO']),                  // H — a regra dos 2 dias úteis
+    fornGanh: ix(['FORNECEDOR_GANHADOR_PATEC']),   // J
+    nmPed:    ix(['NM_PEDIDO'])                    // F
   };
   r.colunas = col;
 
@@ -14021,7 +14024,9 @@ function mdLerMapa(linhas, forcar){
       // Emitir Pedido PATEC só confundiria. O valor cru fica guardado.
       statusChave: ch, status: forcar ? mdStatusNome(ch) : brutoSt,
       statusOrig: brutoSt,
-      negociacao: col.neg === -1 ? '' : cpDataISO(l[col.neg]),
+      negociacao:   col.neg === -1      ? '' : cpDataISO(l[col.neg]),
+      fornGanhador: col.fornGanh === -1 ? '' : String(l[col.fornGanh] == null ? '' : l[col.fornGanh]).trim(),
+      nmPedido:     col.nmPed === -1    ? '' : String(l[col.nmPed] == null ? '' : l[col.nmPed]).trim(),
       sla: sla, slaAlto: sla > MD_SLA_ALERTA,
       seg: col.seg === -1 ? '' : String(l[col.seg] == null ? '' : l[col.seg]).trim(),
       tipo: col.tipo === -1 ? '' : String(l[col.tipo] == null ? '' : l[col.tipo]).trim().toUpperCase(),
@@ -14615,7 +14620,8 @@ function gpEstado(it){
            libera: libera, liberado: liberado,
            fonte: man.data ? 'digitada'
                  : (it.negociacao ? 'aba do MAPA' : (lb.negociacao ? 'levelboard' : '')),
-           fornecedor: lb.fornecedor || '', nmPedido: lb.nmPedido || '' };
+           fornecedor: it.fornGanhador || lb.fornecedor || '',
+           nmPedido: it.nmPedido || lb.nmPedido || '' };
 }
 
 function gpItens(){
@@ -15248,12 +15254,18 @@ async function gpGravarLb(){
 async function gpSalvarBase(r, data){
   try {
     var db = getDB(); if (!db || !r || !r.itens) return false;
+    // BUG (13/10): esta lista joga fora tudo que não está nela. Os três
+    // campos das abas de pedido (negociação, fornecedor ganhador e NM do
+    // pedido) eram lidos do arquivo e morriam aqui — a Governança voltava a
+    // mostrar só o que tinha vindo do levelboard, velho ou vazio.
     var enxuto = function(i){
       return { rc:i.rc, seq:i.seq, op:i.op || '', itemOp:i.itemOp || '',
                statusChave:i.statusChave, status:i.status || '', sla:+i.sla || 0,
                seg:i.seg || '', tipo:i.tipo || '', valor:+i.valor || 0,
                acomp:i.acomp || '', nm:i.nm || '', centro:i.centro || '',
-               texto:i.texto || '', forn:i.forn || '', prazo:i.prazo || '', dpv:!!i.dpv };
+               texto:i.texto || '', forn:i.forn || '', prazo:i.prazo || '', dpv:!!i.dpv,
+               negociacao:i.negociacao || '', fornGanhador:i.fornGanhador || '',
+               nmPedido:i.nmPedido || '', deAba:i.deAba || '' };
     };
     await db.collection(GP_COL).doc(data).set({
       data:data, arquivo:r.arquivo || '', total:r.itens.length,
