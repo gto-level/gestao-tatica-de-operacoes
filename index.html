@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '13/10 15:02';
+var GTO_BUILD = '13/10 21:04';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -13935,17 +13935,27 @@ function mdDinheiro(v){
 }
 
 // ── leitura do MAPA ───────────────────────────────────────────────
-function mdLerMapa(linhas){
+function mdLerMapa(linhas, forcar){
   var r = { itens:[], total:0, porStatus:{}, aviso:'', dpvGrupos:0, lidas:0 };
   MD_STATUS.forEach(function(x){ r.porStatus[x.chave] = 0; });
   if (!linhas || !linhas.length) { r.aviso = 'Arquivo vazio.'; return r; }
 
+  // `forcar` = esta aba inteira é de um status só (as abas Emitir pedido
+  // patec / manual). Lá a coluna ANALISTA_AUTOMATICO diz outra coisa, ou nem
+  // existe — quem manda é a aba.
+  var ALVOS = forcar ? ['ANALISTA_AUTOMATICO', 'RC_ITEM', 'NUMERO_OPORTUNIDADE'] : ['ANALISTA_AUTOMATICO'];
   var iCab = -1, cabs = [];
   for (var k = 0; k < Math.min(linhas.length, 15); k++) {
     var c = (linhas[k] || []).map(cpNormCab);
-    if (c.indexOf('ANALISTA_AUTOMATICO') !== -1) { iCab = k; cabs = c; break; }
+    var achou = false;
+    for (var z = 0; z < ALVOS.length; z++) if (c.indexOf(ALVOS[z]) !== -1) { achou = true; break; }
+    if (achou) { iCab = k; cabs = c; break; }
   }
-  if (iCab === -1) { r.aviso = 'Não achei a coluna ANALISTA_AUTOMATICO — isto é o MAPA mesmo?'; return r; }
+  if (iCab === -1) {
+    r.aviso = forcar ? 'Aba sem cabeçalho reconhecido.'
+                     : 'Não achei a coluna ANALISTA_AUTOMATICO — isto é o MAPA mesmo?';
+    return r;
+  }
 
   var ix = function(nomes){ return _cpAchaCol(cabs, nomes); };
   var col = {
@@ -13955,7 +13965,11 @@ function mdLerMapa(linhas){
     itemOp: ix(['ITEM_OPORTUNIDADE']), enc: ix(['DATA_DE_ENCERRAMENTO']),
     acomp: ix(['N_ACOMPANHAMENTO']), nm: ix(['NM_MATERIAL']), centro: ix(['CENTRO']),
     valor: ix(['VALOR_PEDIDO']), texto: ix(['TEXTO_BREVE']), forn: ix(['NOME_FORNECEDOR']),
-    familia: ix(['FAMILIA'])
+    familia: ix(['FAMILIA']),
+    // Coluna H das abas Emitir pedido patec/manual. É dela que sai a regra
+    // dos 2 dias úteis para o item ficar apto a pedido. A aba MAPA não tem
+    // essa coluna, então ali isto fica vazio e nada muda.
+    neg: ix(['NEGOCIACAO'])
   };
   r.colunas = col;
 
@@ -13980,11 +13994,16 @@ function mdLerMapa(linhas){
   var hojeMs = new Date(cpHojeISO() + 'T00:00:00').getTime();
   for (var b = iCab + 1; b < linhas.length; b++) {
     var l = linhas[b] || [];
-    if (col.status === -1) break;
-    var brutoSt = String(l[col.status] == null ? '' : l[col.status]).trim();
-    if (!brutoSt) continue;
+    if (col.status === -1 && !forcar) break;
+    var brutoSt = col.status === -1 ? '' : String(l[col.status] == null ? '' : l[col.status]).trim();
+    if (forcar) {
+      // numa aba de status único a linha vale se tiver identificação
+      var temId = (col.rc !== -1 && String(l[col.rc] == null ? '' : l[col.rc]).trim())
+               || (col.op !== -1 && String(l[col.op] == null ? '' : l[col.op]).trim());
+      if (!temId) continue;
+    } else if (!brutoSt) continue;
     r.lidas++;
-    var ch = mdStatusChave(brutoSt);
+    var ch = forcar || mdStatusChave(brutoSt);
     if (!ch) continue;
 
     var sla = col.sla === -1 ? 0 : Math.round(mdNum(l[col.sla]));
@@ -13997,7 +14016,12 @@ function mdLerMapa(linhas){
     var kd2 = chaveDpv(l);
 
     var it = {
-      statusChave: ch, status: brutoSt,
+      // Numa aba de status único quem manda é a aba: a coluna do Excel ali
+      // diz "Analisar PATEC Finalizado", e mostrar isso embaixo do card
+      // Emitir Pedido PATEC só confundiria. O valor cru fica guardado.
+      statusChave: ch, status: forcar ? mdStatusNome(ch) : brutoSt,
+      statusOrig: brutoSt,
+      negociacao: col.neg === -1 ? '' : cpDataISO(l[col.neg]),
       sla: sla, slaAlto: sla > MD_SLA_ALERTA,
       seg: col.seg === -1 ? '' : String(l[col.seg] == null ? '' : l[col.seg]).trim(),
       tipo: col.tipo === -1 ? '' : String(l[col.tipo] == null ? '' : l[col.tipo]).trim().toUpperCase(),
@@ -14025,9 +14049,26 @@ function mdLerMapa(linhas){
     else r.porStatus[ch] = 1;
   }
   r.total = r.itens.length;
-  if (!r.total) r.aviso = 'Nenhum item nos status que eu trato: Emitir Pedido, Emitir Pedido PATEC, '
+  if (!r.total && !forcar) r.aviso = 'Nenhum item nos status que eu trato: Emitir Pedido, Emitir Pedido PATEC, '
                         + 'Negociar Preço Excessivo, acima do limite DPV e os dois de Abrir PATEC.';
   return r;
+}
+
+// ── as abas que mandam nos dois cards de Emitir Pedido PATEC ──────
+// O arquivo é o mesmo do upload do MAPA; a diferença é que esses dois
+// status não vivem na coluna ANALISTA_AUTOMATICO da aba MAPA — cada um tem
+// a sua aba. A aba é a fonte de verdade do seu status: o que vier da aba
+// MAPA com esse status é descartado para não contar duas vezes.
+var MD_ABAS_PEDIDO = [
+  { chave:'patec',    abas:['Emitir pedido patec'] },
+  { chave:'patecman', abas:['Emitir pedido manual', 'Emitir pedido patec manual'] }
+];
+function _mdAchaAba(nomes, alvos){
+  for (var a = 0; a < alvos.length; a++) {
+    var alvo = cpNormCab(alvos[a]);
+    for (var i = 0; i < nomes.length; i++) if (cpNormCab(nomes[i]) === alvo) return nomes[i];
+  }
+  return null;
 }
 
 async function mdLerArquivo(file){
@@ -14037,6 +14078,36 @@ async function mdLerArquivo(file){
   var linhas = XLSX.utils.sheet_to_json(wb.Sheets[nome], { header:1, defval:'', raw:true });
   var r = mdLerMapa(linhas);
   r.arquivo = file.name; r.aba = nome;
+
+  r.abasPedido = [];
+  MD_ABAS_PEDIDO.forEach(function(ap){
+    var sn = _mdAchaAba(wb.SheetNames || [], ap.abas);
+    if (!sn) {
+      r.abasPedido.push({ aba: ap.abas[0], chave: ap.chave, achou: false, n: 0 });
+      return;
+    }
+    var sub;
+    try {
+      var ls = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header:1, defval:'', raw:true });
+      sub = mdLerMapa(ls, ap.chave);
+    } catch (e) {
+      console.warn('aba ' + sn + ':', e);
+      r.abasPedido.push({ aba: sn, chave: ap.chave, achou: true, erro: e.message, n: 0 });
+      return;
+    }
+    r.itens = r.itens.filter(function(i){ return i.statusChave !== ap.chave; });
+    sub.itens.forEach(function(i){ i.deAba = sn; r.itens.push(i); });
+    r.abasPedido.push({ aba: sn, chave: ap.chave, achou: true, n: sub.itens.length });
+  });
+
+  // recontar depois de trocar os itens dos dois status
+  r.porStatus = {};
+  MD_STATUS.forEach(function(x){ r.porStatus[x.chave] = 0; });
+  r.itens.forEach(function(i){
+    r.porStatus[i.statusChave] = (r.porStatus[i.statusChave] || 0) + 1;
+  });
+  r.total = r.itens.length;
+  if (r.total) r.aviso = '';
   return r;
 }
 
@@ -14060,9 +14131,14 @@ async function mdUpload(file){
     _mdDist = null;
     await gpSalvarBase(r, mdDataSel());
     mdPintarAtividades();
+    var _detAbas = (r.abasPedido || []).map(function(a){
+      return a.achou
+        ? ' · aba <strong>' + cpEsc(a.aba) + '</strong>: ' + cpNum(a.n) + (a.erro ? ' (erro: ' + cpEsc(a.erro) + ')' : '')
+        : ' · <span style="color:var(--am)">sem a aba <strong>' + cpEsc(a.aba) + '</strong></span>';
+    }).join('');
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ <strong>' + cpEsc(file.name) + '</strong> — aba '
       + cpEsc(r.aba) + ', ' + cpNum(r.lidas) + ' linhas lidas, ' + cpNum(r.total)
-      + ' para a equipe.</span>';
+      + ' para a equipe.</span>' + _detAbas;
     mdRenderResumo();
     mdRender();
   } catch (e) {
@@ -14524,8 +14600,11 @@ function gpEstado(it){
   var man = _gpNeg[k] || {};
   var lb  = (_gpLb.itens || {})[k] || {};
   var ch  = it.statusChave;
-  // a data que o comprador digita vence a do levelboard
-  var dataNeg = man.data || lb.negociacao || '';
+  // Ordem: a data que o comprador digita vence tudo; depois a que veio na
+  // própria aba do MAPA do dia (coluna NEGOCIACAO das abas Emitir pedido
+  // patec/manual); por último a do levelboard, que é upload à parte e pode
+  // estar mais velho.
+  var dataNeg = man.data || it.negociacao || lb.negociacao || '';
   var libera  = dataNeg ? gpMaisDiasUteis(dataNeg, 2) : '';
   var liberado = !!libera && libera <= cpHojeISO();
   var card = ch;
@@ -14534,7 +14613,8 @@ function gpEstado(it){
   return { chave:k, origem:ch, card:card,
            comentario: man.comentario || '', dataNeg: dataNeg,
            libera: libera, liberado: liberado,
-           fonte: man.data ? 'digitada' : (lb.negociacao ? 'levelboard' : ''),
+           fonte: man.data ? 'digitada'
+                 : (it.negociacao ? 'aba do MAPA' : (lb.negociacao ? 'levelboard' : '')),
            fornecedor: lb.fornecedor || '', nmPedido: lb.nmPedido || '' };
 }
 
@@ -14611,6 +14691,11 @@ function gpRender(){
       + (ag ? '<div style="font-size:10px;color:var(--tx2);margin-top:4px">' + cpNum(ag)
               + ' aguardando os 2 dias</div>' : '')
       + ((x.chave === 'negociar' || x.chave === 'dpv')
+          ? '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
+            + cpNum(n - (ct.comData[x.chave] || 0)) + ' sem data de negociação</div>'
+          : '')
+      + (((x.chave === 'patec' || x.chave === 'patecman')
+          && (n - (ct.comData[x.chave] || 0)) > 0)
           ? '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
             + cpNum(n - (ct.comData[x.chave] || 0)) + ' sem data de negociação</div>'
           : '')
