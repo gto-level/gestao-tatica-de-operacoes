@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '12/10 16:25';
+var GTO_BUILD = '13/10 15:02';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -48808,8 +48808,19 @@ function gnvRenderGrafico(alvo){
     if (tab) tab.innerHTML = '';
     if (vazio) {
       vazio.style.display = 'block';
-      vazio.innerHTML = '📈 Ainda não há histórico.<br>'
-        + '<span style="font-size:11px">A primeira foto é gravada hoje; a linha começa a crescer a partir de amanhã.</span>';
+      if (_gnvHistErro) {
+        vazio.innerHTML = '<span style="color:var(--vm)">⚠ ' + cpEsc(_gnvHistErro) + '</span><br>'
+          + '<span style="font-size:11px">O histórico existe na base do FAST — isto aqui é falha de '
+          + 'leitura, não falta de dado. Entre uma vez no módulo FAST e volte.</span>';
+      } else if (_gnvHist.length) {
+        vazio.innerHTML = '📈 Sem fotos no período escolhido.<br>'
+          + '<span style="font-size:11px">Há ' + cpNum(_gnvHist.length) + ' dia(s) guardado(s) '
+          + 'fora deste intervalo — de ' + _gnvDataBR(_gnvHist[0].data) + ' a '
+          + _gnvDataBR(_gnvHist[_gnvHist.length - 1].data) + '. Ajuste as datas.</span>';
+      } else {
+        vazio.innerHTML = '📈 Ainda não há histórico.<br>'
+          + '<span style="font-size:11px">A primeira foto é gravada hoje; a linha começa a crescer a partir de amanhã.</span>';
+      }
     }
     return;
   }
@@ -48937,6 +48948,22 @@ async function gnvMontarGrafico(idContainer, pref, titulo, sub){
 var _GNV_COL_HIST = 'gov_nova_historico';
 var _gnvHist = [];          // [{ data, patecAndamento, patecFinalizado, concluidos, ... }]
 var _gnvHistUltGrav = '';   // evita regravar a mesma coisa a cada re-render
+var _gnvHistErro = '';      // por que a leitura não veio, quando não vem
+
+// A Governança Nova é do FAST: as fotos são gravadas na base do FAST.
+// BUG (13/10): a leitura usava getDB(), que dentro do ADLV aponta para a base
+// do ADLV — lá essa coleção não existe. O gráfico do FAST no Monitoramento
+// dizia "ainda não há histórico" para um histórico que estava gravado o tempo
+// todo, só que na outra base.
+function _gnvDB(){
+  try {
+    if (typeof getDBModulo === 'function') {
+      var db = getDBModulo('fast');
+      if (db) return db;
+    }
+  } catch (e) { console.warn('_gnvDB (fast):', e); }
+  try { return (typeof getDB === 'function') ? getDB() : null; } catch (e) { return null; }
+}
 
 function _gnvContagemDoDia(){
   var c = { patecAndamento: 0, patecFinalizado: 0, semStatus: 0,
@@ -48961,7 +48988,7 @@ function _gnvContagemDoDia(){
 
 async function _gnvGravarFoto(){
   if (!_gnvBase.length) return;
-  var db = (typeof getDB === 'function') ? getDB() : null;
+  var db = _gnvDB();
   if (!db) return;
   var hoje = _gnvHoje();
   var c = _gnvContagemDoDia();
@@ -48979,8 +49006,11 @@ async function _gnvGravarFoto(){
 }
 
 async function _gnvCarregarHistorico(){
-  var db = (typeof getDB === 'function') ? getDB() : null;
-  if (!db) return;
+  var db = _gnvDB();
+  if (!db) {
+    _gnvHistErro = 'Não consegui abrir a base do FAST agora.';
+    return;
+  }
   try {
     var snap = await db.collection(_GNV_COL_HIST).get();
     var out = [];
@@ -48992,7 +49022,11 @@ async function _gnvCarregarHistorico(){
     });
     out.sort(function(a, b){ return String(a.data).localeCompare(String(b.data)); });
     _gnvHist = out;
-  } catch (e) { console.warn('histórico da aba nova:', e); }
+    _gnvHistErro = '';
+  } catch (e) {
+    console.warn('histórico da aba nova:', e);
+    _gnvHistErro = 'Não consegui ler a base do FAST: ' + (e && e.message ? e.message : e);
+  }
 }
 
 // ── Carga ────────────────────────────────────────────────────────
