@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '13/10 22:32';
+var GTO_BUILD = '13/10 22:39';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -16159,6 +16159,19 @@ function topoPintar(){
       cx.style.borderColor = neg ? 'rgba(217,64,64,.4)'   : 'rgba(14,158,106,.35)';
     }
   }
+}
+
+// Na frente Pedidos os dois cards do menu são da medição — e para eles
+// saírem já no login é preciso ter a lista de medições e o histórico do dia.
+// Sem isso o André entrava e via o 1.890 do PATEC até abrir o Monitoramento.
+async function monCardsNoLogin(){
+  if ((typeof _moduloAtivo === 'undefined') || _moduloAtivo !== 'pedidos') return;
+  try { if (typeof monCarregarLista === 'function') await monCarregarLista(); } catch (e) {}
+  try {
+    if (!_monSel) { var m0 = monMedDeHoje(); _monSel = m0 ? m0.inicio : ''; }
+  } catch (e) {}
+  try { if (typeof cpCarregarHistorico === 'function') await cpCarregarHistorico(); } catch (e) {}
+  try { monPintarCardsSidebar(); } catch (e) {}
 }
 
 async function topoCarregar(){
@@ -33423,7 +33436,25 @@ async function pcpTrocarPeriodo(ini, fim){
 
 
 // ── a tela ────────────────────────────────────────────────────────
+// Os dois cards do topo direito, em TODA frente, saem daqui: a premissa da
+// medição e o gap real. Publica ao ABRIR o PCP, em qualquer aba — antes só
+// acontecia dentro da aba Gráfico, e quem não passasse por ela deixava a
+// equipe sem o número.
+function pcpPublicarTopo(alvoAviso){
+  if (!_pcp || typeof topoPublicar !== 'function') return;
+  var s;
+  try { s = pcpSerieCurva(); } catch (e) { return; }
+  if (!s) return;
+  return topoPublicar({
+    meta: Math.round(pcpMetaCiclo()),
+    metaSub: 'itens · medição',
+    gap: Math.round(s.convTotal - s.planAteHoje),
+    gapSub: 'PCP · meta acum. ' + cpNum(Math.round(s.planAteHoje))
+  }, alvoAviso);
+}
+
 function pcpRender(){
+  try { pcpPublicarTopo(_pcpAba === 'grafico' ? 'topo-pub-pcp' : null); } catch (e) {}
   pcpRenderPremissas();
   pcpRenderCards();
   pcpRenderGrade();
@@ -33880,16 +33911,7 @@ function pcpRenderGrafCards(){
   var proj = pcpProjecao();
   var gapReal = s.planAteHoje - s.convTotal;
   var gapProj = s.planAteHoje - proj;
-  // Os dois cards do topo direito, em TODA frente, saem daqui: a premissa
-  // da medição e o gap real. O sinal é o mesmo que a tela usa — negativo é
-  // estar atrás da meta acumulada.
-  try {
-    topoPublicar({ meta: Math.round(pcpMetaCiclo()),
-                   metaSub: 'itens · medição',
-                   gap: Math.round(s.convTotal - s.planAteHoje),
-                   gapSub: 'PCP · meta acum. ' + cpNum(Math.round(s.planAteHoje)) },
-                 'topo-pub-pcp');
-  } catch (e) {}
+  try { pcpPublicarTopo('topo-pub-pcp'); } catch (e) {}
   var trava = _pcp.fechada ? ' disabled' : '';
   var taxa = pcpTaxa();
   var emLib = pcpFarolN('liberacao');
@@ -40712,6 +40734,7 @@ function _entrarNoApp(){
       aaCarregarResultadoFirebase();
       if(typeof equipeRtCarregar === 'function') equipeRtCarregar().catch(e=>console.warn('equipeRtCarregar (login):', e));
       if(typeof topoCarregar === 'function') topoCarregar().catch(e=>console.warn('topoCarregar (login):', e));
+      if(typeof monCardsNoLogin === 'function') monCardsNoLogin().catch(e=>console.warn('monCardsNoLogin:', e));
       if(typeof metasDiariasCarregar === 'function') metasDiariasCarregar().catch(e=>console.warn('metasDiariasCarregar (login):', e));
       // Recalcula o painel do dia (renderCardsDia, dentro de renderPainelEstrategico)
       // para refletir o ciclo ativo correto.
