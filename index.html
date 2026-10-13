@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '13/10 22:20';
+var GTO_BUILD = '13/10 22:32';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -16145,7 +16145,12 @@ function topoPintar(){
   if (_topo.gap != null && !isNaN(_topo.gap)) {
     var neg = _topo.gap < 0;
     _setEl('top-gap-proj',     (neg ? '−' : '+') + cpNum(Math.abs(_topo.gap)));
-    _setEl('top-gap-proj-sub', _topo.gapSub || 'PCP · gap real');
+    // Se a última publicação não é de hoje, o card diz de quando é. Número
+    // velho mostrado como se fosse de agora é pior do que número nenhum.
+    var dia = String(_topo.em || '').slice(0, 10);
+    var velho = dia && dia !== cpHojeISO();
+    _setEl('top-gap-proj-sub', (_topo.gapSub || 'PCP · gap real')
+      + (velho ? ' · de ' + cpDataBR(dia) : ''));
     var el = document.getElementById('top-gap-proj');
     if (el) el.style.color = neg ? '#FFB4B4' : '#6FEABD';
     var cx = document.getElementById('top-gap-proj-box');
@@ -16164,6 +16169,7 @@ async function topoCarregar(){
     var d = doc.data() || {};
     if (d.meta != null) { _topo.meta = +d.meta; _topo.metaSub = d.metaSub || ''; }
     if (d.gap  != null) { _topo.gap  = +d.gap;  _topo.gapSub  = d.gapSub  || ''; }
+    _topo.em = d.atualizadoEm || '';
     topoPintar();
   } catch (e) { console.warn('topoCarregar:', e); }
 }
@@ -16184,6 +16190,7 @@ async function topoPublicar(campos, alvoAviso){
   Object.keys(campos).forEach(function(k){ reg[k] = campos[k]; });
   reg.atualizadoEm = new Date().toISOString();
   reg.atualizadoPor = cpQuem();
+  _topo.em = reg.atualizadoEm;
 
   // Sem sessão na frente, a gravação é recusada pelas regras do Firestore.
   // Autentica as frentes liberadas antes de sair gravando — é o que faz a
