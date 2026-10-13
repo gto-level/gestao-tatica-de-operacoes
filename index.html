@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '13/10 23:46';
+var GTO_BUILD = '14/10 00:28';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -49697,44 +49697,130 @@ function _gnvDesenharSub(){
 }
 
 // ── Desenho ──────────────────────────────────────────────────────
+// ── conferência da planilha × tela ───────────────────────────────
+// Concluído tem duas naturezas, e misturar as duas escondia um problema
+// real: item que SAIU da planilha está concluído e acabou; item que
+// CONTINUA na planilha mas está marcado como concluído no dashboard é
+// conflito — a operação diz que está aberto e o dash diz que fechou.
+// Esse é o que o André precisa ver, com RC e oportunidade, para reabrir.
+function gnvConflitos(){
+  return _gnvBase.filter(function(r){
+    return !r.saiuDaBase && !!(_gnvEdit[r.id] && _gnvEdit[r.id].conclusao);
+  });
+}
+
+function gnvConferenciaHTML(){
+  if (!_gnvBase.length) return '';
+  var conflitos = gnvConflitos();
+  var sairam = _gnvBase.filter(function(r){ return !!r.saiuDaBase; });
+  var emAnd = _gnvBase.length - _gnvBase.filter(_gnvEhConcluido).length;
+
+  var h = '<div style="margin-top:8px;font-size:10.5px;color:var(--tx2)">'
+    + '<strong>' + cpNum(_gnvBase.length) + '</strong> item(ns) na base · '
+    + '<strong>' + cpNum(emAnd) + '</strong> em andamento'
+    + (conflitos.length ? ' · <strong>' + cpNum(conflitos.length) + '</strong> concluído(s) que continuam na planilha' : '')
+    + (sairam.length ? ' · <strong>' + cpNum(sairam.length) + '</strong> que saíram da planilha' : '')
+    + (_gnvResumo && _gnvResumo.linhas && _gnvResumo.linhas !== _gnvBase.length
+        ? ' · a planilha tinha ' + cpNum(_gnvResumo.linhas) + ' linha(s)' : '')
+    + '</div>';
+
+  if (conflitos.length) {
+    h += '<div style="margin-top:8px;border:1px solid var(--am);background:var(--amc);'
+      + 'border-radius:9px;padding:9px 11px">'
+      + '<div style="font-size:11.5px;font-weight:700;color:var(--am)">⚠ '
+      + cpNum(conflitos.length) + ' item(ns) concluído(s) aqui, mas ainda abertos na planilha</div>'
+      + '<div style="font-size:10.5px;color:var(--tx2);margin:3px 0 7px">'
+      + 'A planilha trouxe de volta. Ou a conclusão foi indevida, ou o processo reabriu '
+      + 'de verdade. Confira e reabra o que precisar.</div>'
+      + '<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:10.5px">'
+      + '<thead><tr style="text-align:left">'
+      + ['RC','Item RC','Oportunidade','Item OP','Conclusão','Quem','Quando',''].map(function(c){
+          return '<th style="padding:3px 7px;font-weight:700;white-space:nowrap">' + c + '</th>'; }).join('')
+      + '</tr></thead><tbody>';
+    conflitos.forEach(function(r){
+      var e = _gnvEdit[r.id] || {};
+      var qd = String(e.concluidoTs || e.finalizadoEm || '').slice(0, 10);
+      h += '<tr style="border-top:1px solid var(--brd)">'
+        + '<td style="padding:3px 7px;font-weight:700">' + cpEsc(String(r.rc || '—')) + '</td>'
+        + '<td style="padding:3px 7px">' + cpEsc(String(r.itemRc || '—')) + '</td>'
+        + '<td style="padding:3px 7px">' + cpEsc(String(r.oportunidade || '—')) + '</td>'
+        + '<td style="padding:3px 7px">' + cpEsc(String(r.itemOp || '—')) + '</td>'
+        + '<td style="padding:3px 7px">' + cpEsc(String(e.conclusao || '—')) + '</td>'
+        + '<td style="padding:3px 7px">' + cpEsc(String(e.concluidoPor || '—')) + '</td>'
+        + '<td style="padding:3px 7px;white-space:nowrap">' + (qd ? cpDataBR(qd) : '—') + '</td>'
+        + '<td style="padding:3px 7px"><button class="btn btn-s" style="font-size:10px;padding:3px 9px"'
+        +   ' onclick="gnvReabrir(\'' + cpEsc(r.id).replace(/'/g, "\\'") + '\')">🔓 Reabrir</button></td>'
+        + '</tr>';
+    });
+    h += '</tbody></table></div>'
+      + '<div style="margin-top:7px"><button class="btn btn-s" style="font-size:10.5px"'
+      + ' onclick="gnvBaixarConflitos()">⬇ Baixar a lista</button></div></div>';
+  }
+
+  if (_gnvResumo && _gnvResumo.qtdDuplicadas) {
+    h += '<div style="margin-top:3px;font-size:10.5px;color:#b45309">⚠ ' + _gnvResumo.qtdDuplicadas
+      + ' linha(s) repetida(s) na planilha foram ignoradas (mesma RC + item + oportunidade).</div>';
+  }
+  if (_gnvResumo && _gnvResumo.semRc) {
+    h += '<div style="margin-top:3px;font-size:10.5px;color:#b45309">⚠ ' + _gnvResumo.semRc
+      + ' linha(s) sem RC foram ignoradas.</div>';
+  }
+  return h;
+}
+
+// Reabrir = desfazer a conclusão. O item volta para a lista de trabalho com
+// a fila que tinha; a produção já lançada não é mexida.
+async function gnvReabrir(chave){
+  var r = _gnvBase.filter(function(x){ return x.id === chave; })[0];
+  var e = _gnvEdit[chave] || {};
+  if (!confirm('Reabrir a RC ' + ((r && r.rc) || '') + (r && r.itemRc ? '/' + r.itemRc : '')
+      + (r && r.oportunidade ? ' · oportunidade ' + r.oportunidade : '') + '?\n\n'
+      + 'A conclusão "' + (e.conclusao || '—') + '" é desfeita e o item volta para a lista '
+      + 'de trabalho. O que já foi lançado em produção não muda.')) return;
+  try {
+    var db = getDB(); if (!db) { alert('Firebase indisponível — não reabri.'); return; }
+    if (!_gnvEdit[chave]) _gnvEdit[chave] = {};
+    _gnvEdit[chave].conclusao = '';
+    _gnvEdit[chave].finalizadoEm = '';
+    _gnvEdit[chave].centroConclusao = '';
+    _gnvEdit[chave].concluidoPor = '';
+    _gnvEdit[chave].concluidoTs = '';
+    _gnvEdit[chave].statusPatec = '';
+    _gnvEdit[chave].reabertoEm = new Date().toISOString();
+    _gnvEdit[chave].reabertoPor = cpQuem();
+    _gnvEdit[chave].atualizadoEm = new Date().toISOString();
+    await db.collection(_GNV_COL_EDIT).doc(chave).set(_gnvEdit[chave], { merge: true });
+    _gnvDesenhar();
+  } catch (err) {
+    alert('Não consegui reabrir: ' + (err && err.message ? err.message : err));
+  }
+}
+
+function gnvBaixarConflitos(){
+  try {
+    var cab = ['RC','Item RC','Oportunidade','Item OP','Analista','Conclusão',
+               'Concluído por','Concluído em','Status do Patec na planilha'];
+    var aoa = [cab];
+    gnvConflitos().forEach(function(r){
+      var e = _gnvEdit[r.id] || {};
+      aoa.push([r.rc || '', r.itemRc || '', r.oportunidade || '', r.itemOp || '',
+                r.analista || '', e.conclusao || '', e.concluidoPor || '',
+                String(e.concluidoTs || e.finalizadoEm || '').slice(0, 10),
+                r.statusPatec || '']);
+    });
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Concluidos na planilha');
+    XLSX.writeFile(wb, 'Concluidos_ainda_na_planilha_' + cpHojeISO().replace(/-/g, '') + '.xlsx');
+  } catch (e) { console.warn('gnvBaixarConflitos:', e); }
+}
+
 function _gnvDesenhar(){
   var wrap   = document.getElementById('gnv-tabela');
   var cards  = document.getElementById('gnv-cards');
   var resumo = document.getElementById('gnv-resumo');
   if (!wrap) return;
 
-  if (resumo) {
-    // Conferência: a planilha tem N linhas, a tela mostra M em andamento —
-    // a diferença tem nome e dá para ver quem é. Sem isso o André contava à
-    // mão e ficava sem saber quais RCs tinham "ficado de fora".
-    var _conc = _gnvBase.filter(_gnvEhConcluido);
-    var _and  = _gnvBase.length - _conc.length;
-    var _rcs  = _conc.slice(0, 40).map(function(r){
-      return cpEsc(String(r.rc || '')) + (r.itemRc ? '/' + cpEsc(String(r.itemRc)) : '');
-    });
-    var h = '<div style="margin-top:8px;font-size:10.5px;color:var(--tx2)">'
-      + '<strong>' + cpNum(_gnvBase.length) + '</strong> item(ns) na base · '
-      + '<strong>' + cpNum(_and) + '</strong> em andamento'
-      + (_conc.length ? ' · <strong>' + cpNum(_conc.length) + '</strong> em Concluídos' : '')
-      + (_gnvResumo && _gnvResumo.linhas && _gnvResumo.linhas !== _gnvBase.length
-          ? ' · a planilha tinha ' + cpNum(_gnvResumo.linhas) + ' linha(s)' : '')
-      + '</div>';
-    if (_conc.length) {
-      h += '<div style="margin-top:3px;font-size:10px;color:var(--tx2)">'
-        + 'Em Concluídos (RC/item): ' + _rcs.join(' · ')
-        + (_conc.length > 40 ? ' … e mais ' + cpNum(_conc.length - 40) : '')
-        + ' — eles estão na aba <strong>Concluídos</strong>, não sumiram.</div>';
-    }
-    if (_gnvResumo && _gnvResumo.qtdDuplicadas) {
-      h += '<div style="margin-top:3px;font-size:10.5px;color:#b45309">⚠ ' + _gnvResumo.qtdDuplicadas
-        + ' linha(s) repetida(s) na planilha foram ignoradas (mesma RC + item + oportunidade).</div>';
-    }
-    if (_gnvResumo && _gnvResumo.semRc) {
-      h += '<div style="margin-top:3px;font-size:10.5px;color:#b45309">⚠ ' + _gnvResumo.semRc
-        + ' linha(s) sem RC foram ignoradas.</div>';
-    }
-    resumo.innerHTML = h;
-  }
+  if (resumo) resumo.innerHTML = gnvConferenciaHTML();
 
   if (!_gnvBase.length) {
     _gnvPor('gnv-cards', '');
