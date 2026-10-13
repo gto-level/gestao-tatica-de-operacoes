@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '13/10 22:11';
+var GTO_BUILD = '13/10 22:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -16171,27 +16171,66 @@ async function topoCarregar(){
 // Grava SÓ os campos que vieram, nas bases de todas as frentes que têm
 // tela. Onde a pessoa não tem acesso a gravação falha e é ignorada — quem
 // publica é quem abre a tela de origem.
-async function topoPublicar(campos){
+async function topoPublicar(campos, alvoAviso){
   var mudou = false;
   Object.keys(campos).forEach(function(k){
     if (String(_topo[k]) !== String(campos[k])) { _topo[k] = campos[k]; mudou = true; }
   });
   topoPintar();
-  if (!mudou) return;
   var assin = JSON.stringify(campos);
-  if (_topoUltimo === assin) return;
+  if (!mudou && _topoUltimo === assin) { topoAviso(alvoAviso, _topoRes); return _topoRes; }
   _topoUltimo = assin;
   var reg = {};
   Object.keys(campos).forEach(function(k){ reg[k] = campos[k]; });
   reg.atualizadoEm = new Date().toISOString();
   reg.atualizadoPor = cpQuem();
+
+  // Sem sessão na frente, a gravação é recusada pelas regras do Firestore.
+  // Autentica as frentes liberadas antes de sair gravando — é o que faz a
+  // diferença entre o número chegar para a equipe e não chegar.
+  try {
+    if (typeof _prepararFrentes === 'function') await _prepararFrentes();
+  } catch (e) { console.warn('topoPublicar (preparar frentes):', e); }
+
   var frentes = (typeof FRENTES_COM_TELA !== 'undefined') ? FRENTES_COM_TELA : ['adlv'];
+  var res = { ok:[], falhou:[] };
   for (var i = 0; i < frentes.length; i++) {
     try {
       var db = (typeof getDBModulo === 'function') ? getDBModulo(frentes[i]) : null;
-      if (db) await db.collection('config').doc(TOPO_DOC).set(reg, { merge:true });
-    } catch (e) { /* frente sem acesso: segue adiante */ }
+      if (!db) { res.falhou.push(frentes[i]); continue; }
+      await db.collection('config').doc(TOPO_DOC).set(reg, { merge:true });
+      res.ok.push(frentes[i]);
+    } catch (e) {
+      res.falhou.push(frentes[i]);
+      console.warn('topoPublicar ' + frentes[i] + ':', e && e.message ? e.message : e);
+    }
   }
+  _topoRes = res;
+  topoAviso(alvoAviso, res);
+  return res;
+}
+
+var _topoRes = null;
+
+// Em vez de publicar calado: diz para onde o número foi e para onde não foi.
+// Se falhar justo na frente da pessoa que não tem PCP, ela não veria o gap —
+// e ninguém ficaria sabendo.
+function topoAviso(id, res){
+  if (!id || !res) return;
+  var el = document.getElementById(id);
+  // a caixa pode ainda não ter sido desenhada — tenta de novo logo depois
+  if (!el) { setTimeout(function(){ topoAviso(id, res); }, 400); return; }
+  var nome = function(m){ return (typeof modNome === 'function') ? modNome(m) : m; };
+  if (!res.falhou.length) {
+    el.innerHTML = '<span style="color:var(--vd)">✓ número publicado para as '
+      + cpNum(res.ok.length) + ' frentes</span> — quem não entra aqui vê no canto do topo.';
+    return;
+  }
+  el.innerHTML = '<span style="color:var(--am)">⚠ não consegui publicar em: '
+    + res.falhou.map(function(m){ return '<strong>' + cpEsc(nome(m)) + '</strong>'; }).join(', ')
+    + '</span> — quem só usa essa(s) frente(s) não vai ver o número no topo. '
+    + (res.ok.length ? 'Foi para ' + res.ok.map(function(m){ return cpEsc(nome(m)); }).join(', ') + '. ' : '')
+    + 'Entre uma vez na frente que faltou e volte aqui.';
 }
 
 // ── os dois cards do alto do menu, na frente Pedidos ──────────────
@@ -16248,11 +16287,6 @@ function monRenderResumo(){
     return;
   }
   try { monPintarCardsSidebar(); } catch (e) {}
-  // a meta da medição é o número que o topo direito mostra em toda frente
-  try {
-    topoPublicar({ meta: s.planTotal,
-                   metaSub: cpNum(s.meta) + '/dia × ' + cpNum(s.dias.length) + ' dias' });
-  } catch (e) {}
   var faltam = Math.max(0, s.dias.length - s.decorridos);
   var pctMeta = s.planTotal ? Math.round(s.feito * 100 / s.planTotal) : 0;
   var projFim = s.comDado ? Math.round(s.feito + s.ritmo * faltam) : 0;
@@ -33839,11 +33873,15 @@ function pcpRenderGrafCards(){
   var proj = pcpProjecao();
   var gapReal = s.planAteHoje - s.convTotal;
   var gapProj = s.planAteHoje - proj;
-  // O topo direito mostra esse mesmo gap em toda frente — com o sinal que
-  // a tela usa: negativo é estar atrás da meta acumulada.
+  // Os dois cards do topo direito, em TODA frente, saem daqui: a premissa
+  // da medição e o gap real. O sinal é o mesmo que a tela usa — negativo é
+  // estar atrás da meta acumulada.
   try {
-    topoPublicar({ gap: Math.round(s.convTotal - s.planAteHoje),
-                   gapSub: 'PCP · meta acum. ' + cpNum(Math.round(s.planAteHoje)) });
+    topoPublicar({ meta: Math.round(pcpMetaCiclo()),
+                   metaSub: 'itens · medição',
+                   gap: Math.round(s.convTotal - s.planAteHoje),
+                   gapSub: 'PCP · meta acum. ' + cpNum(Math.round(s.planAteHoje)) },
+                 'topo-pub-pcp');
   } catch (e) {}
   var trava = _pcp.fechada ? ' disabled' : '';
   var taxa = pcpTaxa();
@@ -33898,6 +33936,7 @@ function pcpRenderGrafCards(){
            gapProj > 0 ? 'var(--vm)' : 'var(--vd)') + taxaDentro,
            gapProj > 0 ? 'var(--vm)' : 'var(--vd)')
     + '</div>'
+    + '<div id="topo-pub-pcp" style="font-size:10.5px;color:var(--tx2);margin:-.5rem 0 .7rem"></div>'
     + '<div style="font-size:11px;color:var(--tx2);margin:-.4rem 0 1rem">'
     + 'O <strong>gap projetado</strong> é o único que usa a taxa: ao convertido ('
     + pcpNumD(s.convTotal) + ') soma o que está em liberação no farol ('
