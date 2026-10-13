@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '13/10 21:57';
+var GTO_BUILD = '13/10 22:11';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -16125,6 +16125,75 @@ function monCard(rot, val, sub, cor, fundo){
     + '</div>';
 }
 
+// ── Os dois cards do canto superior direito ───────────────────────
+// São os mesmos em toda frente: META DO PROJETO = a meta da medição
+// (Monitoramento, frente Pedidos) e GAP DO PROJETO = o GAP REAL do PCP.
+// Só que cada frente é um Firebase separado e quase ninguém tem acesso ao
+// PCP — então nenhuma tela pode ir buscar o número na base da outra.
+// O caminho é o contrário: quem ABRE a tela onde o número é calculado
+// publica o resultado na base de todas as frentes. Cada tela lê o resumo
+// da base dela, que é a que ela já tem permissão de ler.
+var TOPO_DOC = 'topo_projeto';
+var _topo = { meta:null, metaSub:'', gap:null, gapSub:'' };
+var _topoUltimo = '';
+
+function topoPintar(){
+  if (_topo.meta != null && !isNaN(_topo.meta)) {
+    _setEl('top-meta-proj',       cpNum(_topo.meta));
+    _setEl('top-meta-proj-label', _topo.metaSub || 'itens · medição');
+  }
+  if (_topo.gap != null && !isNaN(_topo.gap)) {
+    var neg = _topo.gap < 0;
+    _setEl('top-gap-proj',     (neg ? '−' : '+') + cpNum(Math.abs(_topo.gap)));
+    _setEl('top-gap-proj-sub', _topo.gapSub || 'PCP · gap real');
+    var el = document.getElementById('top-gap-proj');
+    if (el) el.style.color = neg ? '#FFB4B4' : '#6FEABD';
+    var cx = document.getElementById('top-gap-proj-box');
+    if (cx) {
+      cx.style.background  = neg ? 'rgba(217,64,64,.22)'  : 'rgba(14,158,106,.18)';
+      cx.style.borderColor = neg ? 'rgba(217,64,64,.4)'   : 'rgba(14,158,106,.35)';
+    }
+  }
+}
+
+async function topoCarregar(){
+  try {
+    var db = getDB(); if (!db) return;
+    var doc = await db.collection('config').doc(TOPO_DOC).get();
+    if (!doc || !doc.exists) return;
+    var d = doc.data() || {};
+    if (d.meta != null) { _topo.meta = +d.meta; _topo.metaSub = d.metaSub || ''; }
+    if (d.gap  != null) { _topo.gap  = +d.gap;  _topo.gapSub  = d.gapSub  || ''; }
+    topoPintar();
+  } catch (e) { console.warn('topoCarregar:', e); }
+}
+
+// Grava SÓ os campos que vieram, nas bases de todas as frentes que têm
+// tela. Onde a pessoa não tem acesso a gravação falha e é ignorada — quem
+// publica é quem abre a tela de origem.
+async function topoPublicar(campos){
+  var mudou = false;
+  Object.keys(campos).forEach(function(k){
+    if (String(_topo[k]) !== String(campos[k])) { _topo[k] = campos[k]; mudou = true; }
+  });
+  topoPintar();
+  if (!mudou) return;
+  var assin = JSON.stringify(campos);
+  if (_topoUltimo === assin) return;
+  _topoUltimo = assin;
+  var reg = {};
+  Object.keys(campos).forEach(function(k){ reg[k] = campos[k]; });
+  reg.atualizadoEm = new Date().toISOString();
+  reg.atualizadoPor = cpQuem();
+  var frentes = (typeof FRENTES_COM_TELA !== 'undefined') ? FRENTES_COM_TELA : ['adlv'];
+  for (var i = 0; i < frentes.length; i++) {
+    try {
+      var db = (typeof getDBModulo === 'function') ? getDBModulo(frentes[i]) : null;
+      if (db) await db.collection('config').doc(TOPO_DOC).set(reg, { merge:true });
+    } catch (e) { /* frente sem acesso: segue adiante */ }
+  }
+}
+
 // ── os dois cards do alto do menu, na frente Pedidos ──────────────
 // Ali em cima eram números do PATEC: Meta Operacional do ciclo e PATEC
 // Finalizado, que nessa frente não dizem nada. Passam a ser os dois números
@@ -16179,6 +16248,11 @@ function monRenderResumo(){
     return;
   }
   try { monPintarCardsSidebar(); } catch (e) {}
+  // a meta da medição é o número que o topo direito mostra em toda frente
+  try {
+    topoPublicar({ meta: s.planTotal,
+                   metaSub: cpNum(s.meta) + '/dia × ' + cpNum(s.dias.length) + ' dias' });
+  } catch (e) {}
   var faltam = Math.max(0, s.dias.length - s.decorridos);
   var pctMeta = s.planTotal ? Math.round(s.feito * 100 / s.planTotal) : 0;
   var projFim = s.comDado ? Math.round(s.feito + s.ritmo * faltam) : 0;
@@ -19997,6 +20071,9 @@ function initMetaGap(){
   // Na frente Pedidos os dois cards da esquerda são da medição, não do
   // PATEC. Vem por último para não ser sobrescrito pelo que está acima.
   try { if(typeof monPintarCardsSidebar==='function') monPintarCardsSidebar(); }catch(e){}
+  // Meta e Gap do Projeto vêm do resumo publicado pelas telas de origem
+  // (medição e PCP) — vêm depois para não serem sobrescritos pelo acima.
+  try { if(typeof topoPintar==='function') topoPintar(); }catch(e){}
 }
 
 function _setEl(id, val, html){
@@ -33762,6 +33839,12 @@ function pcpRenderGrafCards(){
   var proj = pcpProjecao();
   var gapReal = s.planAteHoje - s.convTotal;
   var gapProj = s.planAteHoje - proj;
+  // O topo direito mostra esse mesmo gap em toda frente — com o sinal que
+  // a tela usa: negativo é estar atrás da meta acumulada.
+  try {
+    topoPublicar({ gap: Math.round(s.convTotal - s.planAteHoje),
+                   gapSub: 'PCP · meta acum. ' + cpNum(Math.round(s.planAteHoje)) });
+  } catch (e) {}
   var trava = _pcp.fechada ? ' disabled' : '';
   var taxa = pcpTaxa();
   var emLib = pcpFarolN('liberacao');
@@ -40582,6 +40665,7 @@ function _entrarNoApp(){
       initMetaGap();
       aaCarregarResultadoFirebase();
       if(typeof equipeRtCarregar === 'function') equipeRtCarregar().catch(e=>console.warn('equipeRtCarregar (login):', e));
+      if(typeof topoCarregar === 'function') topoCarregar().catch(e=>console.warn('topoCarregar (login):', e));
       if(typeof metasDiariasCarregar === 'function') metasDiariasCarregar().catch(e=>console.warn('metasDiariasCarregar (login):', e));
       // Recalcula o painel do dia (renderCardsDia, dentro de renderPainelEstrategico)
       // para refletir o ciclo ativo correto.
@@ -40887,9 +40971,16 @@ function authMontarSidebar(emailParam){
   // Os cards de ciclo (Meta Operacional, PATEC Finalizado, Meta e Gap do
   // Projeto) são números do PATEC. Numa frente de base própria eles ficariam
   // mostrando dado de outro projeto, então somem.
-  ['sb-cards-ciclo','top-meta-proj-box','top-gap-proj-box'].forEach(function(id){
+  // Meta e Gap do Projeto passaram a ser o mesmo número em toda frente
+  // (meta da medição + gap real do PCP), então continuam visíveis em todas.
+  // Só os cards de ciclo do menu, que são números do PATEC, somem.
+  ['sb-cards-ciclo'].forEach(function(id){
     const el = document.getElementById(id);
     if(el) el.style.display = _soPcp ? 'none' : '';
+  });
+  ['top-meta-proj-box','top-gap-proj-box'].forEach(function(id){
+    const el = document.getElementById(id);
+    if(el) el.style.display = '';
   });
   // Aba "Usuários" dentro do ADM só aparece pro ADM geral (André) — Admin do
   // FAST vê todas as outras abas do ADM, mas precisa pedir pra André
