@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '13/10 21:25';
+var GTO_BUILD = '13/10 21:57';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -677,12 +677,12 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
   <!-- Mini Meta/Gap no sidebar -->
   <div id="sb-cards-ciclo" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:.625rem .75rem;border-bottom:1px solid rgba(255,255,255,.07)">
     <div style="background:rgba(14,158,106,.15);border:1px solid rgba(14,158,106,.2);border-radius:7px;padding:6px 8px;text-align:center">
-      <div style="font-size:7px;font-weight:600;color:rgba(255,255,255,.4);letter-spacing:.5px;text-transform:uppercase;margin-bottom:1px">META<br>OPERACIONAL</div>
+      <div id="sb-meta-tit" style="font-size:7px;font-weight:600;color:rgba(255,255,255,.4);letter-spacing:.5px;text-transform:uppercase;margin-bottom:1px">META<br>OPERACIONAL</div>
       <div style="font-size:17px;font-weight:700;color:#fff;line-height:1" id="sb-meta">1.980</div>
       <div style="font-size:8px;color:rgba(255,255,255,.3);margin-top:1px" id="sb-meta-label">itens · ciclo</div>
     </div>
     <div id="sb-gap-box" style="background:rgba(192,122,18,.18);border:1px solid rgba(192,122,18,.3);border-radius:7px;padding:6px 8px;text-align:center">
-      <div style="font-size:7px;font-weight:600;color:rgba(255,255,255,.4);letter-spacing:.5px;text-transform:uppercase;margin-bottom:1px">PATEC<br>FINALIZADO</div>
+      <div id="sb-patec-tit" style="font-size:7px;font-weight:600;color:rgba(255,255,255,.4);letter-spacing:.5px;text-transform:uppercase;margin-bottom:1px">PATEC<br>FINALIZADO</div>
       <div style="font-size:17px;font-weight:700;color:#6FEABD;line-height:1" id="sb-patec">—</div>
       <div style="font-size:8px;color:rgba(255,255,255,.3);margin-top:1px" id="sb-patec-sub">atualizar no ADM</div>
     </div>
@@ -16125,6 +16125,45 @@ function monCard(rot, val, sub, cor, fundo){
     + '</div>';
 }
 
+// ── os dois cards do alto do menu, na frente Pedidos ──────────────
+// Ali em cima eram números do PATEC: Meta Operacional do ciclo e PATEC
+// Finalizado, que nessa frente não dizem nada. Passam a ser os dois números
+// que o André olha o dia inteiro: a meta da medição e o gap até hoje — os
+// mesmos do Monitoramento, da mesma conta, sem segunda fonte.
+function monPintarCardsSidebar(){
+  if ((typeof _moduloAtivo === 'undefined') || _moduloAtivo !== 'pedidos') return false;
+  var s = null;
+  try { s = monSerie(); } catch (e) { return false; }
+  if (!s || s.vazio) return false;
+
+  _setEl('sb-meta-tit',   'META DA<br>MEDIÇÃO', true);
+  _setEl('sb-meta',       cpNum(s.planTotal));
+  _setEl('sb-meta-label', cpNum(s.meta) + '/dia × ' + cpNum(s.dias.length) + ' dias');
+
+  _setEl('sb-patec-tit', 'GAP<br>ATÉ HOJE', true);
+  var cxGap = document.getElementById('sb-gap-box');
+  var elGap = document.getElementById('sb-patec');
+  if (!s.decorridos) {
+    _setEl('sb-patec', '—');
+    _setEl('sb-patec-sub', 'a medição não começou');
+    if (elGap) elGap.style.color = '#fff';
+    return true;
+  }
+  var sobra = s.gap >= 0;
+  var falta = Math.max(0, s.planTotal - s.feito);
+  var restam = Math.max(0, s.dias.length - s.decorridos);
+  _setEl('sb-patec', (sobra ? '+' : '−') + cpNum(Math.abs(s.gap)));
+  _setEl('sb-patec-sub', restam
+    ? cpNum(Math.ceil(falta / restam)) + '/dia em ' + cpNum(restam) + ' dia(s)'
+    : 'último dia útil');
+  if (elGap) elGap.style.color = sobra ? '#6FEABD' : '#FF9A9A';
+  if (cxGap) {
+    cxGap.style.background = sobra ? 'rgba(14,158,106,.15)' : 'rgba(217,64,64,.18)';
+    cxGap.style.borderColor = sobra ? 'rgba(14,158,106,.25)' : 'rgba(217,64,64,.35)';
+  }
+  return true;
+}
+
 function monRenderResumo(){
   var box = document.getElementById('mon-resumo');
   if (!box) return;
@@ -16139,6 +16178,7 @@ function monRenderResumo(){
     box.innerHTML = '<div style="font-size:12px;color:var(--vm)">Esse período não tem dia útil.</div>';
     return;
   }
+  try { monPintarCardsSidebar(); } catch (e) {}
   var faltam = Math.max(0, s.dias.length - s.decorridos);
   var pctMeta = s.planTotal ? Math.round(s.feito * 100 / s.planTotal) : 0;
   var projFim = s.comDado ? Math.round(s.feito + s.ritmo * faltam) : 0;
@@ -19954,11 +19994,15 @@ function initMetaGap(){
     const gapEl = document.getElementById('top-gap-proj');
     if(gapEl) gapEl.style.color = neg?'#FAC775':posit?'#6FEABD':'#fff';
   }
+  // Na frente Pedidos os dois cards da esquerda são da medição, não do
+  // PATEC. Vem por último para não ser sobrescrito pelo que está acima.
+  try { if(typeof monPintarCardsSidebar==='function') monPintarCardsSidebar(); }catch(e){}
 }
 
-function _setEl(id, val){
+function _setEl(id, val, html){
   const el = document.getElementById(id);
-  if(el) el.textContent = val;
+  if(!el) return;
+  if(html) el.innerHTML = val; else el.textContent = val;
 }
 
 // ── initMetaGapADM — carrega formulários ──
