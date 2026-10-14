@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/10 06:20';
+var GTO_BUILD = '14/10 07:35';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -13918,13 +13918,14 @@ var GOV_CARDS = [
   { chave:'cockpit',    nome:'Cockpit',                     cor:'var(--az)',  fundo:'var(--azc)', proprio:true },
   { chave:'pateciden',nome:'Abrir PATEC idêntico não',      cor:'var(--azm)', fundo:'var(--azc)' },
   { chave:'patecgm',  nome:'Abrir PATEC Grupo de Mercadoria Obrigatório', cor:'var(--vd)', fundo:'var(--vdc)' },
-  { chave:'rejeitados', nome:'Rejeitados',                  cor:'var(--vm)',  fundo:'var(--vmc)', proprio:true },
+  { chave:'rejeitados', nome:'Rejeite Fornecedor',          cor:'var(--vm)',  fundo:'var(--vmc)', proprio:true },
+  { chave:'rejsup',     nome:'Rejeite Supervisor',          cor:'var(--am)',  fundo:'var(--amc)', proprio:true },
   { chave:'statusb',    nome:'Status B',                    cor:'var(--am)',  fundo:'var(--amc)', proprio:true },
   { chave:'memorizados',nome:'Itens memorizados',            cor:'var(--azm)', fundo:'var(--azc)', proprio:true }
 ];
 var GOV_LINHAS = [
   ['emitir','patec','patecman','negociar','dpv','cockpit'],
-  ['pateciden','patecgm','rejeitados','statusb','memorizados']
+  ['pateciden','patecgm','rejeitados','rejsup','statusb','memorizados']
 ];
 function govLinhasDeCards(){
   var achado = {}, linhas = [];
@@ -14805,6 +14806,7 @@ function gpContar(){
     if ((e.card === 'patec' || e.card === 'patecman') && !e.liberado) aguardando[e.card]++;
   });
   c.rejeitados = (_gpRej && _gpRej.itens) ? _gpRej.itens.length : 0;
+  c.rejsup      = (function(){ try { return rjsMontar().linhas.length; } catch (e) { return 0; } })();
   c.cockpit    = (_gpCock && _gpCock.emLib) ? _gpCock.emLib : 0;
   c.memorizados = (_gpMem && _gpMem.itens) ? _gpMem.itens.length : 0;
   c.statusb     = gpSBPendentes().length;
@@ -14873,7 +14875,16 @@ function gpRender(){
       + (x.chave === 'rejeitados'
           ? '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
             + (_gpRej.lidas ? cpNum(_gpRej.lidas) + ' linhas · ' + cpNum(_gpRej.fora) + ' de outros grupos'
-                            : 'suba a planilha aqui dentro') + '</div>'
+                            : 'suba a planilha em Controle de Pedidos › Rejeite') + '</div>'
+          : '')
+      + (x.chave === 'rejsup'
+          ? (function(){
+              var q = rjsPorCulpa();
+              return '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
+                + (n ? cpNum(q.level) + ' Level · ' + cpNum(q.petro) + ' Petrobras'
+                     + (q.sem ? ' · ' + cpNum(q.sem) + ' sem classificação' : '')
+                     : 'suba a medição e a planilha do Rodrigo') + '</div>';
+            })()
           : '')
       + (x.chave === 'cockpit'
           ? '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
@@ -14920,6 +14931,7 @@ function gpRenderDetalhe(){
   if (!box) return;
   if (!_gpCard) { box.innerHTML = ''; return; }
   if (_gpCard === 'rejeitados') { box.innerHTML = gpHtmlRejeitados(); return; }
+  if (_gpCard === 'rejsup')     { box.innerHTML = gpHtmlRejeiteSup();  return; }
   if (_gpCard === 'cockpit')    { box.innerHTML = gpHtmlCockpit();    return; }
   if (_gpCard === 'memorizados'){ box.innerHTML = gpHtmlMemorizados(); return; }
   if (_gpCard === 'statusb')    { box.innerHTML = gpHtmlStatusB();     return; }
@@ -15463,6 +15475,193 @@ var RJS_COLS = [
   ['Padrão rejeição', 'padrao'], ['Justificativa', 'justificativa']
 ];
 
+
+// ── De quem é o erro: Level ou Petrobras ──────────────────────────
+// Sai do código que abre o Padrão de Rejeição ("4.1 - Material RQT…" →
+// "4.1"). É uma lista, não uma regra: 12, 18 e 24 são Level e 17 é
+// Petrobras, então não há padrão no número que dê para deduzir.
+// Código que não está na lista NÃO é chutado para nenhum dos dois — vai
+// para "sem classificação" e aparece na tela, porque um rejeite contado
+// no lado errado é pior do que um rejeite não contado.
+var RJS_CULPA = {
+  // Level — o erro é nosso, dá para evitar
+  '12':'level', '18':'level', '24':'level', '3.1':'level', '3.2':'level',
+  '4.1':'level', '4.2':'level', '5.1':'level', '5.2':'level', '6.1':'level',
+  '7':'level', '9':'level',
+  // Petrobras — preço excessivo e data de parada
+  '1.2':'petro', '1.3':'petro', '1.4':'petro', '1.5':'petro', '1.6':'petro',
+  '17':'petro'
+};
+var RJS_CULPA_NOME = { level:'Erros Level', petro:'Erros Petrobras', sem:'Sem classificação' };
+
+// O código é o que vem antes do primeiro "-", sem espaços.
+function rjsCodigoPadrao(p){
+  var t = String(p == null ? '' : p).trim();
+  if (!t) return '';
+  var i = t.indexOf('-');
+  return (i === -1 ? t : t.slice(0, i)).trim().replace(/\.$/, '');
+}
+function rjsCulpa(p){
+  var c = rjsCodigoPadrao(p);
+  return RJS_CULPA[c] || 'sem';
+}
+
+// Conta os itens rejeitados por lado. Usada pelo card da Governança.
+function rjsPorCulpa(){
+  var q = { level:0, petro:0, sem:0, semPadrao:0, total:0, codigosSem:{} };
+  var r;
+  try { r = rjsMontar(); } catch (e) { return q; }
+  r.linhas.forEach(function(l){
+    q.total++;
+    if (!l.padrao) { q.semPadrao++; q.sem++; return; }
+    var c = rjsCulpa(l.padrao);
+    q[c]++;
+    if (c === 'sem') {
+      var cod = rjsCodigoPadrao(l.padrao);
+      q.codigosSem[l.padrao] = (q.codigosSem[l.padrao] || 0) + 1;
+    }
+  });
+  return q;
+}
+
+// ── o card da Governança: dois cards dentro ───────────────────────
+var _rjsLado = '';          // '', 'level' ou 'petro'
+
+function rjsAbrirLado(l){
+  _rjsLado = (_rjsLado === l) ? '' : l;
+  gpRenderDetalhe();
+}
+
+function rjsCardLado(chave, nome, n, cor, fundo, sub){
+  var sel = _rjsLado === chave;
+  return '<div onclick="rjsAbrirLado(\'' + chave + '\')" style="flex:1;min-width:170px;cursor:pointer;'
+    + 'border-radius:12px;padding:1rem .9rem;text-align:center;background:' + fundo + ';'
+    + 'border:' + (sel ? '2.5px' : '1.5px') + ' solid ' + cor + ';transition:.15s">'
+    + '<div style="font-size:30px;font-weight:800;color:' + cor + ';line-height:1.1">' + cpNum(n) + '</div>'
+    + '<div style="font-size:11px;font-weight:700;color:' + cor + ';margin-top:5px;letter-spacing:.2px">'
+    +   cpEsc(nome.toUpperCase()) + '</div>'
+    + '<div style="font-size:10px;color:var(--tx2);margin-top:4px">' + sub + '</div></div>';
+}
+
+function gpHtmlRejeiteSup(){
+  var q = rjsPorCulpa();
+  var r;
+  try { r = rjsMontar(); } catch (e) { r = { linhas:[], fora:[] }; }
+
+  var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
+    + '<span>Rejeite Supervisor — ' + cpNum(q.total) + ' item(ns) rejeitado(s)</span>'
+    + '<span style="display:flex;gap:8px">'
+    +   (q.total ? '<button class="btn btn-s" onclick="rjsExportar()">⬇ Exportar planilha</button>' : '')
+    +   '<button class="btn btn-s" onclick="gpAbrirCard(\'rejsup\')">✕ Fechar</button>'
+    + '</span></div>';
+
+  if (!q.total) {
+    return h + '<div style="font-size:12px;color:var(--tx2)">'
+      + 'Sem itens. A conta sai da medição (Controle de Pedidos) e os motivos da planilha do '
+      + 'Rodrigo (Controle de Pedidos › Rejeite › Rejeite Supervisor).</div></div>';
+  }
+
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap">'
+    + rjsCardLado('level', 'Erros Level', q.level, 'var(--vm)', 'var(--vmc)',
+        'o erro é nosso — dá para evitar')
+    + rjsCardLado('petro', 'Erros Petrobras', q.petro, 'var(--azm)', 'var(--azc)',
+        'preço excessivo e data de parada')
+    + (q.sem ? rjsCardLado('sem', 'Sem classificação', q.sem, 'var(--am)', 'var(--amc)',
+        q.semPadrao ? cpNum(q.semPadrao) + ' sem padrão na planilha' : 'código novo, me diga o lado')
+      : '')
+    + '</div>';
+
+  // códigos que ainda não sei de que lado ficam
+  if (q.sem - q.semPadrao > 0) {
+    h += '<div class="al al-a" style="font-size:11.5px;margin-top:.8rem">'
+      + '⚠ Estes padrões não estão na minha lista, então não entraram em nenhum dos dois lados. '
+      + 'Me diga de quem é cada um e eu classifico:<div style="margin-top:5px;line-height:1.8">'
+      + Object.keys(q.codigosSem).sort().map(function(k){
+          return '<div><strong>' + q.codigosSem[k] + '</strong> × ' + cpEsc(k) + '</div>'; }).join('')
+      + '</div></div>';
+  }
+
+  // ── a lista do lado escolhido ─────────────────────────────────
+  if (_rjsLado) {
+    var lista = r.linhas.filter(function(l){
+      return (!l.padrao ? 'sem' : rjsCulpa(l.padrao)) === _rjsLado;
+    });
+    var porPadrao = {};
+    lista.forEach(function(l){
+      var k = l.padrao || '(sem padrão na planilha)';
+      porPadrao[k] = (porPadrao[k] || 0) + 1;
+    });
+    h += '<div style="margin-top:1rem;border-top:1px dashed var(--brd);padding-top:.8rem">'
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:.6rem">'
+      +   '<strong style="font-size:12.5px">' + cpEsc(RJS_CULPA_NOME[_rjsLado]) + ' — '
+      +     cpNum(lista.length) + ' item(ns)</strong>'
+      +   '<button class="btn btn-s" style="font-size:11px;margin-left:auto"'
+      +     ' onclick="rjsBaixarLado(\'' + _rjsLado + '\')">⬇ Baixar</button>'
+      +   '<button class="btn btn-s" style="font-size:11px"'
+      +     ' onclick="rjsAbrirLado(\'' + _rjsLado + '\')">✕ Fechar</button>'
+      + '</div>'
+      + '<div style="font-size:11.5px;color:var(--tx2);line-height:1.9;margin-bottom:.6rem">'
+      + Object.keys(porPadrao).sort(function(a, b){ return porPadrao[b] - porPadrao[a]; })
+          .map(function(k){
+            return '<div><strong style="color:var(--tx)">' + porPadrao[k] + '</strong> — '
+              + cpEsc(k) + '</div>'; }).join('')
+      + '</div>'
+      + '<div style="overflow:auto;max-height:420px"><table><thead><tr>'
+      +   '<th>RC</th><th>Item</th><th>Pedido</th><th>Comprador</th>'
+      +   '<th style="text-align:right">SLA Pedido</th><th>Padrão rejeição</th><th>Justificativa</th>'
+      + '</tr></thead><tbody>';
+    lista.sort(function(a, b){
+      return (b.slaPedido == null ? -1 : b.slaPedido) - (a.slaPedido == null ? -1 : a.slaPedido);
+    });
+    lista.forEach(function(l){
+      h += '<tr><td style="font-weight:700;color:var(--az)">' + cpEsc(l.rc) + '</td>'
+        + '<td>' + cpEsc(l.itemRc || '—') + '</td>'
+        + '<td style="font-weight:600">' + cpEsc(l.pedido || '—') + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(l.comprador || '—') + '</td>'
+        + '<td style="text-align:right;font-weight:700">' + rjsNum(l.slaPedido) + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(l.padrao || '—') + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(l.justificativa || '—') + '</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+  } else {
+    h += '<div style="font-size:11.5px;color:var(--tx2);margin-top:.8rem">'
+      + 'Clique num dos lados para ver os itens.</div>';
+  }
+
+  h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:10px;line-height:1.7">'
+    + 'O lado sai do código do <strong>Padrão de Rejeição</strong> da planilha do Rodrigo. '
+    + 'São <strong>' + Object.keys(RJS_CULPA).filter(function(k){ return RJS_CULPA[k] === 'level'; }).length
+    + ' códigos Level</strong> e <strong>'
+    + Object.keys(RJS_CULPA).filter(function(k){ return RJS_CULPA[k] === 'petro'; }).length
+    + ' Petrobras</strong>; o que não estiver na lista fica à parte, para você dizer de quem é. '
+    + 'A lista completa de itens, com as 12 colunas, está em '
+    + '<strong>Controle de Pedidos › Rejeite › Rejeite Supervisor</strong>.</div></div>';
+  return h;
+}
+
+function rjsBaixarLado(lado){
+  try {
+    var r = rjsMontar();
+    var lista = r.linhas.filter(function(l){
+      return (!l.padrao ? 'sem' : rjsCulpa(l.padrao)) === lado;
+    });
+    if (!lista.length) { alert('Nada para baixar neste lado.'); return; }
+    var cab = RJS_COLS.map(function(c){ return c[0]; }).concat(['Lado']);
+    var linhas = [cab];
+    lista.forEach(function(l){
+      linhas.push(RJS_COLS.map(function(c){
+        var v = l[c[1]];
+        if (c[1] === 'dataPedido') return v ? cpDataBR(v) : '';
+        return (v == null) ? '' : v;
+      }).concat([RJS_CULPA_NOME[lado]]));
+    });
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(linhas),
+      lado === 'level' ? 'Erros Level' : (lado === 'petro' ? 'Erros Petrobras' : 'Sem classificacao'));
+    XLSX.writeFile(wb, 'Rejeite_' + lado + '_' + cpHojeISO().replace(/-/g, '') + '.xlsx');
+  } catch (e) { alert('Não consegui baixar: ' + e.message); }
+}
+
 // ── Rejeite Supervisor — a tela ───────────────────────────────────
 function rjsNum(v){ return (v == null || v === '') ? '—' : cpNum(v); }
 
@@ -15494,6 +15693,19 @@ function rjSupervisorHTML(){
     +       cpNum(r.conta.casados) + '</div>'
     +     '<div style="font-size:10px;color:var(--tx2)">de ' + cpNum(r.conta.apontados)
     +       ' item(ns) apontado(s) pelo Rodrigo</div></div>'
+    +   (function(){
+          var q = rjsPorCulpa();
+          return '<div style="flex:1;min-width:150px;background:var(--cin);border:1px solid var(--brd);'
+            + 'border-radius:10px;padding:.7rem .9rem">'
+            + '<div style="font-size:9px;font-weight:700;color:var(--tx2);letter-spacing:.4px">DE QUEM É O ERRO</div>'
+            + '<div style="font-size:17px;font-weight:800;line-height:1.3">'
+            +   '<span style="color:var(--vm)">' + cpNum(q.level) + '</span>'
+            +   '<span style="font-size:11px;color:var(--tx2);font-weight:600"> Level · </span>'
+            +   '<span style="color:var(--azm)">' + cpNum(q.petro) + '</span>'
+            +   '<span style="font-size:11px;color:var(--tx2);font-weight:600"> Petrobras</span></div>'
+            + '<div style="font-size:10px;color:var(--tx2)">'
+            +   (q.sem ? cpNum(q.sem) + ' sem classificação' : 'pelo padrão de rejeição') + '</div></div>';
+        })()
     +   '<div style="flex:1;min-width:150px;background:' + (r.fora.length ? 'var(--amc)' : 'var(--vdc)')
     +     ';border:1px solid ' + (r.fora.length ? 'var(--am)' : 'var(--vd)') + ';border-radius:10px;padding:.7rem .9rem">'
     +     '<div style="font-size:9px;font-weight:700;color:var(--tx2);letter-spacing:.4px">FORA DO INDICADOR</div>'
@@ -16162,6 +16374,34 @@ async function gpAbrir(){
         var L = d2.data() || {};
         _gpLb = { itens:L.itens || {}, arquivo:L.arquivo || '', lidas:+L.lidas || 0,
                   uteis:+L.uteis || 0, atualizadoEm:L.atualizadoEm || '' };
+      }
+      // O card Rejeite Supervisor vive das mesmas três bases da aba do
+      // Controle de Pedidos — sem elas, ele apareceria zerado aqui.
+      var dR = await Promise.all([
+        db.collection('config').doc('rejeite_sup_medicao').get(),
+        db.collection('config').doc('rejeite_sup_sla').get(),
+        db.collection('config').doc('rejeite_sup_rodrigo').get()
+      ]);
+      if (dR[0] && dR[0].exists) {
+        var RM = dR[0].data() || {};
+        _rjsMed = { itens:RM.itens || [], linhas:+RM.linhas || 0, chaves:+RM.chaves || 0,
+                    posUsadas:RM.posUsadas || [], pedidos:RM.pedidos || {},
+                    cabecalho:RM.cabecalho || [], comBruto:+RM.comBruto || 0,
+                    arquivo:RM.arquivo || '', atualizadoEm:RM.atualizadoEm || '',
+                    atualizadoPor:RM.atualizadoPor || '' };
+      }
+      if (dR[1] && dR[1].exists) {
+        var RS = dR[1].data() || {};
+        _rjsSla = { itens:RS.itens || {}, chaves:+RS.chaves || 0, cortou:!!RS.cortou,
+                    arquivo:RS.arquivo || '', atualizadoEm:RS.atualizadoEm || '' };
+      }
+      if (dR[2] && dR[2].exists) {
+        var RR = dR[2].data() || {};
+        _rjsRod = { cockpit:RR.cockpit || {}, motivos:RR.motivos || {},
+                    nCockpit:+RR.nCockpit || 0, nMotivos:+RR.nMotivos || 0,
+                    nDados:+RR.nDados || 0, foraDoCockpit:+RR.foraDoCockpit || 0,
+                    abas:RR.abas || {}, arquivo:RR.arquivo || '',
+                    atualizadoEm:RR.atualizadoEm || '', atualizadoPor:RR.atualizadoPor || '' };
       }
     }
   } catch (e) { console.warn('gpAbrir config:', e); }
