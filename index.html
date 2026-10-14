@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/10 00:28';
+var GTO_BUILD = '14/10 01:14';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -16133,11 +16133,32 @@ function monCard(rot, val, sub, cor, fundo){
 // O caminho é o contrário: quem ABRE a tela onde o número é calculado
 // publica o resultado na base de todas as frentes. Cada tela lê o resumo
 // da base dela, que é a que ela já tem permissão de ler.
+// Frentes onde esses quatro cards não dizem nada e por isso somem.
+// No FAST, Meta Operacional / PATEC Finalizado (menu) e Meta do Projeto /
+// GAP do Projeto (topo) são números do ciclo do ADLV: mostrar ali só
+// confunde quem abre a tela. É um registro — para esconder em outra
+// frente, basta acrescentar a chave dela aqui.
+var CARDS_CICLO_OCULTOS = ['fast'];
+
+function cardsCicloVisibilidade(){
+  var esconder = (typeof _moduloAtivo !== 'undefined') && !!_moduloAtivo
+    && CARDS_CICLO_OCULTOS.indexOf(_moduloAtivo) >= 0;
+  [['sb-cards-ciclo','grid'], ['top-meta-proj-box',''], ['top-gap-proj-box','']]
+  .forEach(function(par){
+    var el = document.getElementById(par[0]);
+    if (!el) return;
+    if (esconder) el.style.display = 'none';
+    else if (el.style.display === 'none') el.style.display = par[1];
+  });
+  return esconder;
+}
+
 var TOPO_DOC = 'topo_projeto';
 var _topo = { meta:null, metaSub:'', gap:null, gapSub:'' };
 var _topoUltimo = '';
 
 function topoPintar(){
+  if (cardsCicloVisibilidade()) return;
   if (_topo.meta != null && !isNaN(_topo.meta)) {
     _setEl('top-meta-proj',       cpNum(_topo.meta));
     _setEl('top-meta-proj-label', _topo.metaSub || 'itens · medição');
@@ -20128,6 +20149,8 @@ function initMetaGap(){
   // Meta e Gap do Projeto vêm do resumo publicado pelas telas de origem
   // (medição e PCP) — vêm depois para não serem sobrescritos pelo acima.
   try { if(typeof topoPintar==='function') topoPintar(); }catch(e){}
+  // E, por último mesmo, some com os cards nas frentes que não os usam.
+  try { if(typeof cardsCicloVisibilidade==='function') cardsCicloVisibilidade(); }catch(e){}
 }
 
 function _setEl(id, val, html){
@@ -40664,6 +40687,7 @@ function _entrarNoApp(){
   document.getElementById('patec-modulo-overlay').style.display = 'none';
   pedidosMontarModulo();
   authMontarSidebar();
+  try { if(typeof cardsCicloVisibilidade==='function') cardsCicloVisibilidade(); }catch(e){}
 
   // Badge
   const badge = document.getElementById('topbar-user-badge');
