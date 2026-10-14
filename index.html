@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/10 01:14';
+var GTO_BUILD = '14/10 02:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1370,6 +1370,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
           <button class="stab" id="cp-sub-btn-ctrlpatec" onclick="cpSubTab('ctrlpatec',this)">📈 Controle abrir PATEC</button>
           <button class="stab" id="cp-sub-btn-ctrlneg" onclick="cpSubTab('ctrlneg',this)">📉 Controle negociação</button>
           <button class="stab" id="cp-sub-btn-statusb" onclick="cpSubTab('statusb',this)">📋 Status B</button>
+          <button class="stab" id="cp-sub-btn-rejeite" onclick="cpSubTab('rejeite',this)">🚫 Rejeite</button>
           <button class="stab" id="cp-sub-btn-monitor" onclick="cpSubTab('monitor',this)">📡 Monitoramento</button>
         </div>
 
@@ -1427,6 +1428,16 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
 
         <!-- ── ABERTURA DE PATEC ── -->
         <!-- ══ DISTRIBUIÇÃO DO MAPA ═══════════════════════════════ -->
+        <!-- ── REJEITE — duas regras diferentes, uma aba cada ────────── -->
+        <div id="cp-sub-rejeite" style="display:none">
+          <div class="stabs" style="margin-bottom:1rem">
+            <button class="stab active" id="rj-btn-fornecedor" onclick="rjAba('fornecedor',this)">🏭 Rejeite Fornecedor</button>
+            <button class="stab" id="rj-btn-supervisor" onclick="rjAba('supervisor',this)">👤 Rejeite Supervisor</button>
+          </div>
+          <div id="rj-fornecedor"></div>
+          <div id="rj-supervisor" style="display:none"></div>
+        </div>
+
         <div id="cp-sub-mapa" style="display:none">
 
           <div class="cd" style="border-top:3px solid var(--azm)">
@@ -12486,7 +12497,7 @@ function apSubAtiva(){
   return el && el.style.display !== 'none';
 }
 function cpSubTab(qual, btn){
-  ['pedidos','mapa','ctrlpatec','ctrlneg','statusb','monitor'].forEach(function(k){
+  ['pedidos','mapa','ctrlpatec','ctrlneg','statusb','rejeite','monitor'].forEach(function(k){
     var el = document.getElementById('cp-sub-' + k);
     if (el) el.style.display = (qual === k) ? 'block' : 'none';
     var b = document.getElementById('cp-sub-btn-' + k);
@@ -12505,6 +12516,7 @@ function cpSubTab(qual, btn){
   if (qual === 'ctrlpatec') ctpAbrir();
   if (qual === 'ctrlneg')   ctnAbrir();
   if (qual === 'statusb')   stbAbrir();
+  if (qual === 'rejeite')   rjAbrir();
   if (qual === 'monitor')   monAbrir();
 }
 
@@ -14544,11 +14556,16 @@ async function gpUploadRejeitados(file){
     _gpRej = { itens:r.itens, arquivo:file.name, aba:nome, lidas:r.lidas, fora:r.fora,
                grupos:r.grupos, atualizadoEm:new Date().toISOString(), atualizadoPor:cpQuem() };
     var ok = await gpGravarRej();
+    gpRender();
+    // A aba do Controle de Pedidos é onde o upload mora agora: ela tem de
+    // mostrar a lista nova sem precisar de F5. Redesenha ANTES do recado —
+    // o redesenho troca o innerHTML e levaria o recado junto.
+    try { if (document.getElementById('rj-fornecedor')) rjDesenhar(); } catch (e) {}
+    st = document.getElementById('gp-rej-status');
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ <strong>' + cpEsc(file.name) + '</strong> — '
       + cpNum(r.lidas) + ' linhas, <strong>' + cpNum(r.itens.length) + '</strong> dos nossos grupos · '
       + cpNum(r.fora) + ' de outros grupos fora da conta'
       + (ok ? '.' : ' <span style="color:var(--am)">(não gravou no Firebase)</span>') + '</span>';
-    gpRender();
   } catch (e) {
     if (st) st.innerHTML = '<span style="color:var(--vm)">✗ Erro ao ler: ' + cpEsc(e.message) + '</span>';
   }
@@ -14835,44 +14852,27 @@ function gpRenderDetalhe(){
   box.innerHTML = h;
 }
 
-// O card de Rejeitados tem vida própria: a planilha é subida aqui dentro.
-function gpHtmlRejeitados(){
+// ══════════════════ REJEITE ══════════════════════════════════════
+// A planilha de rejeitados é uma só e a base é uma só
+// (config/governanca_rejeitados). O que mudou de lugar foi o upload: ele
+// passou a morar em Controle de Pedidos › Rejeite › Rejeite Fornecedor, e
+// só ali. O card da Governança de pedidos continua mostrando o número e a
+// lista — ele lê, não sobe. Um lugar para subir, vários para olhar.
+//
+// Estas três funções são a parte comum: a mesma ordenação, o mesmo resumo
+// e a mesma tabela servem o card e a aba, para não existirem duas versões
+// da mesma lista que um dia divergem.
+function rjItens(){
   var itens = (_gpRej && _gpRej.itens) ? _gpRej.itens.slice() : [];
   itens.sort(function(a, b){
     if ((b.dias || 0) !== (a.dias || 0)) return (b.dias || 0) - (a.dias || 0);
     return String(a.pedido).localeCompare(String(b.pedido));
   });
-  var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
-    + '<span>Rejeitados — ' + cpNum(itens.length) + ' pedido(s) dos nossos grupos</span>'
-    + '<span style="display:flex;gap:8px">'
-    +   (itens.length ? '<button class="btn btn-s" onclick="gpCopiar()">📋 Copiar</button>'
-                      + '<button class="btn btn-s" onclick="gpBaixarExcel()">⬇ Baixar Excel</button>' : '')
-    +   '<button class="btn btn-s" onclick="gpAbrirCard(\'rejeitados\')">✕ Fechar</button>'
-    + '</span></div>'
-    + '<div style="border:2px dashed var(--brd);border-radius:10px;padding:1.1rem;text-align:center;cursor:pointer;background:var(--cin)"'
-    +   ' onclick="document.getElementById(\'gp-rej-input\').click()"'
-    +   ' ondragover="event.preventDefault()" ondrop="gpRejDrop(event)">'
-    +   '<div style="font-size:22px;margin-bottom:.3rem">📥</div>'
-    +   '<div style="font-size:13px;font-weight:600">Arraste aqui a planilha de rejeitados</div>'
-    +   '<div style="font-size:11px;color:var(--tx2);margin-top:4px">'
-    +     '.xlsx, .xlsb ou .csv — conto só os grupos de compras da nossa lista (' + GP_GRUPOS.length + ')</div>'
-    +   '<input type="file" id="gp-rej-input" accept=".xlsb,.xlsx,.xls,.csv" style="display:none"'
-    +     ' onchange="gpUploadRejeitados(this.files[0]); this.value=\'\';">'
-    + '</div>'
-    + '<div id="gp-rej-status" style="margin-top:.7rem;font-size:12px">'
-    +   (_gpRej.arquivo ? '<span style="color:var(--tx2)">Último arquivo: <strong>' + cpEsc(_gpRej.arquivo)
-        + '</strong>' + (_gpRej.atualizadoEm ? ' — ' + cpDataBR(String(_gpRej.atualizadoEm).slice(0,10)) : '')
-        + ' · ' + cpNum(_gpRej.lidas) + ' linhas, <strong>' + cpNum(itens.length)
-        + '</strong> dos nossos grupos, ' + cpNum(_gpRej.fora) + ' de outros grupos fora da conta.</span>' : '')
-    + '</div>';
+  return itens;
+}
 
-  if (!itens.length) {
-    h += '<div style="font-size:12px;color:var(--tx2);margin-top:.8rem">'
-      + 'Nenhum pedido rejeitado nos nossos grupos.</div></div>';
-    return h;
-  }
-
-  // um resumo rápido por grupo e por motivo
+function rjResumoHTML(itens){
+  if (!itens.length) return '';
   var porGrupo = {}, porMotivo = {}, itensSoma = 0;
   itens.forEach(function(i){
     porGrupo[i.grupo] = (porGrupo[i.grupo] || 0) + 1;
@@ -14883,13 +14883,16 @@ function gpHtmlRejeitados(){
     return Object.keys(o).sort(function(a, b){ return o[b] - o[a]; })
       .map(function(k){ return cpEsc(k) + ' <strong>' + o[k] + '</strong>'; }).join(' · ');
   };
-  h += '<div style="font-size:11px;color:var(--tx2);margin-top:.9rem;line-height:1.8">'
+  return '<div style="font-size:11px;color:var(--tx2);margin-top:.9rem;line-height:1.8">'
     + '<div><strong style="color:var(--tx)">' + cpNum(itensSoma) + '</strong> itens em '
     +   cpNum(itens.length) + ' pedidos.</div>'
     + '<div>Por grupo: ' + topo(porGrupo) + '</div>'
     + '<div>Por motivo: ' + topo(porMotivo) + '</div></div>';
+}
 
-  h += '<div style="overflow:auto;max-height:520px;margin-top:.8rem"><table><thead><tr>'
+function rjTabelaHTML(itens){
+  if (!itens.length) return '';
+  var h = '<div style="overflow:auto;max-height:520px;margin-top:.8rem"><table><thead><tr>'
     + '<th>Pedido</th><th>Grupo</th><th>Responsável do grupo</th><th>Fornecedor</th>'
     + '<th>Tipo</th><th style="text-align:right">Itens</th><th>Rejeitado em</th>'
     + '<th style="text-align:right">Dias</th><th style="text-align:right">Envios</th>'
@@ -14912,8 +14915,137 @@ function gpHtmlRejeitados(){
       + '<td style="font-size:10.5px">' + cpEsc(i.motivo || '—') + '</td>'
       + '<td style="font-size:10.5px">' + cpEsc(i.quem || '—') + '</td></tr>';
   });
-  h += '</tbody></table></div></div>';
-  return h;
+  return h + '</tbody></table></div>';
+}
+
+// A linha que diz de qual arquivo veio a base que está na tela.
+function rjOrigemHTML(itens){
+  if (!_gpRej || !_gpRej.arquivo) return '';
+  return '<span style="color:var(--tx2)">Último arquivo: <strong>' + cpEsc(_gpRej.arquivo)
+    + '</strong>' + (_gpRej.atualizadoEm ? ' — ' + cpDataBR(String(_gpRej.atualizadoEm).slice(0,10)) : '')
+    + ' · ' + cpNum(_gpRej.lidas) + ' linhas, <strong>' + cpNum(itens.length)
+    + '</strong> dos nossos grupos, ' + cpNum(_gpRej.fora) + ' de outros grupos fora da conta.</span>';
+}
+
+// O card da Governança de pedidos: lê a mesma base, sem o upload.
+function gpHtmlRejeitados(){
+  var itens = rjItens();
+  var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
+    + '<span>Rejeitados — ' + cpNum(itens.length) + ' pedido(s) dos nossos grupos</span>'
+    + '<span style="display:flex;gap:8px">'
+    +   (itens.length ? '<button class="btn btn-s" onclick="gpCopiar()">📋 Copiar</button>'
+                      + '<button class="btn btn-s" onclick="gpBaixarExcel()">⬇ Baixar Excel</button>' : '')
+    +   '<button class="btn btn-s" onclick="gpAbrirCard(\'rejeitados\')">✕ Fechar</button>'
+    + '</span></div>'
+    + '<div class="al al-b" style="font-size:11.5px">ℹ A planilha de rejeitados é subida em '
+    +   '<strong>Controle de Pedidos › Rejeite › Rejeite Fornecedor</strong>. Aqui é só leitura — '
+    +   'a base é a mesma.</div>'
+    + '<div style="font-size:12px;margin-top:.5rem">' + rjOrigemHTML(itens) + '</div>';
+  if (!itens.length) {
+    return h + '<div style="font-size:12px;color:var(--tx2);margin-top:.8rem">'
+      + 'Nenhum pedido rejeitado nos nossos grupos.</div></div>';
+  }
+  return h + rjResumoHTML(itens) + rjTabelaHTML(itens) + '</div>';
+}
+
+// ── a aba: duas regras, uma em cada lado ──────────────────────────
+var _rjAba = 'fornecedor';
+
+function rjAba(qual, btn){
+  _rjAba = (qual === 'supervisor') ? 'supervisor' : 'fornecedor';
+  ['fornecedor','supervisor'].forEach(function(k){
+    var el = document.getElementById('rj-' + k);
+    if (el) el.style.display = (_rjAba === k) ? 'block' : 'none';
+    var b = document.getElementById('rj-btn-' + k);
+    if (b) b.classList.remove('active');
+  });
+  var bt = btn || document.getElementById('rj-btn-' + _rjAba);
+  if (bt) bt.classList.add('active');
+  rjDesenhar();
+}
+
+function rjDesenhar(){
+  var a = document.getElementById('rj-fornecedor');
+  if (a) a.innerHTML = rjFornecedorHTML();
+  var b = document.getElementById('rj-supervisor');
+  if (b) b.innerHTML = rjSupervisorHTML();
+}
+
+// Busca a base de rejeitados na frente atual. É a mesma que o card da
+// Governança de pedidos lê — só que esta aba não depende de o André ter
+// aberto aquela tela antes.
+async function rjAbrir(){
+  try {
+    var db = getDB();
+    if (db) {
+      var d = await db.collection('config').doc('governanca_rejeitados').get();
+      if (d && d.exists) {
+        var R = d.data() || {};
+        _gpRej = { itens:R.itens || [], arquivo:R.arquivo || '', aba:R.aba || '',
+                   lidas:+R.lidas || 0, fora:+R.fora || 0, grupos:R.grupos || {},
+                   atualizadoEm:R.atualizadoEm || '', atualizadoPor:R.atualizadoPor || '' };
+      }
+    }
+  } catch (e) { console.warn('rjAbrir:', e); }
+  rjAba(_rjAba, null);
+}
+
+// ── Rejeite Fornecedor — a regra que já existe, com o upload ──────
+function rjFornecedorHTML(){
+  var itens = rjItens();
+  return '<div class="cd" style="border-top:3px solid var(--vm)">'
+    + '<div class="cd-t" style="justify-content:space-between">'
+    +   '<span>🏭 Rejeite Fornecedor — ' + cpNum(itens.length) + ' pedido(s) dos nossos grupos</span>'
+    +   '<span style="display:flex;gap:8px">'
+    +     (itens.length ? '<button class="btn btn-s" onclick="gpCopiar()">📋 Copiar</button>'
+                        + '<button class="btn btn-s" onclick="gpBaixarExcel()">⬇ Baixar Excel</button>' : '')
+    +     '<button class="btn btn-s" onclick="rjAbrir()">↻ Atualizar</button>'
+    +   '</span></div>'
+    + '<div style="border:2px dashed var(--brd);border-radius:10px;padding:1.1rem;text-align:center;cursor:pointer;background:var(--cin)"'
+    +   ' onclick="document.getElementById(\'gp-rej-input\').click()"'
+    +   ' ondragover="event.preventDefault()" ondrop="gpRejDrop(event)">'
+    +   '<div style="font-size:22px;margin-bottom:.3rem">📥</div>'
+    +   '<div style="font-size:13px;font-weight:600">Arraste aqui a planilha de rejeitados</div>'
+    +   '<div style="font-size:11px;color:var(--tx2);margin-top:4px">'
+    +     '.xlsx, .xlsb ou .csv — conto só os grupos de compras da nossa lista ('
+    +     GP_GRUPOS.length + ')</div>'
+    +   '<input type="file" id="gp-rej-input" accept=".xlsb,.xlsx,.xls,.csv" style="display:none"'
+    +     ' onchange="gpUploadRejeitados(this.files[0]); this.value=\'\';">'
+    + '</div>'
+    + '<div id="gp-rej-status" style="margin-top:.7rem;font-size:12px">' + rjOrigemHTML(itens) + '</div>'
+    + (itens.length
+        ? rjResumoHTML(itens) + rjTabelaHTML(itens)
+        : '<div style="font-size:12px;color:var(--tx2);margin-top:.8rem">'
+          + 'Nenhum pedido rejeitado nos nossos grupos. Suba a planilha aqui em cima.</div>')
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-top:10px;line-height:1.6">'
+    +   'A regra é a que já rodava: entram só os pedidos dos <strong>' + GP_GRUPOS.length
+    +   ' grupos de compras</strong> da nossa lista; <strong>Dias</strong> é o que veio na coluna '
+    +   'DIAS_REJEITADO e a linha fica vermelha a partir de <strong>3 dias</strong>; o '
+    +   '<strong>Prazo</strong> vem da coluna PRAZO_RECUSA. A mesma base alimenta o card '
+    +   '<em>Rejeitados</em> da Governança de pedidos e o <em>Rejeites por comprador</em> do '
+    +   'Monitoramento.</div>'
+    + '</div>';
+}
+
+// ── Rejeite Supervisor — a regra nova, ainda sem regra ────────────
+// Deixo a aba de pé e digo o que falta, em vez de inventar uma conta que
+// depois teria de ser desfeita. Assim que o André passar a regra, é aqui
+// que ela entra.
+function rjSupervisorHTML(){
+  return '<div class="cd" style="border-top:3px solid var(--am)">'
+    + '<div class="cd-t">👤 Rejeite Supervisor</div>'
+    + '<div class="al al-a" style="font-size:12px">⏳ A aba está de pé, a regra ainda não. '
+    +   'Não coloquei nenhuma conta aqui para não inventar número.</div>'
+    + '<div style="font-size:12px;color:var(--tx2);margin-top:.8rem;line-height:1.8">'
+    +   'Para eu montar, preciso de quatro coisas:'
+    +   '<div style="margin-top:6px">1. <strong>De onde vem</strong> — é a mesma planilha de '
+    +   'rejeitados (outra coluna) ou um arquivo novo? Se for novo, me mande um exemplo.</div>'
+    +   '<div>2. <strong>Quem conta como supervisor</strong> — nome na planilha, ou a lista da equipe.</div>'
+    +   '<div>3. <strong>O que conta como rejeite dele</strong> — qual coluna/valor marca o rejeite '
+    +   'do supervisor, e se há prazo (quantos dias) para ele responder.</div>'
+    +   '<div>4. <strong>O que você quer ver</strong> — a lista por pedido, o total por supervisor, '
+    +   'ou os dois.</div>'
+    + '</div></div>';
 }
 
 // Status B: a lista é só leitura aqui. Quem trata é a aba do Controle de
