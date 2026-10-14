@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/10 09:10';
+var GTO_BUILD = '14/10 11:55';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15666,6 +15666,7 @@ function arjDados(ini, fim){
     total: forn.length + sup.length,
     serie: rjHistSerie(ini, fim),
     resolvidos: rjHistResolvidos(fim),
+    mov: rjHistMovimento(fim),
     slaSup:slaSup, slaForn:slaForn, ordemSla:ORDEM,
     mediaSup: comS ? Math.round(somaS / comS * 10) / 10 : null,
     mediaForn: comF ? Math.round(somaF / comF * 10) / 10 : null,
@@ -15675,33 +15676,69 @@ function arjDados(ini, fim){
   };
 }
 
-function arjCard(rot, val, sub, cor){
-  return '<div class="mcard" style="border-color:' + cor + ' !important">'
+// No padrão do slide do PATEC: fundo claro por família, rótulo e valor em
+// preto, variação/legenda embaixo.
+// A tira que mostra a base não ser congelada: o que havia, o que saiu, o
+// que entrou e o que ficou. Com ela, "30% resolvidos" e um total que
+// subiu deixam de ser contraditórios.
+function arjMovimentoHTML(m){
+  var cel = function(rot, val, cor, sub){
+    return '<div style="flex:1;min-width:110px;text-align:center;padding:4px 6px">'
+      + '<div style="font-size:9.5px;font-weight:700;color:#555;text-transform:uppercase;'
+      +   'letter-spacing:.3px">' + _arjEsc(rot) + '</div>'
+      + '<div style="font-size:19px;font-weight:800;color:' + cor + ';line-height:1.1">'
+      +   _arjEsc(val) + '</div>'
+      + '<div style="font-size:9.5px;color:#777">' + sub + '</div></div>';
+  };
+  var seta = function(){
+    return '<div style="font-size:15px;color:#aaa;align-self:center;padding:0 2px">→</div>';
+  };
+  return '<div style="border:1px solid #ddd;border-radius:6px;background:#fafbfc;'
+    +   'display:flex;flex-wrap:wrap;align-items:stretch;padding:4px 6px;margin-bottom:8px">'
+    +   cel('Havia em ' + _arjBR(m.de), _arjN(m.base), '#1a1a1a', 'retrato anterior')
+    +   seta()
+    +   cel('Saíram', '−' + _arjN(m.saiu), '#2e7d32',
+          String(m.pct).replace('.', ',') + '% da base anterior')
+    +   seta()
+    +   cel('Entraram', '+' + _arjN(m.entrou), '#c62828',
+          m.voltaram ? m.voltaram + ' já tinham saído antes' : 'novos no período')
+    +   seta()
+    +   cel('Hoje', _arjN(m.hoje), '#1a1a1a',
+          (m.hoje === m.base ? 'igual ao anterior'
+            : (m.hoje > m.base ? '+' : '−') + _arjN(Math.abs(m.hoje - m.base)) + ' no saldo'))
+    + '</div>';
+}
+
+function arjCard(rot, val, sub, fundo){
+  return '<div class="mcard" style="background:' + fundo + ' !important">'
     + '<div class="mcard-lbl">' + _arjEsc(rot) + '</div>'
-    + '<div class="mcard-val" style="color:' + cor + ' !important">' + _arjEsc(val) + '</div>'
-    + '<div style="font-size:10px;color:#555">' + sub + '</div></div>';
+    + '<div class="mcard-val">' + _arjEsc(val) + '</div>'
+    + '<div class="mcard-sub">' + sub + '</div></div>';
 }
 
 function arjSlideHTML(op){
+  op = op || {};
   var d = arjDados(op.ini, op.fim);
-  var corF = '#C62828', corS = '#E08A1E', corT = '#1B5E20', corP = '#2F6FB5';
+  var corF = '#C62828', corS = '#E08A1E', corT = '#1B5E20', corP = '#3266AD';
   var secs = '';
 
   if (op.incVisao) {
-    secs += '<div><div class="sec-title">Visão geral — pedidos rejeitados</div>'
-      + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">'
-      +   arjCard('Total rejeitado', _arjN(d.total), 'supervisor + fornecedor', corT)
-      +   arjCard('Rejeite Supervisor', _arjN(d.sup.length),
-            _arjN(d.q.level) + ' Level · ' + _arjN(d.q.petro) + ' Petrobras', corS)
-      +   arjCard('Rejeite Fornecedor', _arjN(d.forn.length),
-            _arjN(d.foraPrazo) + ' fora do prazo', corF)
-      +   arjCard('% resolvidos', d.resolvidos ? (String(d.resolvidos.pct).replace('.', ',') + '%') : '—',
-            d.resolvidos
-              ? _arjN(d.resolvidos.saiu) + ' de ' + _arjN(d.resolvidos.base) + ' desde '
-                + _arjBR(d.resolvidos.de)
-              : 'preciso de dois dias no histórico', corP)
+    secs += '<div><div class="sec-title">📊 Visão geral — pedidos rejeitados em ' + _arjBR(op.data || '')
       + '</div>'
-      + '<div class="sec-title" style="margin-top:4px">Evolução</div>'
+      + '<div class="mapa-grid" style="margin-bottom:10px">'
+      +   arjCard('Total rejeitado', _arjN(d.total), 'supervisor + fornecedor', '#f5f5f5')
+      +   arjCard('Rejeite Supervisor', _arjN(d.sup.length),
+            _arjN(d.q.level) + ' Level · ' + _arjN(d.q.petro) + ' Petrobras', '#FFF8E1')
+      +   arjCard('Rejeite Fornecedor', _arjN(d.forn.length),
+            _arjN(d.foraPrazo) + ' fora do prazo', '#FDECEA')
+      +   arjCard('% resolvidos', d.mov ? (String(d.mov.pct).replace('.', ',') + '%') : '—',
+            d.mov
+              ? _arjN(d.mov.saiu) + ' dos ' + _arjN(d.mov.base) + ' que havia em '
+                + _arjBR(d.mov.de)
+              : 'preciso de dois dias no histórico', '#EBF0FA')
+      + '</div>'
+      + (d.mov ? arjMovimentoHTML(d.mov) : '')
+      + '<div class="sec-title" style="margin-top:4px">📈 Evolução — itens rejeitados por dia</div>'
       + arjGrafLinhas(d.serie, [
           { campo:'total', nome:'Total', cor:corT },
           { campo:'sup',   nome:'Supervisor', cor:corS },
@@ -15710,32 +15747,32 @@ function arjSlideHTML(op){
   }
 
   if (op.incSup) {
-    secs += '<div><div class="sec-title">Rejeite Supervisor — ' + _arjN(d.sup.length) + ' item(ns)</div>'
+    secs += '<div><div class="sec-title">👤 Rejeite Supervisor — ' + _arjN(d.sup.length) + ' item(ns)</div>'
       + '<div class="two-col">'
-      +   '<div><div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">'
-      +     'POR PADRÃO DE REJEIÇÃO</div>' + arjBarras(d.padroesSup, corS, 8) + '</div>'
-      +   '<div><div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">'
-      +     'DE QUEM É O ERRO</div>'
+      +   '<div><div class="col-tit">Por padrão de rejeição</div>'
+      +     arjBarras(d.padroesSup, corS, 8) + '</div>'
+      +   '<div><div class="col-tit">De quem é o erro</div>'
       +     arjBarras([['Erros Level', d.q.level], ['Erros Petrobras', d.q.petro]]
             .concat(d.q.sem ? [['Sem classificação', d.q.sem]] : []), corS, 3)
-      +     '<div style="font-size:10px;color:#777;margin-top:8px">'
+      +     '<div class="nota">'
       +       (d.fora ? '⚠ ' + _arjN(d.fora) + ' item(ns) apontado(s) pelo Rodrigo sem par na medição.'
                       : '✓ Todo item apontado pelo Rodrigo tem par na medição.')
       +     '</div>'
       +     (d.compradores.length
-          ? '<div style="font-size:10px;font-weight:700;color:#555;margin:10px 0 6px">POR COMPRADOR</div>'
+          ? '<div class="col-tit" style="margin-top:10px">Por comprador</div>'
             + arjBarras(d.compradores, corP, 5) : '')
       +   '</div>'
       + '</div></div>';
   }
 
   if (op.incForn) {
-    secs += '<div><div class="sec-title">Rejeite Fornecedor — ' + _arjN(d.forn.length) + ' pedido(s)</div>'
+    secs += '<div><div class="sec-title">🏭 Rejeite Fornecedor — ' + _arjN(d.forn.length)
+      + ' pedido(s)</div>'
       + '<div class="two-col">'
-      +   '<div><div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">'
-      +     'POR MOTIVO DE RECUSA</div>' + arjBarras(d.motivosForn, corF, 8) + '</div>'
-      +   '<div><div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">'
-      +     'POR GRUPO DE COMPRAS</div>' + arjBarras(d.gruposForn, corF, 6) + '</div>'
+      +   '<div><div class="col-tit">Por motivo de recusa</div>'
+      +     arjBarras(d.motivosForn, corF, 8) + '</div>'
+      +   '<div><div class="col-tit">Por grupo de compras</div>'
+      +     arjBarras(d.gruposForn, corF, 6) + '</div>'
       + '</div></div>';
   }
 
@@ -15748,28 +15785,40 @@ function arjSlideHTML(op){
           return '<div class="gov-row"><div class="gov-lbl">' + _arjEsc(p[0]) + '</div>'
             + '<div class="gov-bar-wrap"><div class="gov-bar" style="width:' + pc
             +   '%;background:' + cor + '"></div></div>'
-            + '<div class="gov-cnt">' + _arjN(p[1]) + ' · ' + pc + '%</div></div>';
+            + '<div class="gov-cnt">' + _arjN(p[1]) + ' itens · ' + pc + '%</div></div>';
         }).join('');
     };
-    secs += '<div><div class="sec-title">SLA do pedido e resolução</div>'
+    secs += '<div><div class="sec-title">⏱ Há quanto tempo cada item está parado</div>'
       + '<div class="two-col">'
-      +   '<div><div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">'
-      +     'SUPERVISOR — TEMPO DESDE O ENVIO DO COCKPIT'
+      +   '<div><div class="col-tit">Supervisor — tempo desde o envio do cockpit'
       +     (d.mediaSup != null ? ' · média ' + String(d.mediaSup).replace('.', ',') + ' dias' : '')
-      +     '</div>' + linhaSla(d.slaSup, corS, d.sup.length) + '</div>'
-      +   '<div><div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">'
-      +     'FORNECEDOR — DIAS REJEITADO'
+      +     '</div>'
+      +     '<div class="nota" style="margin:0 0 6px">quantos dos ' + _arjN(d.sup.length)
+      +       ' itens estão em cada faixa, e quanto isso é do total</div>'
+      +     linhaSla(d.slaSup, corS, d.sup.length) + '</div>'
+      +   '<div><div class="col-tit">Fornecedor — dias rejeitado'
       +     (d.mediaForn != null ? ' · média ' + String(d.mediaForn).replace('.', ',') + ' dias' : '')
-      +     '</div>' + linhaSla(d.slaForn, corF, d.forn.length) + '</div>'
+      +     '</div>'
+      +     '<div class="nota" style="margin:0 0 6px">quantos dos ' + _arjN(d.forn.length)
+      +       ' pedidos estão em cada faixa, e quanto isso é do total</div>'
+      +     linhaSla(d.slaForn, corF, d.forn.length) + '</div>'
       + '</div>'
-      + '<div style="font-size:10px;color:#777;margin-top:8px">'
-      +   (d.resolvidos
-        ? 'Resolvido = item que estava na lista em ' + _arjBR(d.resolvidos.de)
-          + ' e não está mais em ' + _arjBR(d.resolvidos.ate) + ': '
-          + _arjN(d.resolvidos.saiu) + ' de ' + _arjN(d.resolvidos.base) + ' ('
-          + String(d.resolvidos.pct).replace('.', ',') + '%).'
-        : 'O percentual de resolvidos compara o retrato de hoje com o retrato anterior. '
-          + 'Ainda só existe um retrato no histórico.')
+      + '<div class="nota">'
+      +   '<strong>Resolvido = saiu da lista.</strong> No Supervisor, o item deixou de ser '
+      +   'STATUS_PROCESSO 8 na medição; no Fornecedor, o pedido saiu da planilha de rejeitados. '
+      +   'Nenhuma das duas fontes tem um campo "tratado" — sair da lista é o sinal que elas dão. '
+      +   'A base não é congelada, então o percentual é sempre sobre a BASE ANTERIOR: quem entrou '
+      +   'depois não entra na conta de quem foi tratado.'
+      +   (d.mov
+        ? ' Entre ' + _arjBR(d.mov.de) + ' e ' + _arjBR(d.mov.ate) + ': dos '
+          + _arjN(d.mov.base) + ' que havia, ' + _arjN(d.mov.saiu) + ' saíram ('
+          + String(d.mov.pct).replace('.', ',') + '%) e ' + _arjN(d.mov.ficaram)
+          + ' continuam; entraram ' + _arjN(d.mov.entrou) + ' novos, fechando em '
+          + _arjN(d.mov.hoje) + '.'
+          + (d.mov.voltaram
+             ? ' ⚠ ' + _arjN(d.mov.voltaram) + ' dos que entraram já tinham saído antes — '
+               + 'voltaram para a lista, então não estavam resolvidos.' : '')
+        : ' Ainda só existe um retrato no histórico, então não há com o que comparar.')
       + '</div></div>';
   }
 
@@ -15778,7 +15827,7 @@ function arjSlideHTML(op){
 
 function arjGerar(){
   var titulo = (document.getElementById('arj-titulo') || {}).value || 'Rejeite de Pedidos';
-  var sub    = (document.getElementById('arj-subtitulo') || {}).value || 'BPO de Compras · ADLV';
+  var sub    = (document.getElementById('arj-subtitulo') || {}).value || 'BPO de Compras · DPV';
   var data   = (document.getElementById('arj-data') || {}).value || cpHojeISO();
   var op = {
     ini: (document.getElementById('arj-ini') || {}).value || '',
@@ -15786,42 +15835,72 @@ function arjGerar(){
     incVisao: !!(document.getElementById('arj-inc-visao') || {}).checked,
     incSup:   !!(document.getElementById('arj-inc-sup') || {}).checked,
     incForn:  !!(document.getElementById('arj-inc-forn') || {}).checked,
-    incSla:   !!(document.getElementById('arj-inc-sla') || {}).checked
+    incSla:   !!(document.getElementById('arj-inc-sla') || {}).checked,
+    data: data
   };
   var r = arjSlideHTML(op);
-  var html = '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">'
-    + '<title>' + _arjEsc(titulo) + ' — ' + _arjBR(data) + '</title><style>'
-    + '*{margin:0;padding:0;box-sizing:border-box}'
-    + "body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;color:#1a1a2e}"
-    + '.page{width:1200px;background:#fff;margin:0 auto 24px;box-shadow:0 4px 32px rgba(0,0,0,.15);overflow:hidden}'
-    + '.hdr{background:linear-gradient(90deg,#7a1414 0%,#a82020 60%,#c62828 100%);padding:10px 20px;'
-    +   'display:flex;align-items:center;justify-content:space-between}'
-    + '.hdr-title{color:#fff;font-size:20px;font-weight:700;letter-spacing:.3px}'
-    + '.hdr-right{text-align:right;color:rgba(255,255,255,.9)}'
-    + '.hdr-right .brand{font-size:22px;font-weight:900;letter-spacing:-1px}'
-    + '.hdr-right .sub{font-size:10px;opacity:.8;margin-top:1px}'
-    + '.body{padding:12px 18px;display:grid;gap:14px}'
-    + '.sec-title{font-size:10px;font-weight:700;color:#7a1414;text-transform:uppercase;'
-    +   'letter-spacing:.8px;border-bottom:2px solid #7a1414;padding-bottom:3px;margin-bottom:8px}'
-    + '.mcard{border-radius:6px;padding:8px 10px;border:1.5px solid #555;background:#fafbfc;text-align:center}'
-    + '.mcard-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;'
-    +   'margin-bottom:3px;color:#444}'
-    + '.mcard-val{font-size:30px;font-weight:800;line-height:1.05;margin-bottom:2px}'
-    + '.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}'
-    + '.gov-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}'
-    + '.gov-lbl{font-size:10px;font-weight:600;color:#333;width:230px;flex-shrink:0}'
-    + '.gov-bar-wrap{flex:1;background:#f0f0f0;border-radius:4px;height:14px;overflow:hidden}'
-    + '.gov-bar{height:100%;border-radius:4px}'
-    + '.gov-cnt{font-size:11px;font-weight:700;color:#333;width:72px;text-align:right;flex-shrink:0}'
-    + '.rodape{padding:6px 20px 12px;font-size:9.5px;color:#8a94a6;text-align:right}'
-    + '@media print{body{background:#fff}.page{box-shadow:none;margin:0}}'
-    + '</style></head><body><div class="page">'
-    + '<div class="hdr"><div class="hdr-title">' + _arjEsc(titulo)
-    +   ' <span style="font-weight:400;opacity:.85;font-size:14px">· ' + _arjBR(data) + '</span></div>'
-    + '<div class="hdr-right"><div class="brand">GTO</div><div class="sub">' + _arjEsc(sub) + '</div></div></div>'
+  var per = r.dados.serie.length
+    ? _arjBR(r.dados.serie[0].dia) + ' a ' + _arjBR(r.dados.serie[r.dados.serie.length - 1].dia)
+    : _arjBR(data);
+
+  // O CSS é o mesmo do slide do PATEC: faixa verde, cards de borda cinza,
+  // barras, rodapé verde e a marca "level". Um slide com outra cara, na
+  // mesma reunião, parece outro assunto — e não é.
+  var html = '<!DOCTYPE html>\n<html lang="pt-BR">\n<head>\n<meta charset="UTF-8">\n'
+    + '<title>' + _arjEsc(titulo) + ' — ' + _arjBR(data) + '</title>\n<style>\n'
+    + '*{margin:0;padding:0;box-sizing:border-box}\n'
+    + "body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;color:#1a1a2e}\n"
+    + '.page{width:1200px;background:#fff;margin:0 auto 24px;padding:0;'
+    +   'box-shadow:0 4px 32px rgba(0,0,0,.15);position:relative;overflow:hidden}\n'
+    + '.hdr{background:linear-gradient(90deg,#1b5e20 0%,#2e7d32 60%,#388e3c 100%);'
+    +   'padding:10px 20px;display:flex;align-items:center;justify-content:space-between}\n'
+    + '.hdr-title{color:#fff;font-size:20px;font-weight:700;letter-spacing:.3px}\n'
+    + '.hdr-right{text-align:right;color:rgba(255,255,255,.9)}\n'
+    + '.hdr-right .brand{font-size:22px;font-weight:900;letter-spacing:-1px}\n'
+    + '.hdr-right .sub{font-size:10px;opacity:.8;margin-top:1px}\n'
+    + '.body{padding:8px 16px;display:grid;gap:8px}\n'
+    + '.sec-title{font-size:10px;font-weight:700;color:#1b5e20;text-transform:uppercase;'
+    +   'letter-spacing:.8px;border-bottom:2px solid #1b5e20;padding-bottom:3px;margin-bottom:7px}\n'
+    + '.mapa-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}\n'
+    + '.mcard{border-radius:6px;padding:6px 8px;border:1px solid #555 !important;'
+    +   'background:#f5f5f5 !important;text-align:center;display:flex;flex-direction:column;'
+    +   'justify-content:center}\n'
+    + '.mcard-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;'
+    +   'margin-bottom:3px;color:#1a1a1a !important}\n'
+    + '.mcard-val{font-size:20px;font-weight:800;line-height:1;margin-bottom:1px;'
+    +   'color:#1a1a1a !important}\n'
+    + '.mcard-sub{font-size:10px;color:#777}\n'
+    + '.two-col{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start}\n'
+    + '.col-tit{font-size:11px;font-weight:700;text-transform:uppercase;color:#555;margin-bottom:6px}\n'
+    + '.gov-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}\n'
+    + '.gov-lbl{font-size:10px;font-weight:600;color:#333;width:230px;flex-shrink:0}\n'
+    + '.gov-bar-wrap{flex:1;background:#f0f0f0;border-radius:4px;height:14px;overflow:hidden}\n'
+    + '.gov-bar{height:100%;border-radius:4px}\n'
+    + '.gov-cnt{font-size:11px;font-weight:700;color:#333;width:96px;text-align:right;flex-shrink:0}\n'
+    + '.nota{font-size:10px;color:#777;margin-top:6px}\n'
+    + '.ftr{background:#1b5e20;padding:7px 28px;display:flex;justify-content:space-between;'
+    +   'align-items:center;margin-top:10px}\n'
+    + '.ftr-txt{color:rgba(255,255,255,.7);font-size:9px}\n'
+    + '@media print{body{background:#fff}.page{box-shadow:none;margin:0;width:100%;'
+    +   'page-break-after:always}.no-print{display:none!important}@page{size:A4 landscape;margin:5mm}}\n'
+    + '</style>\n</head>\n<body>\n'
+    + '<div class="no-print" style="text-align:center;padding:8px;background:#1b5e20">'
+    +   '<button onclick="window.print()" style="background:#fff;color:#1b5e20;border:none;'
+    +     'padding:10px 32px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;'
+    +     'margin-right:12px">🖨️ Imprimir / Salvar PDF</button>'
+    +   '<span style="color:rgba(255,255,255,.8);font-size:12px">Configure sua impressora para '
+    +     'A4 Paisagem · Sem margens</span></div>'
+    + '<div class="page">'
+    + '<div class="hdr"><div>'
+    +   '<div class="hdr-title">' + _arjEsc(titulo) + ' em <span>' + _arjBR(data) + '</span></div>'
+    +   '<div style="color:rgba(255,255,255,.75);font-size:11px;margin-top:2px">'
+    +     _arjEsc(sub) + ' &nbsp;·&nbsp; Período: ' + per + '</div></div>'
+    + '<div class="hdr-right"><div class="brand">level</div>'
+    +   '<div class="sub">Rejeite de Pedidos · ADLV</div></div></div>'
     + '<div class="body">' + r.html + '</div>'
-    + '<div class="rodape">Fontes: medição e levelboard (Controle de Pedidos) · planilha do Rodrigo · '
-    +   'planilha de rejeitados. Gerado em ' + _arjBR(cpHojeISO()) + '.</div>'
+    + '<div class="ftr"><div class="ftr-txt">Rejeite de Pedidos · Gestão de Compras · '
+    +   _arjBR(data) + '</div>'
+    + '<div class="ftr-txt">Gerado em ' + new Date().toLocaleString('pt-BR') + '</div></div>'
     + '</div></body></html>';
   var blob = new Blob([html], { type:'text/html' });
   window.open(URL.createObjectURL(blob), '_blank');
@@ -15875,6 +15954,14 @@ async function arjAbrir(){
   } catch (e) { console.warn('arjAbrir:', e); }
   var dt = document.getElementById('arj-data');
   if (dt && !dt.value) dt.value = cpHojeISO();
+
+  // Dia sem upload deixaria buraco na linha. Abrir a tela grava o retrato
+  // de hoje se ainda não existir — repete o número da véspera, o que é
+  // honesto: nada mudou porque nada foi atualizado.
+  try {
+    if (!(_rjHist.dias || {})[cpHojeISO()]) await rjHistGravar();
+  } catch (e) { console.warn('arjAbrir gravar hoje:', e); }
+
   if (av) av.innerHTML = '';
   arjDesenharResumo();
 }
@@ -15919,13 +16006,41 @@ function arjDesenharResumo(){
     +     'border-radius:10px;padding:.7rem .9rem;text-align:center">'
     +     '<div style="font-size:9px;font-weight:700;color:var(--tx2)">% RESOLVIDOS</div>'
     +     '<div style="font-size:24px;font-weight:800;color:var(--azm)">'
-    +       (d.resolvidos ? String(d.resolvidos.pct).replace('.', ',') + '%' : '—') + '</div>'
+    +       (d.mov ? String(d.mov.pct).replace('.', ',') + '%' : '—') + '</div>'
     +     '<div style="font-size:10px;color:var(--tx2)">'
-    +       (d.resolvidos ? 'desde ' + cpDataBR(d.resolvidos.de) : 'preciso de 2 dias') + '</div></div>'
+    +       (d.mov ? cpNum(d.mov.saiu) + ' dos ' + cpNum(d.mov.base) + ' de '
+                     + cpDataBR(d.mov.de)
+                   : 'preciso de 2 dias') + '</div></div>'
     + '</div>';
+
+  if (d.mov) {
+    var m = d.mov;
+    h += '<div style="border:1px solid var(--brd);border-radius:10px;background:var(--cin);'
+      +   'padding:.7rem .9rem;margin-bottom:.9rem;font-size:12px;line-height:1.9">'
+      +   '<div style="font-weight:700;color:var(--tx);font-size:11.5px;margin-bottom:4px">'
+      +     'O movimento entre ' + cpDataBR(m.de) + ' e ' + cpDataBR(m.ate) + '</div>'
+      +   '<div><strong>' + cpNum(m.base) + '</strong> havia no retrato anterior · '
+      +     '<strong style="color:var(--vd)">−' + cpNum(m.saiu) + '</strong> saíram ('
+      +     String(m.pct).replace('.', ',') + '% da base anterior) · '
+      +     '<strong style="color:var(--vm)">+' + cpNum(m.entrou) + '</strong> entraram · '
+      +     '<strong>' + cpNum(m.hoje) + '</strong> hoje</div>'
+      +   (m.voltaram
+         ? '<div style="color:var(--am)">⚠ ' + cpNum(m.voltaram) + ' dos que entraram já tinham '
+           + 'saído antes: voltaram para a lista, então não estavam resolvidos.</div>' : '')
+      +   '<div style="font-size:10.5px;color:var(--tx2)">A base não é congelada — por isso o '
+      +     'percentual é sempre sobre a base ANTERIOR, nunca sobre a de hoje. '
+      +     (m.fecha ? 'A conta fecha: ' + cpNum(m.base) + ' − ' + cpNum(m.saiu) + ' + '
+                       + cpNum(m.entrou) + ' = ' + cpNum(m.hoje) + '.'
+                     : '')
+      +   '</div></div>';
+  }
 
   h += '<div style="font-size:11.5px;color:var(--tx2);line-height:1.8;background:var(--cin);'
     +   'border:1px solid var(--brd);border-radius:8px;padding:.6rem .8rem">'
+    +   '<div><strong style="color:var(--tx)">Como eu sei que um item foi tratado</strong> — '
+    +     'ele sai da lista. No Supervisor, deixa de ser STATUS_PROCESSO 8 na medição; no '
+    +     'Fornecedor, some da planilha de rejeitados. É o único sinal que os arquivos dão: '
+    +     'nenhum dos dois tem um campo dizendo "resolvido".</div>'
     +   '<div><strong style="color:var(--tx)">Histórico</strong> — '
     +     (serie.length
         ? cpNum(serie.length) + ' dia(s) gravado(s), de ' + cpDataBR(serie[0].dia)
@@ -16043,6 +16158,62 @@ function rjHistSerie(ini, fim){
     return { dia:d, forn:+f.n || 0, sup:+s.n || 0, total:(+f.n || 0) + (+s.n || 0),
              lv:+s.lv || 0, pb:+s.pb || 0, sem:+s.sem || 0 };
   });
+}
+
+// ── o movimento entre dois retratos ──────────────────────────────
+// A base não é congelada: entre um upload e outro entram itens novos e
+// saem outros. Um "% resolvidos" sozinho esconde isso — 30% resolvidos
+// com o total subindo de 10 para 12 confunde quem lê.
+//
+// Por isso a conta é a identidade que sempre fecha:
+//     base anterior − saíram + entraram = base de hoje
+// O percentual sai sobre a BASE ANTERIOR, nunca sobre a de hoje: assim
+// quem entrou depois não dilui nem infla quem foi tratado.
+//
+// E conto à parte os que VOLTARAM: item que saiu num retrato e reapareceu
+// depois não foi resolvido coisa nenhuma — contá-lo como resolvido sem
+// dizer que voltou seria maquiar o indicador.
+function rjHistMovimento(fim){
+  var ds = Object.keys(_rjHist.dias || {}).sort().filter(function(d){ return !fim || d <= fim; });
+  if (ds.length < 2) return null;
+  var chavesDe = function(o){
+    if (!o) return null;
+    var f = (o.f && o.f.chaves) || [], s2 = (o.s && o.s.chaves) || [];
+    if (!f.length && !s2.length) return null;
+    var m = {};
+    f.forEach(function(k){ m['F' + k] = 1; });
+    s2.forEach(function(k){ m['S' + k] = 1; });
+    return m;
+  };
+  var hoje = chavesDe(_rjHist.dias[ds[ds.length - 1]]);
+  if (!hoje) return null;
+  var ant = null, dAnt = '', iAnt = -1;
+  for (var i = ds.length - 2; i >= 0; i--) {
+    var c = chavesDe(_rjHist.dias[ds[i]]);
+    if (c) { ant = c; dAnt = ds[i]; iAnt = i; break; }
+  }
+  if (!ant) return null;
+
+  var kAnt = Object.keys(ant), kHoje = Object.keys(hoje);
+  var saiu = kAnt.filter(function(k){ return !hoje[k]; });
+  var entrou = kHoje.filter(function(k){ return !ant[k]; });
+
+  // dos que entraram, quais já tinham estado na lista em algum retrato antigo
+  var jaVistos = {};
+  for (var j = 0; j < iAnt; j++) {
+    var c2 = chavesDe(_rjHist.dias[ds[j]]);
+    if (c2) Object.keys(c2).forEach(function(k){ jaVistos[k] = 1; });
+  }
+  var voltaram = entrou.filter(function(k){ return jaVistos[k]; });
+
+  return {
+    de:dAnt, ate:ds[ds.length - 1],
+    base:kAnt.length, saiu:saiu.length, entrou:entrou.length, hoje:kHoje.length,
+    ficaram: kAnt.length - saiu.length,
+    voltaram: voltaram.length,
+    pct: kAnt.length ? Math.round(saiu.length / kAnt.length * 1000) / 10 : 0,
+    fecha: (kAnt.length - saiu.length + entrou.length) === kHoje.length
+  };
 }
 
 // Quantos dos itens do retrato anterior já não estão mais na lista.
