@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/10 02:05';
+var GTO_BUILD = '14/10 02:48';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -50740,9 +50740,31 @@ async function _gnvBuscaAnexar(rcBusca, el){
   if (!el || !rcBusca) return;
   await _gnvGarantirDados();
 
-  var achados = _gnvBase.filter(function(r){
+  var todos = _gnvBase.filter(function(r){
     return String(r.rc || '').indexOf(String(rcBusca).trim()) !== -1;
   });
+  // O que já foi concluído some da busca. A busca é para ACHAR O CARD EM
+  // QUE SE ATUA; card concluído ali no meio só atrapalha na hora de decidir
+  // onde clicar. Quem foi concluído está na aba Concluídos — e é o mesmo
+  // critério que manda na aba, para as duas telas nunca discordarem.
+  var achados = todos.filter(function(r){ return !_gnvEhConcluido(r); });
+  var ocultos = todos.length - achados.length;
+
+  // A RC existe, mas tudo o que ela tem já está concluído. Isso precisa
+  // ser dito: sumir calado faria parecer que a RC não existe na base.
+  if (!achados.length && ocultos) {
+    var vz0 = el.querySelector('[data-gnv-vazio]');
+    if (vz0) vz0.remove();
+    var antes0 = el.querySelector('#gnv-busca-bloco');
+    if (antes0) antes0.remove();
+    var d0 = document.createElement('div');
+    d0.id = 'gnv-busca-bloco';
+    d0.innerHTML = _gnvBuscaConcluidosHTML(ocultos, rcBusca);
+    el.appendChild(d0);
+    el.style.display = 'block';
+    return;
+  }
+
   if (!achados.length) {
     // a RC existe na Governança mas ainda não entrou na planilha desta aba:
     // é melhor dizer isso do que só "nenhum resultado"
@@ -50762,11 +50784,40 @@ async function _gnvBuscaAnexar(rcBusca, el){
 
   var div = document.createElement('div');
   div.id = 'gnv-busca-bloco';
-  div.innerHTML = _gnvBuscaHtml(achados, rcBusca);
+  div.innerHTML = _gnvBuscaHtml(achados, rcBusca)
+    + (ocultos ? _gnvBuscaConcluidosHTML(ocultos, rcBusca, true) : '');
   var antigo = el.querySelector('#gnv-busca-bloco');
   if (antigo) antigo.remove();
   el.appendChild(div);
   el.style.display = 'block';
+}
+
+// O recado dos que ficaram de fora — e o caminho para vê-los.
+function _gnvBuscaConcluidosHTML(n, rcBusca, rodape){
+  var rc = String(rcBusca || '').trim();
+  return '<div style="border:1.5px dashed var(--brd);border-radius:9px;padding:.6rem .8rem;'
+    + 'margin:' + (rodape ? '2px 0 9px' : '10px 0 9px') + ';background:var(--cin);'
+    + 'display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+    + '<span style="font-size:11.5px;color:var(--tx2)">✅ <strong>' + n + '</strong> item(ns) da RC '
+    +   '<strong>' + _cobEsc(rc) + '</strong> ' + (n > 1 ? 'já saíram' : 'já saiu')
+    +   ' da lista de trabalho (concluído ou fora da planilha)'
+    +   (rodape ? ' — por isso não ' + (n > 1 ? 'aparecem' : 'aparece') + ' aqui em cima.' : '.')
+    + '</span>'
+    + '<button class="btn btn-s" style="font-size:11px;margin-left:auto"'
+    +   ' onclick="gnvVerConcluidos(\'' + _cobEsc(rc).replace(/'/g, '') + '\')">'
+    +   '✅ Ver na aba Concluídos</button></div>';
+}
+
+// Leva para a aba Concluídos já filtrada por esta RC.
+function gnvVerConcluidos(rc){
+  try {
+    if (typeof gnvSetAba === 'function') gnvSetAba('concluidos', null);
+    var cx = document.getElementById('gnv-filtro-texto');
+    if (cx) cx.value = rc || '';
+    if (typeof gnvBuscar === 'function') gnvBuscar(rc || '');
+    var alvo = document.getElementById('gnv-aba-concluidos') || document.getElementById('gnv-cards');
+    if (alvo && alvo.scrollIntoView) alvo.scrollIntoView({ behavior:'smooth', block:'center' });
+  } catch (e) { console.warn('gnvVerConcluidos:', e); }
 }
 
 function _gnvBuscaHtml(achados, rcBusca){
