@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/10 07:35';
+var GTO_BUILD = '14/10 09:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -784,6 +784,50 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
     <div class="page" id="p-pedidos">
       <div id="pedidos-aviso-config"></div>
       <div id="pedidos-conteudo"></div>
+    </div>
+
+    <!-- ══ APRESENTAÇÃO — REJEITE (fornecedor + supervisor) ══ -->
+    <div class="page" id="p-apres-rejeite">
+      <div class="cd">
+        <div class="cd-t">🖥️ Gerador de Slide — Rejeite de Pedidos</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;margin-bottom:1.1rem">
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--tx2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">🏷️ Identificação</div>
+            <div style="font-size:11px;color:var(--tx2);margin-bottom:3px">Título</div>
+            <input type="text" id="arj-titulo" value="Rejeite de Pedidos" style="width:100%;font-size:12px;padding:5px 10px;margin-bottom:8px">
+            <div style="font-size:11px;color:var(--tx2);margin-bottom:3px">Subtítulo / Área</div>
+            <input type="text" id="arj-subtitulo" value="BPO de Compras · ADLV" style="width:100%;font-size:12px;padding:5px 10px;margin-bottom:8px">
+            <div style="font-size:11px;color:var(--tx2);margin-bottom:3px">Data de referência</div>
+            <input type="date" id="arj-data" style="width:100%;font-size:12px;padding:5px 10px">
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--tx2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">📅 Evolução</div>
+            <div style="font-size:11px;color:var(--tx2);margin-bottom:3px">De</div>
+            <input type="date" id="arj-ini" style="width:100%;font-size:12px;padding:5px 10px;margin-bottom:8px">
+            <div style="font-size:11px;color:var(--tx2);margin-bottom:3px">Até</div>
+            <input type="date" id="arj-fim" style="width:100%;font-size:12px;padding:5px 10px;margin-bottom:8px">
+            <div style="font-size:10.5px;color:var(--tx2);line-height:1.6">
+              Em branco, uso tudo que houver no histórico.
+            </div>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--tx2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">📋 Seções do slide</div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-visao" checked> Visão geral + evolução</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-sup" checked> Detalhe — Rejeite Supervisor</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-forn" checked> Detalhe — Rejeite Fornecedor</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-sla" checked> SLA e % resolvidos</label>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-p" onclick="arjGerar()" style="flex:1;justify-content:center;font-size:13px;padding:10px">🖨️ Gerar slide</button>
+          <button class="btn btn-s" onclick="arjGravarHoje()">💾 Gravar o dia de hoje</button>
+          <button class="btn btn-s" onclick="arjAbrir()">↻ Atualizar</button>
+        </div>
+        <div id="arj-aviso" style="font-size:12px;margin-top:.7rem"></div>
+      </div>
+      <div id="arj-resumo"></div>
     </div>
 
     <!-- ══════════════════ VISÃO GERAL ══════════════════ -->
@@ -7986,6 +8030,7 @@ function go(id, el) {
   if (id === 'pcp' && typeof pcpAbrir === 'function') setTimeout(pcpAbrir, 60);
   if (id === 'pcp-hist' && typeof pcpHistAbrir === 'function') setTimeout(pcpHistAbrir, 60);
   if (id === 'pcp-fin-proj' && typeof pcpProjAbrir === 'function') setTimeout(pcpProjAbrir, 60);
+  if (id === 'apres-rejeite' && typeof arjAbrir === 'function') setTimeout(arjAbrir, 60);
   // Sai da página do ADM → desliga o tempo real do Controle das Equipes.
   if(id!=='adm' && typeof _cePararRT==='function') _cePararRT();
   // Plano de Ação: liberado para ADLV e FAST (cada módulo usa sua própria
@@ -12049,6 +12094,7 @@ async function cpHandleUpload(file){
     await gpSalvarMemorizados(med, file.name);
     await monSalvarConversao(med, file.name);
     await rjsSalvarMedicao(med, file.name);
+    try { await rjHistGravar(); } catch (e) {}
     try { if (document.getElementById('rj-supervisor')) rjDesenhar(); } catch (e) {}
 
     if (med.aviso && !med.compradores.length) {
@@ -14710,6 +14756,7 @@ async function gpUploadRejeitados(file){
     // mostrar a lista nova sem precisar de F5. Redesenha ANTES do recado —
     // o redesenho troca o innerHTML e levaria o recado junto.
     try { if (document.getElementById('rj-fornecedor')) rjDesenhar(); } catch (e) {}
+    try { await rjHistGravar(); } catch (e) {}
     st = document.getElementById('gp-rej-status');
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ <strong>' + cpEsc(file.name) + '</strong> — '
       + cpNum(r.lidas) + ' linhas, <strong>' + cpNum(r.itens.length) + '</strong> dos nossos grupos · '
@@ -15342,6 +15389,7 @@ async function rjsUploadRodrigo(file){
       var db = getDB();
       if (db) { await db.collection('config').doc('rejeite_sup_rodrigo').set(_rjsRod); ok = true; }
     } catch (e2) { console.warn('rjsUploadRodrigo gravar:', e2); }
+    try { await rjHistGravar(); } catch (e) {}
     rjDesenhar();
     st = document.getElementById('rjs-rod-status');
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ <strong>' + cpEsc(file.name) + '</strong> — '
@@ -15475,6 +15523,552 @@ var RJS_COLS = [
   ['Padrão rejeição', 'padrao'], ['Justificativa', 'justificativa']
 ];
 
+
+
+
+// ══════════════════ APRESENTAÇÃO — REJEITE ═══════════════════════
+// Mesmo formato do slide do PATEC no ADLV: uma página de 1200px por
+// seção, cabeçalho em faixa, cards grandes e gráfico. Aqui o conteúdo
+// são os dois cards de rejeite — Fornecedor e Supervisor — somados,
+// detalhados e com a evolução.
+//
+// Os gráficos são SVG escrito à mão de propósito: o slide abre numa
+// janela em branco (blob), e depender de CDN ali é a diferença entre
+// abrir a apresentação e olhar para um retângulo vazio na reunião.
+
+function _arjEsc(v){
+  return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c];
+  });
+}
+function _arjN(v){ return cpNum(v == null ? 0 : v); }
+function _arjBR(d){ return d ? String(d).split('-').reverse().join('/') : ''; }
+
+// ── gráfico de linhas ─────────────────────────────────────────────
+function arjGrafLinhas(serie, series, op){
+  op = op || {};
+  var L = op.largura || 1120, A = op.altura || 250;
+  var mE = 44, mD = 14, mT = 16, mB = 34;
+  if (!serie.length) {
+    return '<div style="font-size:12px;color:#777;padding:20px;text-align:center">'
+      + 'Sem histórico ainda. Cada upload grava o dia — a evolução aparece a partir do segundo.</div>';
+  }
+  var max = 0;
+  serie.forEach(function(p){ series.forEach(function(s){ if (p[s.campo] > max) max = p[s.campo]; }); });
+  max = Math.max(1, Math.ceil(max * 1.15 / 5) * 5);
+  var lx = L - mE - mD, ly = A - mT - mB;
+  var px = function(i){ return mE + (serie.length === 1 ? lx / 2 : (i / (serie.length - 1)) * lx); };
+  var py = function(v){ return mT + ly - (v / max) * ly; };
+
+  var h = '<svg viewBox="0 0 ' + L + ' ' + A + '" style="width:100%;height:auto;display:block">';
+  for (var g = 0; g <= 4; g++) {
+    var vy = mT + (g / 4) * ly, vv = Math.round(max - (g / 4) * max);
+    h += '<line x1="' + mE + '" y1="' + vy + '" x2="' + (L - mD) + '" y2="' + vy
+      + '" stroke="#e3e8ef" stroke-width="1"/>'
+      + '<text x="' + (mE - 6) + '" y="' + (vy + 4) + '" text-anchor="end" font-size="10" fill="#8a94a6">'
+      + vv + '</text>';
+  }
+  var passo = Math.max(1, Math.ceil(serie.length / 12));
+  serie.forEach(function(p, i){
+    if (i % passo && i !== serie.length - 1) return;
+    h += '<text x="' + px(i) + '" y="' + (A - 12) + '" text-anchor="middle" font-size="10" fill="#8a94a6">'
+      + _arjEsc(p.dia.slice(8, 10) + '/' + p.dia.slice(5, 7)) + '</text>';
+  });
+  series.forEach(function(s){
+    var d = serie.map(function(p, i){ return (i ? 'L' : 'M') + px(i) + ' ' + py(p[s.campo]); }).join(' ');
+    h += '<path d="' + d + '" fill="none" stroke="' + s.cor + '" stroke-width="2.5" '
+      + 'stroke-linejoin="round" stroke-linecap="round"/>';
+    serie.forEach(function(p, i){
+      h += '<circle cx="' + px(i) + '" cy="' + py(p[s.campo]) + '" r="3.2" fill="#fff" stroke="'
+        + s.cor + '" stroke-width="2"/>';
+    });
+    var ult = serie[serie.length - 1];
+    h += '<text x="' + (px(serie.length - 1) - 2) + '" y="' + (py(ult[s.campo]) - 9)
+      + '" text-anchor="end" font-size="11" font-weight="700" fill="' + s.cor + '">'
+      + _arjN(ult[s.campo]) + '</text>';
+  });
+  h += '</svg><div style="display:flex;gap:16px;justify-content:center;margin-top:4px">'
+    + series.map(function(s){
+        return '<span style="font-size:10px;color:#555;display:flex;align-items:center;gap:5px">'
+          + '<span style="width:12px;height:3px;background:' + s.cor + ';border-radius:2px;'
+          + 'display:inline-block"></span>' + _arjEsc(s.nome) + '</span>'; }).join('')
+    + '</div>';
+  return h;
+}
+
+// ── barras horizontais ────────────────────────────────────────────
+function arjBarras(pares, cor, limite){
+  var lista = pares.slice(0, limite || 8);
+  if (!lista.length) return '<div style="font-size:11px;color:#777">Sem itens.</div>';
+  var max = lista[0][1] || 1;
+  return lista.map(function(p){
+    var pc = Math.round((p[1] / max) * 100);
+    return '<div class="gov-row">'
+      + '<div class="gov-lbl" title="' + _arjEsc(p[0]) + '">' + _arjEsc(String(p[0]).slice(0, 48))
+      +   (String(p[0]).length > 48 ? '…' : '') + '</div>'
+      + '<div class="gov-bar-wrap"><div class="gov-bar" style="width:' + pc + '%;background:'
+      +   cor + '"></div></div>'
+      + '<div class="gov-cnt">' + _arjN(p[1]) + '</div></div>';
+  }).join('');
+}
+
+function _arjOrdena(obj){
+  return Object.keys(obj || {}).map(function(k){ return [k, obj[k]]; })
+    .sort(function(a, b){ return b[1] - a[1]; });
+}
+
+// ── o que vai no slide ────────────────────────────────────────────
+function arjDados(ini, fim){
+  var forn = (_gpRej && _gpRej.itens) ? _gpRej.itens.slice() : [];
+  var r = null;
+  try { r = rjsMontar(); } catch (e) { r = { linhas:[], fora:[] }; }
+  var sup = r.linhas;
+  var q = rjsPorCulpa();
+
+  var faixa = function(v){
+    if (v == null) return 'sem SLA';
+    if (v <= 2)  return 'até 2 dias';
+    if (v <= 5)  return '3 a 5 dias';
+    if (v <= 10) return '6 a 10 dias';
+    if (v <= 20) return '11 a 20 dias';
+    return 'mais de 20 dias';
+  };
+  var ORDEM = ['até 2 dias','3 a 5 dias','6 a 10 dias','11 a 20 dias','mais de 20 dias','sem SLA'];
+  var slaSup = {}, slaForn = {};
+  ORDEM.forEach(function(k){ slaSup[k] = 0; slaForn[k] = 0; });
+  var somaS = 0, comS = 0, somaF = 0, comF = 0;
+  sup.forEach(function(l){
+    slaSup[faixa(l.slaPedido)]++;
+    if (l.slaPedido != null) { somaS += (+l.slaPedido || 0); comS++; }
+  });
+  forn.forEach(function(i){
+    var d = (i.dias === '' || i.dias == null) ? null : (+i.dias || 0);
+    slaForn[faixa(d)]++;
+    if (d != null) { somaF += d; comF++; }
+  });
+
+  var motivosForn = {}, gruposForn = {}, foraPrazo = 0;
+  forn.forEach(function(i){
+    motivosForn[i.motivo || '(sem motivo)'] = (motivosForn[i.motivo || '(sem motivo)'] || 0) + 1;
+    gruposForn[i.grupo || '(sem grupo)'] = (gruposForn[i.grupo || '(sem grupo)'] || 0) + 1;
+    if (/FORA/i.test(i.prazo || '')) foraPrazo++;
+  });
+  var padroesSup = {};
+  sup.forEach(function(l){
+    var p = l.padrao || '(sem padrão na planilha)';
+    padroesSup[p] = (padroesSup[p] || 0) + 1;
+  });
+  var compradores = {};
+  sup.forEach(function(l){ if (l.comprador) compradores[l.comprador] = (compradores[l.comprador] || 0) + 1; });
+
+  return {
+    forn:forn, sup:sup, q:q, fora:r.fora.length,
+    total: forn.length + sup.length,
+    serie: rjHistSerie(ini, fim),
+    resolvidos: rjHistResolvidos(fim),
+    slaSup:slaSup, slaForn:slaForn, ordemSla:ORDEM,
+    mediaSup: comS ? Math.round(somaS / comS * 10) / 10 : null,
+    mediaForn: comF ? Math.round(somaF / comF * 10) / 10 : null,
+    motivosForn:_arjOrdena(motivosForn), gruposForn:_arjOrdena(gruposForn),
+    padroesSup:_arjOrdena(padroesSup), compradores:_arjOrdena(compradores),
+    foraPrazo:foraPrazo
+  };
+}
+
+function arjCard(rot, val, sub, cor){
+  return '<div class="mcard" style="border-color:' + cor + ' !important">'
+    + '<div class="mcard-lbl">' + _arjEsc(rot) + '</div>'
+    + '<div class="mcard-val" style="color:' + cor + ' !important">' + _arjEsc(val) + '</div>'
+    + '<div style="font-size:10px;color:#555">' + sub + '</div></div>';
+}
+
+function arjSlideHTML(op){
+  var d = arjDados(op.ini, op.fim);
+  var corF = '#C62828', corS = '#E08A1E', corT = '#1B5E20', corP = '#2F6FB5';
+  var secs = '';
+
+  if (op.incVisao) {
+    secs += '<div><div class="sec-title">Visão geral — pedidos rejeitados</div>'
+      + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">'
+      +   arjCard('Total rejeitado', _arjN(d.total), 'supervisor + fornecedor', corT)
+      +   arjCard('Rejeite Supervisor', _arjN(d.sup.length),
+            _arjN(d.q.level) + ' Level · ' + _arjN(d.q.petro) + ' Petrobras', corS)
+      +   arjCard('Rejeite Fornecedor', _arjN(d.forn.length),
+            _arjN(d.foraPrazo) + ' fora do prazo', corF)
+      +   arjCard('% resolvidos', d.resolvidos ? (String(d.resolvidos.pct).replace('.', ',') + '%') : '—',
+            d.resolvidos
+              ? _arjN(d.resolvidos.saiu) + ' de ' + _arjN(d.resolvidos.base) + ' desde '
+                + _arjBR(d.resolvidos.de)
+              : 'preciso de dois dias no histórico', corP)
+      + '</div>'
+      + '<div class="sec-title" style="margin-top:4px">Evolução</div>'
+      + arjGrafLinhas(d.serie, [
+          { campo:'total', nome:'Total', cor:corT },
+          { campo:'sup',   nome:'Supervisor', cor:corS },
+          { campo:'forn',  nome:'Fornecedor', cor:corF }
+        ]) + '</div>';
+  }
+
+  if (op.incSup) {
+    secs += '<div><div class="sec-title">Rejeite Supervisor — ' + _arjN(d.sup.length) + ' item(ns)</div>'
+      + '<div class="two-col">'
+      +   '<div><div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">'
+      +     'POR PADRÃO DE REJEIÇÃO</div>' + arjBarras(d.padroesSup, corS, 8) + '</div>'
+      +   '<div><div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">'
+      +     'DE QUEM É O ERRO</div>'
+      +     arjBarras([['Erros Level', d.q.level], ['Erros Petrobras', d.q.petro]]
+            .concat(d.q.sem ? [['Sem classificação', d.q.sem]] : []), corS, 3)
+      +     '<div style="font-size:10px;color:#777;margin-top:8px">'
+      +       (d.fora ? '⚠ ' + _arjN(d.fora) + ' item(ns) apontado(s) pelo Rodrigo sem par na medição.'
+                      : '✓ Todo item apontado pelo Rodrigo tem par na medição.')
+      +     '</div>'
+      +     (d.compradores.length
+          ? '<div style="font-size:10px;font-weight:700;color:#555;margin:10px 0 6px">POR COMPRADOR</div>'
+            + arjBarras(d.compradores, corP, 5) : '')
+      +   '</div>'
+      + '</div></div>';
+  }
+
+  if (op.incForn) {
+    secs += '<div><div class="sec-title">Rejeite Fornecedor — ' + _arjN(d.forn.length) + ' pedido(s)</div>'
+      + '<div class="two-col">'
+      +   '<div><div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">'
+      +     'POR MOTIVO DE RECUSA</div>' + arjBarras(d.motivosForn, corF, 8) + '</div>'
+      +   '<div><div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">'
+      +     'POR GRUPO DE COMPRAS</div>' + arjBarras(d.gruposForn, corF, 6) + '</div>'
+      + '</div></div>';
+  }
+
+  if (op.incSla) {
+    var linhaSla = function(mapa, cor, total){
+      return d.ordemSla.filter(function(k){ return mapa[k]; })
+        .map(function(k){ return [k, mapa[k]]; })
+        .map(function(p){
+          var pc = total ? Math.round(p[1] / total * 100) : 0;
+          return '<div class="gov-row"><div class="gov-lbl">' + _arjEsc(p[0]) + '</div>'
+            + '<div class="gov-bar-wrap"><div class="gov-bar" style="width:' + pc
+            +   '%;background:' + cor + '"></div></div>'
+            + '<div class="gov-cnt">' + _arjN(p[1]) + ' · ' + pc + '%</div></div>';
+        }).join('');
+    };
+    secs += '<div><div class="sec-title">SLA do pedido e resolução</div>'
+      + '<div class="two-col">'
+      +   '<div><div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">'
+      +     'SUPERVISOR — TEMPO DESDE O ENVIO DO COCKPIT'
+      +     (d.mediaSup != null ? ' · média ' + String(d.mediaSup).replace('.', ',') + ' dias' : '')
+      +     '</div>' + linhaSla(d.slaSup, corS, d.sup.length) + '</div>'
+      +   '<div><div style="font-size:10px;font-weight:700;color:#555;margin-bottom:6px">'
+      +     'FORNECEDOR — DIAS REJEITADO'
+      +     (d.mediaForn != null ? ' · média ' + String(d.mediaForn).replace('.', ',') + ' dias' : '')
+      +     '</div>' + linhaSla(d.slaForn, corF, d.forn.length) + '</div>'
+      + '</div>'
+      + '<div style="font-size:10px;color:#777;margin-top:8px">'
+      +   (d.resolvidos
+        ? 'Resolvido = item que estava na lista em ' + _arjBR(d.resolvidos.de)
+          + ' e não está mais em ' + _arjBR(d.resolvidos.ate) + ': '
+          + _arjN(d.resolvidos.saiu) + ' de ' + _arjN(d.resolvidos.base) + ' ('
+          + String(d.resolvidos.pct).replace('.', ',') + '%).'
+        : 'O percentual de resolvidos compara o retrato de hoje com o retrato anterior. '
+          + 'Ainda só existe um retrato no histórico.')
+      + '</div></div>';
+  }
+
+  return { html: secs, dados: d };
+}
+
+function arjGerar(){
+  var titulo = (document.getElementById('arj-titulo') || {}).value || 'Rejeite de Pedidos';
+  var sub    = (document.getElementById('arj-subtitulo') || {}).value || 'BPO de Compras · ADLV';
+  var data   = (document.getElementById('arj-data') || {}).value || cpHojeISO();
+  var op = {
+    ini: (document.getElementById('arj-ini') || {}).value || '',
+    fim: (document.getElementById('arj-fim') || {}).value || '',
+    incVisao: !!(document.getElementById('arj-inc-visao') || {}).checked,
+    incSup:   !!(document.getElementById('arj-inc-sup') || {}).checked,
+    incForn:  !!(document.getElementById('arj-inc-forn') || {}).checked,
+    incSla:   !!(document.getElementById('arj-inc-sla') || {}).checked
+  };
+  var r = arjSlideHTML(op);
+  var html = '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">'
+    + '<title>' + _arjEsc(titulo) + ' — ' + _arjBR(data) + '</title><style>'
+    + '*{margin:0;padding:0;box-sizing:border-box}'
+    + "body{font-family:'Segoe UI',Arial,sans-serif;background:#eef2f7;color:#1a1a2e}"
+    + '.page{width:1200px;background:#fff;margin:0 auto 24px;box-shadow:0 4px 32px rgba(0,0,0,.15);overflow:hidden}'
+    + '.hdr{background:linear-gradient(90deg,#7a1414 0%,#a82020 60%,#c62828 100%);padding:10px 20px;'
+    +   'display:flex;align-items:center;justify-content:space-between}'
+    + '.hdr-title{color:#fff;font-size:20px;font-weight:700;letter-spacing:.3px}'
+    + '.hdr-right{text-align:right;color:rgba(255,255,255,.9)}'
+    + '.hdr-right .brand{font-size:22px;font-weight:900;letter-spacing:-1px}'
+    + '.hdr-right .sub{font-size:10px;opacity:.8;margin-top:1px}'
+    + '.body{padding:12px 18px;display:grid;gap:14px}'
+    + '.sec-title{font-size:10px;font-weight:700;color:#7a1414;text-transform:uppercase;'
+    +   'letter-spacing:.8px;border-bottom:2px solid #7a1414;padding-bottom:3px;margin-bottom:8px}'
+    + '.mcard{border-radius:6px;padding:8px 10px;border:1.5px solid #555;background:#fafbfc;text-align:center}'
+    + '.mcard-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;'
+    +   'margin-bottom:3px;color:#444}'
+    + '.mcard-val{font-size:30px;font-weight:800;line-height:1.05;margin-bottom:2px}'
+    + '.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}'
+    + '.gov-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}'
+    + '.gov-lbl{font-size:10px;font-weight:600;color:#333;width:230px;flex-shrink:0}'
+    + '.gov-bar-wrap{flex:1;background:#f0f0f0;border-radius:4px;height:14px;overflow:hidden}'
+    + '.gov-bar{height:100%;border-radius:4px}'
+    + '.gov-cnt{font-size:11px;font-weight:700;color:#333;width:72px;text-align:right;flex-shrink:0}'
+    + '.rodape{padding:6px 20px 12px;font-size:9.5px;color:#8a94a6;text-align:right}'
+    + '@media print{body{background:#fff}.page{box-shadow:none;margin:0}}'
+    + '</style></head><body><div class="page">'
+    + '<div class="hdr"><div class="hdr-title">' + _arjEsc(titulo)
+    +   ' <span style="font-weight:400;opacity:.85;font-size:14px">· ' + _arjBR(data) + '</span></div>'
+    + '<div class="hdr-right"><div class="brand">GTO</div><div class="sub">' + _arjEsc(sub) + '</div></div></div>'
+    + '<div class="body">' + r.html + '</div>'
+    + '<div class="rodape">Fontes: medição e levelboard (Controle de Pedidos) · planilha do Rodrigo · '
+    +   'planilha de rejeitados. Gerado em ' + _arjBR(cpHojeISO()) + '.</div>'
+    + '</div></body></html>';
+  var blob = new Blob([html], { type:'text/html' });
+  window.open(URL.createObjectURL(blob), '_blank');
+  return html;
+}
+
+// ── a tela ────────────────────────────────────────────────────────
+async function arjAbrir(){
+  var av = document.getElementById('arj-aviso');
+  if (av) av.innerHTML = '⏳ Carregando as bases...';
+  try {
+    var db = getDB();
+    if (db) {
+      var docs = await Promise.all([
+        db.collection('config').doc('governanca_rejeitados').get(),
+        db.collection('config').doc('rejeite_sup_medicao').get(),
+        db.collection('config').doc('rejeite_sup_sla').get(),
+        db.collection('config').doc('rejeite_sup_rodrigo').get(),
+        db.collection('config').doc(RJH_DOC).get()
+      ]);
+      if (docs[0] && docs[0].exists) {
+        var R = docs[0].data() || {};
+        _gpRej = { itens:R.itens || [], arquivo:R.arquivo || '', aba:R.aba || '',
+                   lidas:+R.lidas || 0, fora:+R.fora || 0, grupos:R.grupos || {},
+                   atualizadoEm:R.atualizadoEm || '', atualizadoPor:R.atualizadoPor || '' };
+      }
+      if (docs[1] && docs[1].exists) {
+        var M = docs[1].data() || {};
+        _rjsMed = { itens:M.itens || [], linhas:+M.linhas || 0, chaves:+M.chaves || 0,
+                    posUsadas:M.posUsadas || [], pedidos:M.pedidos || {},
+                    cabecalho:M.cabecalho || [], comBruto:+M.comBruto || 0,
+                    arquivo:M.arquivo || '', atualizadoEm:M.atualizadoEm || '' };
+      }
+      if (docs[2] && docs[2].exists) {
+        var S = docs[2].data() || {};
+        _rjsSla = { itens:S.itens || {}, chaves:+S.chaves || 0, cortou:!!S.cortou,
+                    arquivo:S.arquivo || '', atualizadoEm:S.atualizadoEm || '' };
+      }
+      if (docs[3] && docs[3].exists) {
+        var D = docs[3].data() || {};
+        _rjsRod = { cockpit:D.cockpit || {}, motivos:D.motivos || {},
+                    nCockpit:+D.nCockpit || 0, nMotivos:+D.nMotivos || 0,
+                    nDados:+D.nDados || 0, foraDoCockpit:+D.foraDoCockpit || 0,
+                    abas:D.abas || {}, arquivo:D.arquivo || '', atualizadoEm:D.atualizadoEm || '' };
+      }
+      if (docs[4] && docs[4].exists) {
+        var H = docs[4].data() || {};
+        _rjHist = { dias:H.dias || {}, atualizadoEm:H.atualizadoEm || '' };
+      }
+    }
+  } catch (e) { console.warn('arjAbrir:', e); }
+  var dt = document.getElementById('arj-data');
+  if (dt && !dt.value) dt.value = cpHojeISO();
+  if (av) av.innerHTML = '';
+  arjDesenharResumo();
+}
+
+async function arjGravarHoje(){
+  var av = document.getElementById('arj-aviso');
+  if (av) av.innerHTML = '⏳ Gravando o retrato de hoje...';
+  var ok = await rjHistGravar();
+  if (av) {
+    av.innerHTML = ok
+      ? '<span style="color:var(--vd)">✓ Retrato de ' + cpDataBR(cpHojeISO()) + ' gravado.</span>'
+      : '<span style="color:var(--am)">Não gravei: as bases ainda estão vazias nesta frente, '
+        + 'ou o Firebase recusou.</span>';
+  }
+  arjDesenharResumo();
+}
+
+function arjDesenharResumo(){
+  var box = document.getElementById('arj-resumo');
+  if (!box) return;
+  var d = arjDados('', '');
+  var serie = d.serie;
+  var h = '<div class="cd"><div class="cd-t">O que vai no slide</div>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:.9rem">'
+    +   '<div style="flex:1;min-width:140px;background:var(--vdc);border:1px solid var(--vd);'
+    +     'border-radius:10px;padding:.7rem .9rem;text-align:center">'
+    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2)">TOTAL REJEITADO</div>'
+    +     '<div style="font-size:24px;font-weight:800;color:var(--vd)">' + cpNum(d.total) + '</div>'
+    +     '<div style="font-size:10px;color:var(--tx2)">supervisor + fornecedor</div></div>'
+    +   '<div style="flex:1;min-width:140px;background:var(--amc);border:1px solid var(--am);'
+    +     'border-radius:10px;padding:.7rem .9rem;text-align:center">'
+    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2)">SUPERVISOR</div>'
+    +     '<div style="font-size:24px;font-weight:800;color:var(--am)">' + cpNum(d.sup.length) + '</div>'
+    +     '<div style="font-size:10px;color:var(--tx2)">' + cpNum(d.q.level) + ' Level · '
+    +       cpNum(d.q.petro) + ' Petrobras</div></div>'
+    +   '<div style="flex:1;min-width:140px;background:var(--vmc);border:1px solid var(--vm);'
+    +     'border-radius:10px;padding:.7rem .9rem;text-align:center">'
+    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2)">FORNECEDOR</div>'
+    +     '<div style="font-size:24px;font-weight:800;color:var(--vm)">' + cpNum(d.forn.length) + '</div>'
+    +     '<div style="font-size:10px;color:var(--tx2)">' + cpNum(d.foraPrazo) + ' fora do prazo</div></div>'
+    +   '<div style="flex:1;min-width:140px;background:var(--azc);border:1px solid var(--azm);'
+    +     'border-radius:10px;padding:.7rem .9rem;text-align:center">'
+    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2)">% RESOLVIDOS</div>'
+    +     '<div style="font-size:24px;font-weight:800;color:var(--azm)">'
+    +       (d.resolvidos ? String(d.resolvidos.pct).replace('.', ',') + '%' : '—') + '</div>'
+    +     '<div style="font-size:10px;color:var(--tx2)">'
+    +       (d.resolvidos ? 'desde ' + cpDataBR(d.resolvidos.de) : 'preciso de 2 dias') + '</div></div>'
+    + '</div>';
+
+  h += '<div style="font-size:11.5px;color:var(--tx2);line-height:1.8;background:var(--cin);'
+    +   'border:1px solid var(--brd);border-radius:8px;padding:.6rem .8rem">'
+    +   '<div><strong style="color:var(--tx)">Histórico</strong> — '
+    +     (serie.length
+        ? cpNum(serie.length) + ' dia(s) gravado(s), de ' + cpDataBR(serie[0].dia)
+          + ' a ' + cpDataBR(serie[serie.length - 1].dia)
+        : '<span style="color:var(--am)">nenhum dia gravado ainda. Cada upload grava um retrato; '
+          + 'use o botão acima para gravar hoje.</span>')
+    +   '</div>'
+    +   (serie.length === 1
+       ? '<div style="color:var(--am)">Com um dia só, o gráfico sai com um ponto e o % resolvidos '
+         + 'fica em branco. A partir do segundo dia os dois aparecem.</div>' : '')
+    + '</div>';
+
+  if (serie.length) {
+    h += '<div style="margin-top:.9rem">' + arjGrafLinhas(serie, [
+        { campo:'total', nome:'Total', cor:'#1B5E20' },
+        { campo:'sup',   nome:'Supervisor', cor:'#E08A1E' },
+        { campo:'forn',  nome:'Fornecedor', cor:'#C62828' }
+      ], { altura:230 }) + '</div>';
+  }
+  box.innerHTML = h + '</div>';
+}
+
+// ══════════════════ HISTÓRICO DO REJEITE ═════════════════════════
+// Nenhuma das três bases guarda ontem: cada upload substitui a anterior.
+// Sem isto não existe evolução para mostrar na apresentação — e, pior,
+// não dá para dizer quantos foram resolvidos, porque resolver é sair da
+// lista. Cada upload grava o retrato do dia aqui.
+//
+// Guardo as CHAVES dos últimos dias, não só os totais: é comparando o
+// conjunto de ontem com o de hoje que se sabe quem saiu. Os dias velhos
+// perdem as chaves e ficam só com os números, para o documento não
+// crescer sem fim.
+var RJH_DOC = 'rejeite_historico';
+var RJH_DIAS_MAX = 120;
+var RJH_DIAS_COM_CHAVE = 40;
+var _rjHist = { dias:{}, atualizadoEm:'' };
+
+function rjHistSnapshot(){
+  var f = { n:0, soma:0, com:0, fora:0, motivos:{}, chaves:[] };
+  ((_gpRej && _gpRej.itens) || []).forEach(function(i){
+    f.n++;
+    var d = +i.dias;
+    if (isFinite(d)) { f.soma += d; f.com++; }
+    if (/FORA/i.test(i.prazo || '')) f.fora++;
+    var m = i.motivo || '(sem motivo)';
+    f.motivos[m] = (f.motivos[m] || 0) + 1;
+    if (i.pedido) f.chaves.push(String(i.pedido));
+  });
+
+  var s = { n:0, lv:0, pb:0, sem:0, soma:0, com:0, padroes:{}, chaves:[], fora:0 };
+  var r = null;
+  try { r = rjsMontar(); } catch (e) { r = null; }
+  if (r) {
+    s.fora = r.fora.length;
+    r.linhas.forEach(function(l){
+      s.n++;
+      var c = !l.padrao ? 'sem' : rjsCulpa(l.padrao);
+      if (c === 'level') s.lv++; else if (c === 'petro') s.pb++; else s.sem++;
+      if (l.slaPedido != null) { s.soma += (+l.slaPedido || 0); s.com++; }
+      var p = l.padrao || '(sem padrão)';
+      s.padroes[p] = (s.padroes[p] || 0) + 1;
+      s.chaves.push(String(l.rc) + '|' + String(l.itemRc));
+    });
+  }
+  return { f:f, s:s };
+}
+
+// Grava o retrato de hoje. Rodar duas vezes no mesmo dia só atualiza —
+// o dia é a chave, então não dá para duplicar ponto no gráfico.
+async function rjHistGravar(dia){
+  try {
+    var d = dia || cpHojeISO();
+    var snap = rjHistSnapshot();
+    if (!snap.f.n && !snap.s.n) return false;     // nada lido ainda
+    _rjHist.dias = _rjHist.dias || {};
+    _rjHist.dias[d] = snap;
+
+    // poda: no máximo RJH_DIAS_MAX dias, e só os mais recentes com chaves
+    var ds = Object.keys(_rjHist.dias).sort();
+    if (ds.length > RJH_DIAS_MAX) {
+      ds.slice(0, ds.length - RJH_DIAS_MAX).forEach(function(k){ delete _rjHist.dias[k]; });
+      ds = Object.keys(_rjHist.dias).sort();
+    }
+    ds.slice(0, Math.max(0, ds.length - RJH_DIAS_COM_CHAVE)).forEach(function(k){
+      if (_rjHist.dias[k].f) _rjHist.dias[k].f.chaves = [];
+      if (_rjHist.dias[k].s) _rjHist.dias[k].s.chaves = [];
+    });
+    _rjHist.atualizadoEm = new Date().toISOString();
+
+    var db = getDB(); if (!db) return false;
+    await db.collection('config').doc(RJH_DOC).set(_rjHist);
+    return true;
+  } catch (e) { console.warn('rjHistGravar:', e); return false; }
+}
+
+async function rjHistCarregar(){
+  try {
+    var db = getDB(); if (!db) return;
+    var doc = await db.collection('config').doc(RJH_DOC).get();
+    if (doc && doc.exists) {
+      var d = doc.data() || {};
+      _rjHist = { dias:d.dias || {}, atualizadoEm:d.atualizadoEm || '' };
+    }
+  } catch (e) { console.warn('rjHistCarregar:', e); }
+}
+
+// A série para o gráfico, do dia mais antigo ao mais novo.
+function rjHistSerie(ini, fim){
+  var ds = Object.keys(_rjHist.dias || {}).sort().filter(function(d){
+    return (!ini || d >= ini) && (!fim || d <= fim);
+  });
+  return ds.map(function(d){
+    var o = _rjHist.dias[d] || {};
+    var f = o.f || {}, s = o.s || {};
+    return { dia:d, forn:+f.n || 0, sup:+s.n || 0, total:(+f.n || 0) + (+s.n || 0),
+             lv:+s.lv || 0, pb:+s.pb || 0, sem:+s.sem || 0 };
+  });
+}
+
+// Quantos dos itens do retrato anterior já não estão mais na lista.
+// É esta a conta de "% resolvidos": resolver é sumir do rejeite.
+function rjHistResolvidos(fim){
+  var ds = Object.keys(_rjHist.dias || {}).sort().filter(function(d){ return !fim || d <= fim; });
+  if (ds.length < 2) return null;
+  var hoje = _rjHist.dias[ds[ds.length - 1]];
+  var ant = null, dAnt = '';
+  for (var i = ds.length - 2; i >= 0; i--) {
+    var o = _rjHist.dias[ds[i]];
+    if (o && ((o.f && (o.f.chaves || []).length) || (o.s && (o.s.chaves || []).length))) {
+      ant = o; dAnt = ds[i]; break;
+    }
+  }
+  if (!ant) return null;
+  var agora = {};
+  ((hoje.f && hoje.f.chaves) || []).forEach(function(k){ agora['F' + k] = 1; });
+  ((hoje.s && hoje.s.chaves) || []).forEach(function(k){ agora['S' + k] = 1; });
+  var antes = ((ant.f && ant.f.chaves) || []).map(function(k){ return 'F' + k; })
+    .concat(((ant.s && ant.s.chaves) || []).map(function(k){ return 'S' + k; }));
+  if (!antes.length) return null;
+  var saiu = antes.filter(function(k){ return !agora[k]; }).length;
+  return { de:dAnt, ate:ds[ds.length - 1], base:antes.length, saiu:saiu,
+           pct: Math.round(saiu / antes.length * 1000) / 10 };
+}
 
 // ── De quem é o erro: Level ou Petrobras ──────────────────────────
 // Sai do código que abre o Padrão de Rejeição ("4.1 - Material RQT…" →
@@ -41177,6 +41771,7 @@ const PERMS_SIDEBAR = {
   // Só existem dentro do módulo Pedidos, que tem Firebase próprio
   'governanca-pedidos': { icon:'🏛️', label:'Governança',           mod:'EXECUÇÃO', soPedidos:true },
   'pedidos':        { icon:'📦', label:'Controle de Pedidos',      mod:'EXECUÇÃO', soPedidos:true },
+  'apres-rejeite':  { icon:'🖥️', label:'Apresentação',             mod:'EXECUÇÃO', soPedidos:true },
   // Só existem dentro da frente ADLV · PCP, que tem Firebase próprio
   'pcp':            { icon:'📋', label:'PCP',                     mod:'EXECUÇÃO', soPcp:true },
   'pcp-hist':       { icon:'📚', label:'Histórico de Medição',    mod:'EXECUÇÃO', soPcp:true },
