@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/10 04:10';
+var GTO_BUILD = '14/10 05:02';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -14551,7 +14551,18 @@ var _rjsMed = { itens:[], linhas:0, chaves:0, posUsadas:[], cabecalho:[],
 var _rjsRod = { cockpit:{}, motivos:{}, nCockpit:0, nMotivos:0, nDados:0,
                 foraDoCockpit:0, arquivo:'', atualizadoEm:'', atualizadoPor:'' };
 
-function rjsChaveRc(o){ return String(o.rc || '') + '|' + String(o.itemRc || ''); }
+// A mesma RC chega escrita de três jeitos: 34000001, "34000001.0" e
+// "034000001", conforme quem exportou a planilha. Sem normalizar os dois
+// lados, o cruzamento com o levelboard dá zero e parece que falta dado —
+// quando o que falta é só o formato bater.
+function _rjsN(v){
+  var t = String(v == null ? '' : v).trim().replace(/\.0+$/, '');
+  if (/^\d+$/.test(t)) t = t.replace(/^0+(?=\d)/, '');
+  return t;
+}
+function rjsChaveLb(rc, seq){ return _rjsN(rc) + '|' + _rjsN(seq); }
+function rjsChaveRc(o){ return rjsChaveLb(o.rc, o.itemRc); }
+function rjsChavePed(ped, item){ return rjsChaveLb(ped, item); }
 
 function rjsDeduzirMedicao(rejSup){
   var vistos = {}, itens = [];
@@ -15218,7 +15229,7 @@ function rjsLerRodrigo(wb){
   var uCri = _cpAchaCol(cu, ['CRIADOR']);
   for (var b = iC + 1; b < lu.length; b++) {
     var l = lu[b] || [];
-    var ped = txt(l, uPed);
+    var ped = _rjsN(txt(l, uPed));
     if (!ped) continue;
     r.nCockpit++;
     if (r.cockpit[ped]) continue;       // repetido traz o mesmo SLA
@@ -15247,11 +15258,11 @@ function rjsLerRodrigo(wb){
       var dCk  = _cpAchaCol(cd, ['COCKPIT']);
       for (var b2 = iD + 1; b2 < ld.length; b2++) {
         var l2 = ld[b2] || [];
-        var pd = txt(l2, dPed);
+        var pd = _rjsN(txt(l2, dPed));
         if (!pd) continue;
         r.nDados++;
         if (!r.cockpit[pd]) { r.foraDoCockpit++; continue; }
-        var ch = pd + '|' + txt(l2, dIt);
+        var ch = rjsChavePed(pd, txt(l2, dIt));
         var ck = dCk === -1 ? '' : cpDataISO(l2[dCk]);
         var ja = r.motivos[ch];
         if (ja && ja.cockpit && ck && ck <= ja.cockpit) continue;
@@ -15292,7 +15303,7 @@ async function rjsUploadRodrigo(file){
       var db = getDB();
       if (db) { await db.collection('config').doc('rejeite_sup_rodrigo').set(_rjsRod); ok = true; }
     } catch (e2) { console.warn('rjsUploadRodrigo gravar:', e2); }
-    rjsDesenhar();
+    rjDesenhar();
     st = document.getElementById('rjs-rod-status');
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ <strong>' + cpEsc(file.name) + '</strong> — '
       + cpNum(r.nCockpit) + ' linha(s) no último cockpit · ' + cpNum(Object.keys(r.cockpit).length)
@@ -15317,12 +15328,12 @@ function rjsMontar(){
 
   var porPedItem = {}, porPedido = {};
   var linhas = med.map(function(o){
-    var kRc  = String(o.rc || '') + '|' + String(o.itemRc || '');
-    var kPed = String(o.pedido || '') + '|' + String(o.itemPedido || '');
+    var kRc  = rjsChaveRc(o);
+    var kPed = rjsChavePed(o.pedido, o.itemPedido);
     porPedItem[kPed] = 1;
-    if (o.pedido) porPedido[o.pedido] = 1;
+    if (o.pedido) porPedido[_rjsN(o.pedido)] = 1;
     var lb = sla[kRc] || [null, null];
-    var c  = cock[o.pedido] || null;
+    var c  = cock[_rjsN(o.pedido)] || null;
     var m  = mot[kPed] || null;
     return {
       rc:o.rc, itemRc:o.itemRc, pedido:o.pedido, itemPedido:o.itemPedido,
@@ -15359,9 +15370,26 @@ function rjsMontar(){
     if (x) return x;
     return String(a.rc).localeCompare(String(b.rc));
   });
-  return { linhas:linhas, fora:fora,
+  // Quando NENHUM item casa com uma das fontes, o problema não é falta de
+  // dado: é a chave escrita diferente nos dois arquivos. Em vez de deixar
+  // a coluna vazia e o André adivinhando, mostro três chaves de cada lado.
+  var diag = null;
+  var semSla = linhas.filter(function(l){ return l.slaRc == null; }).length;
+  if (linhas.length && semSla === linhas.length && Object.keys(sla).length) {
+    diag = { fonte:'levelboard',
+             daqui: linhas.slice(0, 3).map(function(l){ return rjsChaveRc(l); }),
+             dela:  Object.keys(sla).slice(0, 3) };
+  }
+  var semCock = linhas.filter(function(l){ return !l.noCockpit; }).length;
+  if (!diag && linhas.length && semCock === linhas.length && Object.keys(cock).length) {
+    diag = { fonte:'planilha do Rodrigo',
+             daqui: linhas.slice(0, 3).map(function(l){ return _rjsN(l.pedido); }),
+             dela:  Object.keys(cock).slice(0, 3) };
+  }
+
+  return { linhas:linhas, fora:fora, diag:diag,
            semPadrao: linhas.filter(function(l){ return !l.padrao; }).length,
-           semSlaRc:  linhas.filter(function(l){ return l.slaRc == null; }).length };
+           semSlaRc:  semSla };
 }
 
 var RJS_COLS = [
@@ -15454,6 +15482,12 @@ function rjSupervisorHTML(){
                       + (r.semPadrao ? ' · <span style="color:var(--am)">' + cpNum(r.semPadrao)
                                        + ' sem padrão (rejeitado num cockpit anterior)</span>' : ''))
     +   '</div>'
+    +   (r.diag
+       ? '<div style="color:var(--vm);margin-top:4px">⚠ <strong>Nenhum</strong> item casou com '
+         + cpEsc(r.diag.fonte) + ' — a chave está escrita diferente nos dois arquivos.'
+         + '<br>Daqui: <code>' + r.diag.daqui.map(function(x){ return cpEsc(x); }).join('</code> · <code>') + '</code>'
+         + '<br>De lá: <code>' + r.diag.dela.map(function(x){ return cpEsc(x); }).join('</code> · <code>') + '</code>'
+         + '<br>Me mande estas duas linhas que eu acerto o casamento.</div>' : '')
     +   ((_rjsMed.posUsadas || []).length
        ? '<div style="color:var(--am)">⚠ Na medição eu não achei o nome de algumas colunas e usei a '
          + 'posição: ' + cpEsc((_rjsMed.posUsadas || []).join(' · ')) + '. Confira se bate.</div>' : '')
@@ -15876,7 +15910,7 @@ function gpLerLevelboard(linhas){
     // estouraria o limite de 1 MB do Firestore. Aqui fica só o essencial.
     var slaT  = pega(l, col.sla), idasT = pega(l, col.idas);
     if (slaT !== '' || idasT !== '') {
-      var kS = rc + '|' + pega(l, col.seq);
+      var kS = rjsChaveLb(rc, pega(l, col.seq));
       if (!r.sla[kS]) {
         r.sla[kS] = [ slaT === '' ? null : (mdNum(slaT) || 0),
                       idasT === '' ? null : (mdNum(idasT) || 0) ];
