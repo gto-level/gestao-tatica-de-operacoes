@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/10 02:48';
+var GTO_BUILD = '14/10 04:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -11591,6 +11591,7 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
             convMapa:{}, convTotal:{ mem:0, emi:0, lib:0, aguard:0, rej:0, outro:0 },
             convVelhas:0, convDesde:'',
             rejMed:{}, rejMedTotal:0, donoPedido:{},
+            rejSup:[], rejSupTotal:0, rejSupCols:{}, rejSupPos:[],
             cockFunil:{ lidas:0, st3:0, semElim:0, rlrt:0, emLib:0,
                         colGer:'', colPsmv:'', colSt:'', colElim:'',
                         gerentes:{}, psmv:{}, status:{} } };
@@ -11625,6 +11626,32 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
   var iPd   = _cpAchaCol(cabs, ['PEDIDO','NUMERO_PEDIDO','NUM_PEDIDO']);
   var iRc   = _cpAchaCol(cabs, ['REQUISICAO','RC','NUMERO_RC','NUM_RC','REQUISICAO_COMPRA','REQ']);
   var iIt   = _cpAchaCol(cabs, ['LINHAREQUISICAO','LINHA_REQUISICAO','ITEM_RC','ITEM_REQUISICAO','ITEM_DA_RC','SEQ']);
+
+  // ── Rejeite Supervisor: as colunas que só ele usa ────────────────
+  // São as letras que o André passou (C, D, E, G, H, I, L, M, N, T). Procuro
+  // sempre pelo NOME primeiro; a letra é rede de segurança para quando o
+  // cabeçalho vier escrito diferente. Quando a letra for usada, fica
+  // registrado em rejSupPos e a tela avisa — chute silencioso aqui viraria
+  // um indicador errado sem ninguém perceber.
+  var _posUsadas = [];
+  var _colOuLetra = function(nomes, pos, rotulo){
+    var j = _cpAchaCol(cabs, nomes);
+    if (j !== -1) return j;
+    if (pos < cabs.length) { _posUsadas.push(rotulo); return pos; }
+    return -1;
+  };
+  // CODIGO_ELIMINACAO (M) é outra coluna que CODIGO_ELIMINACAO_ITEM_PEDIDO (N):
+  // o filtro do rejeite exige as DUAS vazias, então não dá para reaproveitar iEl.
+  var iElPed = _colOuLetra(['CODIGO_ELIMINACAO'], 12, 'M · CODIGO_ELIMINACAO');
+  var iElIt  = _cpAchaCol(cabs, ['CODIGO_ELIMINACAO_ITEM_PEDIDO']);
+  if (iElIt === -1) iElIt = _colOuLetra(['CODIGO_ELIMINACAO_ITEM_PEDIDO'], 13, 'N · CODIGO_ELIMINACAO_ITEM_PEDIDO');
+  var iLnPd  = _colOuLetra(['LINHAPEDIDO','LINHA_PEDIDO','ITEM_PEDIDO','ITEM_DO_PEDIDO'], 4, 'E · LINHAPEDIDO');
+  var iPdRej = (iPd !== -1) ? iPd : _colOuLetra(['PEDIDOS'], 3, 'D · PEDIDOS');
+  r.rejSupCols = { chave:iCh, pedido:iPdRej, linhaPedido:iLnPd, rc:iRc, itemRc:iIt,
+                   criacao:iDt, status:iSt, elimPedido:iElPed, elimItem:iElIt,
+                   comprador:iQuem };
+  r.rejSupPos = _posUsadas;
+
   r.colunas = { comprador:iQuem, status:iSt, data:iDt, eliminacao:iEl,
                 memorizado:iMem, emitido:iEmi, chave:iCh, pedido:iPd, rc:iRc, item:iIt,
                 gerente:iGer, psmv:iPsmv };
@@ -11672,6 +11699,33 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
     for (var b = iCab + 1; b < linhas.length; b++) {
       var lb = linhas[b] || [];
       var nomeB = String(lb[iQuem] == null ? '' : lb[iQuem]).trim();
+
+      // ── Rejeite Supervisor ───────────────────────────────────────
+      // STATUS_PROCESSO 8, CODIGO_ELIMINACAO vazio e
+      // CODIGO_ELIMINACAO_ITEM_PEDIDO vazio. Fica antes do corte por
+      // comprador em branco: item rejeitado sem RESP_PEDIDO continua sendo
+      // item rejeitado, e sumir com ele falsearia a conta.
+      if (iSt !== -1 && _cpStatusNum(lb[iSt]) === 8
+          && !_cpTemEliminacao(iElPed === -1 ? '' : lb[iElPed])
+          && !_cpTemEliminacao(iElIt  === -1 ? '' : lb[iElIt])) {
+        var pR = function(j){ return j === -1 ? '' : String(lb[j] == null ? '' : lb[j]).trim().replace(/\.0+$/, ''); };
+        var rcR = pR(iRc), itR = pR(iIt);
+        if (rcR || pR(iPdRej)) {
+          r.rejSupTotal++;
+          if (r.rejSup.length < 8000) {
+            r.rejSup.push({
+              rc: rcR, itemRc: itR,
+              pedido: pR(iPdRej), itemPedido: pR(iLnPd),
+              chaveComprador: pR(iCh), comprador: nomeB,
+              dataPedido: iDt === -1 ? '' : cpDataISO(lb[iDt]),
+              // a linha inteira da medição vai junto: é ela que sai no fim
+              // da planilha exportada, depois das colunas que montamos
+              bruto: lb.map(function(x){ return x == null ? '' : x; })
+            });
+          }
+        }
+      }
+
       if (!nomeB) continue;
 
       // ── Cockpit ──────────────────────────────────────────────────
@@ -11971,6 +12025,8 @@ async function cpHandleUpload(file){
     await gpSalvarCockpit(med, file.name);
     await gpSalvarMemorizados(med, file.name);
     await monSalvarConversao(med, file.name);
+    await rjsSalvarMedicao(med, file.name);
+    try { if (document.getElementById('rj-supervisor')) rjDesenhar(); } catch (e) {}
 
     if (med.aviso && !med.compradores.length) {
       if (st) {
@@ -14481,6 +14537,61 @@ async function gpSalvarCockpit(med, arquivo){
   } catch (e) { console.warn('gpSalvarCockpit:', e); return false; }
 }
 
+// ── Rejeite Supervisor: a fatia da medição ────────────────────────
+// Sai do mesmo upload da medição (Controle de Pedidos), junto com o
+// Cockpit e os Memorizados. Guardo a lista pronta porque a medição crua
+// não fica gravada em lugar nenhum — sem isto, a aba só teria dados no
+// instante do upload.
+//
+// A contagem do card é por chave RC + LINHAREQUISICAO, sem repetir: a
+// mesma RC/item pode vir em mais de uma linha de pedido.
+var RJS_BRUTO_MAX = 2500;
+var _rjsMed = { itens:[], linhas:0, chaves:0, posUsadas:[], cabecalho:[],
+                comBruto:0, arquivo:'', atualizadoEm:'', atualizadoPor:'' };
+var _rjsRod = { cockpit:{}, motivos:{}, nCockpit:0, nMotivos:0, nDados:0,
+                foraDoCockpit:0, arquivo:'', atualizadoEm:'', atualizadoPor:'' };
+
+function rjsChaveRc(o){ return String(o.rc || '') + '|' + String(o.itemRc || ''); }
+
+function rjsDeduzirMedicao(rejSup){
+  var vistos = {}, itens = [];
+  (rejSup || []).forEach(function(o){
+    var k = rjsChaveRc(o);
+    if (vistos[k]) { vistos[k].linhas++; return; }
+    var novo = {
+      rc:o.rc || '', itemRc:o.itemRc || '', pedido:o.pedido || '',
+      itemPedido:o.itemPedido || '', chaveComprador:o.chaveComprador || '',
+      comprador:o.comprador || '', dataPedido:o.dataPedido || '', linhas:1,
+      bruto:o.bruto || []
+    };
+    vistos[k] = novo; itens.push(novo);
+  });
+  return itens;
+}
+
+async function rjsSalvarMedicao(med, arquivo){
+  try {
+    if (!med) return false;
+    var itens = rjsDeduzirMedicao(med.rejSup || []);
+    // A linha crua só vai para as primeiras RJS_BRUTO_MAX: é ela que pesa,
+    // e um doc do Firestore não passa de 1 MB. Acima disso a tela continua
+    // certa e a exportação sai sem o rabicho da medição, dizendo isso.
+    var comBruto = 0;
+    itens.forEach(function(o, i){
+      if (i < RJS_BRUTO_MAX && (o.bruto || []).length) comBruto++;
+      else o.bruto = [];
+    });
+    _rjsMed = { itens: itens.slice(0, 5000), linhas: +med.rejSupTotal || 0,
+                chaves: itens.length, posUsadas: med.rejSupPos || [],
+                cabecalho: med.cabecalhoCompleto || [], comBruto: comBruto,
+                arquivo: arquivo || '', atualizadoEm:new Date().toISOString(),
+                atualizadoPor:cpQuem() };
+    var db = getDB(); if (!db) return false;
+    await db.collection('config').doc('rejeite_sup_medicao').set(_rjsMed);
+    return true;
+  } catch (e) { console.warn('rjsSalvarMedicao:', e); return false; }
+}
+
 // A planilha de rejeitados: conta só os grupos de compras da nossa lista.
 function gpLerRejeitados(linhas){
   var r = { itens:[], lidas:0, fora:0, aviso:'', grupos:{}, colunas:{} };
@@ -14978,12 +15089,37 @@ async function rjAbrir(){
   try {
     var db = getDB();
     if (db) {
-      var d = await db.collection('config').doc('governanca_rejeitados').get();
-      if (d && d.exists) {
-        var R = d.data() || {};
+      var docs = await Promise.all([
+        db.collection('config').doc('governanca_rejeitados').get(),
+        db.collection('config').doc('rejeite_sup_medicao').get(),
+        db.collection('config').doc('rejeite_sup_sla').get(),
+        db.collection('config').doc('rejeite_sup_rodrigo').get()
+      ]);
+      if (docs[0] && docs[0].exists) {
+        var R = docs[0].data() || {};
         _gpRej = { itens:R.itens || [], arquivo:R.arquivo || '', aba:R.aba || '',
                    lidas:+R.lidas || 0, fora:+R.fora || 0, grupos:R.grupos || {},
                    atualizadoEm:R.atualizadoEm || '', atualizadoPor:R.atualizadoPor || '' };
+      }
+      if (docs[1] && docs[1].exists) {
+        var M = docs[1].data() || {};
+        _rjsMed = { itens:M.itens || [], linhas:+M.linhas || 0, chaves:+M.chaves || 0,
+                    posUsadas:M.posUsadas || [], cabecalho:M.cabecalho || [],
+                    comBruto:+M.comBruto || 0, arquivo:M.arquivo || '',
+                    atualizadoEm:M.atualizadoEm || '', atualizadoPor:M.atualizadoPor || '' };
+      }
+      if (docs[2] && docs[2].exists) {
+        var S = docs[2].data() || {};
+        _rjsSla = { itens:S.itens || {}, chaves:+S.chaves || 0, cortou:!!S.cortou,
+                    arquivo:S.arquivo || '', atualizadoEm:S.atualizadoEm || '' };
+      }
+      if (docs[3] && docs[3].exists) {
+        var D = docs[3].data() || {};
+        _rjsRod = { cockpit:D.cockpit || {}, motivos:D.motivos || {},
+                    nCockpit:+D.nCockpit || 0, nMotivos:+D.nMotivos || 0,
+                    nDados:+D.nDados || 0, foraDoCockpit:+D.foraDoCockpit || 0,
+                    abas:D.abas || {}, arquivo:D.arquivo || '',
+                    atualizadoEm:D.atualizadoEm || '', atualizadoPor:D.atualizadoPor || '' };
       }
     }
   } catch (e) { console.warn('rjAbrir:', e); }
@@ -15027,26 +15163,432 @@ function rjFornecedorHTML(){
     + '</div>';
 }
 
-// ── Rejeite Supervisor — a regra nova, ainda sem regra ────────────
-// Deixo a aba de pé e digo o que falta, em vez de inventar uma conta que
-// depois teria de ser desfeita. Assim que o André passar a regra, é aqui
-// que ela entra.
-function rjSupervisorHTML(){
-  return '<div class="cd" style="border-top:3px solid var(--am)">'
-    + '<div class="cd-t">👤 Rejeite Supervisor</div>'
-    + '<div class="al al-a" style="font-size:12px">⏳ A aba está de pé, a regra ainda não. '
-    +   'Não coloquei nenhuma conta aqui para não inventar número.</div>'
-    + '<div style="font-size:12px;color:var(--tx2);margin-top:.8rem;line-height:1.8">'
-    +   'Para eu montar, preciso de quatro coisas:'
-    +   '<div style="margin-top:6px">1. <strong>De onde vem</strong> — é a mesma planilha de '
-    +   'rejeitados (outra coluna) ou um arquivo novo? Se for novo, me mande um exemplo.</div>'
-    +   '<div>2. <strong>Quem conta como supervisor</strong> — nome na planilha, ou a lista da equipe.</div>'
-    +   '<div>3. <strong>O que conta como rejeite dele</strong> — qual coluna/valor marca o rejeite '
-    +   'do supervisor, e se há prazo (quantos dias) para ele responder.</div>'
-    +   '<div>4. <strong>O que você quer ver</strong> — a lista por pedido, o total por supervisor, '
-    +   'ou os dois.</div>'
-    + '</div></div>';
+
+// ══════════════════ REJEITE SUPERVISOR ════════════════════════════
+// Três fontes, cada uma entrando por onde já entrava:
+//   · medição  → upload do Controle de Pedidos (STATUS_PROCESSO 8 com as
+//                duas colunas de eliminação vazias) → rejeite_sup_medicao
+//   · levelboard → upload da Distribuição do MAPA (SLA_Dias, QTD_IDAS_LEVEL)
+//                → rejeite_sup_sla
+//   · Rodrigo  → upload aqui dentro (SLA do pedido, padrão e justificativa)
+//                → rejeite_sup_rodrigo
+// A conta do card é por chave RC + LINHAREQUISICAO, sem repetir.
+
+// ── a planilha do Rodrigo ─────────────────────────────────────────
+// 'Último cockpit' = os rejeites em aberto. É este o recorte que cobramos
+// contra a medição — a aba 'Dados' é o histórico desde AGO/24 e serve de
+// dicionário do padrão e da justificativa. Guardo só os motivos dos
+// pedidos que estão no último cockpit: o histórico inteiro passa de 3 MB
+// e não cabe num documento do Firestore.
+function _rjsNomeAba(nomes, alvo){
+  var n = cpNormCab(alvo);
+  for (var i = 0; i < nomes.length; i++) if (cpNormCab(nomes[i]) === n) return nomes[i];
+  for (var j = 0; j < nomes.length; j++) if (cpNormCab(nomes[j]).indexOf(n) !== -1) return nomes[j];
+  return '';
 }
+
+function rjsLerRodrigo(wb){
+  var r = { cockpit:{}, motivos:{}, nCockpit:0, nMotivos:0, nDados:0,
+            foraDoCockpit:0, aviso:'', abas:{} };
+  var nomes = wb.SheetNames || [];
+  var aUc = _rjsNomeAba(nomes, 'ULTIMO_COCKPIT') || _rjsNomeAba(nomes, 'COCKPIT');
+  var aDd = _rjsNomeAba(nomes, 'DADOS');
+  r.abas = { cockpit:aUc, dados:aDd };
+  if (!aUc) { r.aviso = 'Não achei a aba "Último cockpit" — é a planilha do Rodrigo?'; return r; }
+
+  var ler = function(nm){
+    return XLSX.utils.sheet_to_json(wb.Sheets[nm], { header:1, defval:'', raw:true });
+  };
+  var txt = function(l, j){ return j === -1 ? '' : String(l[j] == null ? '' : l[j]).trim().replace(/\.0+$/, ''); };
+
+  // ── Último cockpit: pedido → SLA do pedido ──────────────────────
+  var lu = ler(aUc);
+  var iC = -1, cu = [];
+  for (var k = 0; k < Math.min(lu.length, 10); k++) {
+    var c = (lu[k] || []).map(cpNormCab);
+    if (_cpAchaCol(c, ['PEDIDO','PEDIDOS']) !== -1) { iC = k; cu = c; break; }
+  }
+  if (iC === -1) { r.aviso = 'Não achei a coluna Pedido na aba "' + aUc + '".'; return r; }
+  var uPed = _cpAchaCol(cu, ['PEDIDO','PEDIDOS']);
+  var uSla = _cpAchaCol(cu, ['TEMPO_DESDE_O_ENVIO_DIAS','TEMPO_DESDE_O_ENVIO','TEMPO_DESDE_ENVIO_DIAS']);
+  if (uSla === -1 && cu.length > 7) uSla = 7;            // coluna H
+  var uOp  = _cpAchaCol(cu, ['OPORTUNIDADE']);
+  var uDt  = _cpAchaCol(cu, ['DATA']);
+  var uDtC = _cpAchaCol(cu, ['DATA_ULTIMO_COCKPIT']);
+  var uCri = _cpAchaCol(cu, ['CRIADOR']);
+  for (var b = iC + 1; b < lu.length; b++) {
+    var l = lu[b] || [];
+    var ped = txt(l, uPed);
+    if (!ped) continue;
+    r.nCockpit++;
+    if (r.cockpit[ped]) continue;       // repetido traz o mesmo SLA
+    r.cockpit[ped] = {
+      sla:  uSla === -1 ? null : (mdNum(l[uSla]) || 0),
+      op:   txt(l, uOp), envio: uDt === -1 ? '' : cpDataISO(l[uDt]),
+      cock: uDtC === -1 ? '' : cpDataISO(l[uDtC]), criador: txt(l, uCri)
+    };
+  }
+
+  // ── Dados: padrão e justificativa do cockpit mais recente ───────
+  if (aDd) {
+    var ld = ler(aDd);
+    var iD = -1, cd = [];
+    for (var k2 = 0; k2 < Math.min(ld.length, 10); k2++) {
+      var c2 = (ld[k2] || []).map(cpNormCab);
+      if (_cpAchaCol(c2, ['PADRAO_REJEICAO']) !== -1) { iD = k2; cd = c2; break; }
+    }
+    if (iD !== -1) {
+      var dPed = _cpAchaCol(cd, ['PEDIDOS','PEDIDO']);
+      if (dPed === -1 && cd.length > 5) dPed = 5;        // coluna F
+      var dIt  = _cpAchaCol(cd, ['ITEM','LINHA','LINHAPEDIDO']);
+      if (dIt === -1 && cd.length > 6) dIt = 6;          // coluna G
+      var dPad = _cpAchaCol(cd, ['PADRAO_REJEICAO']);
+      var dJus = _cpAchaCol(cd, ['JUSTIFICATIVA']);
+      var dCk  = _cpAchaCol(cd, ['COCKPIT']);
+      for (var b2 = iD + 1; b2 < ld.length; b2++) {
+        var l2 = ld[b2] || [];
+        var pd = txt(l2, dPed);
+        if (!pd) continue;
+        r.nDados++;
+        if (!r.cockpit[pd]) { r.foraDoCockpit++; continue; }
+        var ch = pd + '|' + txt(l2, dIt);
+        var ck = dCk === -1 ? '' : cpDataISO(l2[dCk]);
+        var ja = r.motivos[ch];
+        if (ja && ja.cockpit && ck && ck <= ja.cockpit) continue;
+        if (ja && !ck) continue;
+        r.motivos[ch] = { padrao: txt(l2, dPad), justificativa: txt(l2, dJus), cockpit: ck };
+      }
+      r.nMotivos = Object.keys(r.motivos).length;
+    }
+  }
+  if (!r.nCockpit) r.aviso = 'A aba "' + aUc + '" não tem nenhum pedido.';
+  return r;
+}
+
+function rjsRodDrop(e){
+  e.preventDefault();
+  var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) rjsUploadRodrigo(f);
+}
+
+async function rjsUploadRodrigo(file){
+  if (!file) return;
+  var st = document.getElementById('rjs-rod-status');
+  if (st) st.innerHTML = '⏳ Lendo a planilha do Rodrigo...';
+  try {
+    var buf = await file.arrayBuffer();
+    var wb = _lerWorkbookBR(buf, file.name);
+    var r = rjsLerRodrigo(wb);
+    if (r.aviso && !r.nCockpit) {
+      if (st) st.innerHTML = '<span style="color:var(--vm)">✗ ' + cpEsc(r.aviso) + '</span>';
+      return;
+    }
+    _rjsRod = { cockpit:r.cockpit, motivos:r.motivos, nCockpit:r.nCockpit,
+                nMotivos:r.nMotivos, nDados:r.nDados, foraDoCockpit:r.foraDoCockpit,
+                abas:r.abas, arquivo:file.name,
+                atualizadoEm:new Date().toISOString(), atualizadoPor:cpQuem() };
+    var ok = false;
+    try {
+      var db = getDB();
+      if (db) { await db.collection('config').doc('rejeite_sup_rodrigo').set(_rjsRod); ok = true; }
+    } catch (e2) { console.warn('rjsUploadRodrigo gravar:', e2); }
+    rjsDesenhar();
+    st = document.getElementById('rjs-rod-status');
+    if (st) st.innerHTML = '<span style="color:var(--vd)">✓ <strong>' + cpEsc(file.name) + '</strong> — '
+      + cpNum(r.nCockpit) + ' linha(s) no último cockpit · ' + cpNum(Object.keys(r.cockpit).length)
+      + ' pedido(s) · ' + cpNum(r.nMotivos) + ' com padrão/justificativa'
+      + (ok ? '.' : ' <span style="color:var(--am)">(não gravou no Firebase)</span>') + '</span>';
+  } catch (e) {
+    if (st) st.innerHTML = '<span style="color:var(--vm)">✗ Erro ao ler: ' + cpEsc(e.message) + '</span>';
+  }
+}
+
+// ── o cruzamento ──────────────────────────────────────────────────
+// A planilha começa na medição; o levelboard e o Rodrigo só preenchem
+// colunas. Depois vem a cobrança ao contrário: tudo que está apontado no
+// último cockpit do Rodrigo TEM de estar na medição — o que não estiver é
+// listado para análise, porque item apontado fora do indicador é item que
+// ninguém vai tratar.
+function rjsMontar(){
+  var med  = (_rjsMed && _rjsMed.itens) ? _rjsMed.itens : [];
+  var sla  = (_rjsSla && _rjsSla.itens) ? _rjsSla.itens : {};
+  var cock = (_rjsRod && _rjsRod.cockpit) ? _rjsRod.cockpit : {};
+  var mot  = (_rjsRod && _rjsRod.motivos) ? _rjsRod.motivos : {};
+
+  var porPedItem = {}, porPedido = {};
+  var linhas = med.map(function(o){
+    var kRc  = String(o.rc || '') + '|' + String(o.itemRc || '');
+    var kPed = String(o.pedido || '') + '|' + String(o.itemPedido || '');
+    porPedItem[kPed] = 1;
+    if (o.pedido) porPedido[o.pedido] = 1;
+    var lb = sla[kRc] || [null, null];
+    var c  = cock[o.pedido] || null;
+    var m  = mot[kPed] || null;
+    return {
+      rc:o.rc, itemRc:o.itemRc, pedido:o.pedido, itemPedido:o.itemPedido,
+      chaveComprador:o.chaveComprador, comprador:o.comprador,
+      dataPedido:o.dataPedido,
+      slaPedido: c ? c.sla : null,
+      slaRc:  lb[0], idas: lb[1],
+      padrao: m ? m.padrao : '', justificativa: m ? m.justificativa : '',
+      noCockpit: !!c, bruto:o.bruto || []
+    };
+  });
+
+  // o que o Rodrigo aponta e a medição não tem
+  var fora = [];
+  Object.keys(mot).forEach(function(k){
+    if (porPedItem[k]) return;
+    var pt = k.split('|'), c = cock[pt[0]] || {};
+    fora.push({ pedido:pt[0], item:pt[1], padrao:mot[k].padrao,
+                justificativa:mot[k].justificativa, sla:c.sla == null ? null : c.sla,
+                op:c.op || '', pedidoNaMedicao: !!porPedido[pt[0]] });
+  });
+  // pedido do cockpit que nem motivo tem e também não está na medição
+  Object.keys(cock).forEach(function(p){
+    if (porPedido[p]) return;
+    var temMotivo = Object.keys(mot).some(function(k){ return k.split('|')[0] === p; });
+    if (temMotivo) return;
+    fora.push({ pedido:p, item:'', padrao:'', justificativa:'',
+                sla:cock[p].sla, op:cock[p].op || '', pedidoNaMedicao:false });
+  });
+  fora.sort(function(a, b){ return String(a.pedido).localeCompare(String(b.pedido)); });
+
+  linhas.sort(function(a, b){
+    var x = (b.slaPedido == null ? -1 : b.slaPedido) - (a.slaPedido == null ? -1 : a.slaPedido);
+    if (x) return x;
+    return String(a.rc).localeCompare(String(b.rc));
+  });
+  return { linhas:linhas, fora:fora,
+           semPadrao: linhas.filter(function(l){ return !l.padrao; }).length,
+           semSlaRc:  linhas.filter(function(l){ return l.slaRc == null; }).length };
+}
+
+var RJS_COLS = [
+  ['RC', 'rc'], ['Item da RC', 'itemRc'], ['Pedido', 'pedido'],
+  ['Item do pedido', 'itemPedido'], ['Chave comprador', 'chaveComprador'],
+  ['Comprador', 'comprador'], ['Data do pedido', 'dataPedido'],
+  ['SLA Pedido', 'slaPedido'], ['SLA RC', 'slaRc'], ['Idas ao Mercado', 'idas'],
+  ['Padrão rejeição', 'padrao'], ['Justificativa', 'justificativa']
+];
+
+// ── Rejeite Supervisor — a tela ───────────────────────────────────
+function rjsNum(v){ return (v == null || v === '') ? '—' : cpNum(v); }
+
+function rjSupervisorHTML(){
+  var r = rjsMontar();
+  var n = r.linhas.length;
+  var faltaMed = !(_rjsMed && _rjsMed.itens && _rjsMed.itens.length);
+  var faltaRod = !(_rjsRod && _rjsRod.nCockpit);
+
+  var h = '<div class="cd" style="border-top:3px solid var(--am)">'
+    + '<div class="cd-t" style="justify-content:space-between">'
+    +   '<span>👤 Rejeite Supervisor — ' + cpNum(n) + ' item(ns) rejeitado(s)</span>'
+    +   '<span style="display:flex;gap:8px">'
+    +     (n ? '<button class="btn btn-s" onclick="rjsExportar()">⬇ Exportar planilha</button>' : '')
+    +     '<button class="btn btn-s" onclick="rjAbrir()">↻ Atualizar</button>'
+    +   '</span></div>';
+
+  // ── o card da conta ───────────────────────────────────────────
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:.9rem">'
+    +   '<div style="flex:1;min-width:150px;background:var(--vmc);border:1px solid var(--vm);'
+    +     'border-radius:10px;padding:.7rem .9rem">'
+    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2);letter-spacing:.4px">ITENS REJEITADOS</div>'
+    +     '<div style="font-size:24px;font-weight:800;color:var(--vm);line-height:1.1">' + cpNum(n) + '</div>'
+    +     '<div style="font-size:10px;color:var(--tx2)">chaves RC + item da RC</div></div>'
+    +   '<div style="flex:1;min-width:150px;background:var(--cin);border:1px solid var(--brd);'
+    +     'border-radius:10px;padding:.7rem .9rem">'
+    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2);letter-spacing:.4px">NO CADERNO DO RODRIGO</div>'
+    +     '<div style="font-size:24px;font-weight:800;color:var(--tx);line-height:1.1">'
+    +       cpNum(r.linhas.filter(function(l){ return l.noCockpit; }).length) + '</div>'
+    +     '<div style="font-size:10px;color:var(--tx2)">de ' + cpNum(_rjsRod.nCockpit || 0)
+    +       ' linha(s) do último cockpit</div></div>'
+    +   '<div style="flex:1;min-width:150px;background:' + (r.fora.length ? 'var(--amc)' : 'var(--vdc)')
+    +     ';border:1px solid ' + (r.fora.length ? 'var(--am)' : 'var(--vd)') + ';border-radius:10px;padding:.7rem .9rem">'
+    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2);letter-spacing:.4px">FORA DO INDICADOR</div>'
+    +     '<div style="font-size:24px;font-weight:800;color:' + (r.fora.length ? 'var(--am)' : 'var(--vd)')
+    +       ';line-height:1.1">' + cpNum(r.fora.length) + '</div>'
+    +     '<div style="font-size:10px;color:var(--tx2)">apontados pelo Rodrigo e sem par na medição</div></div>'
+    + '</div>';
+
+  // ── o upload do Rodrigo ───────────────────────────────────────
+  h += '<div style="border:2px dashed var(--brd);border-radius:10px;padding:1rem;text-align:center;'
+    +   'cursor:pointer;background:var(--cin)"'
+    +   ' onclick="document.getElementById(\'rjs-rod-input\').click()"'
+    +   ' ondragover="event.preventDefault()" ondrop="rjsRodDrop(event)">'
+    +   '<div style="font-size:20px;margin-bottom:.2rem">📥</div>'
+    +   '<div style="font-size:13px;font-weight:600">Arraste aqui a planilha do Rodrigo</div>'
+    +   '<div style="font-size:11px;color:var(--tx2);margin-top:4px">'
+    +     'leio a aba <strong>Último cockpit</strong> (SLA do pedido) e a aba <strong>Dados</strong> '
+    +     '(padrão de rejeição e justificativa)</div>'
+    +   '<input type="file" id="rjs-rod-input" accept=".xlsb,.xlsx,.xls,.csv" style="display:none"'
+    +     ' onchange="rjsUploadRodrigo(this.files[0]); this.value=\'\';">'
+    + '</div>'
+    + '<div id="rjs-rod-status" style="margin-top:.6rem;font-size:12px">'
+    +   (_rjsRod.arquivo
+        ? '<span style="color:var(--tx2)">Último arquivo: <strong>' + cpEsc(_rjsRod.arquivo) + '</strong>'
+          + (_rjsRod.atualizadoEm ? ' — ' + cpDataBR(String(_rjsRod.atualizadoEm).slice(0,10)) : '')
+          + ' · ' + cpNum(_rjsRod.nCockpit) + ' linha(s) no último cockpit · '
+          + cpNum(_rjsRod.nMotivos) + ' com padrão/justificativa.</span>'
+        : '')
+    + '</div>';
+
+  // ── de onde veio cada fonte ───────────────────────────────────
+  h += '<div style="font-size:11px;color:var(--tx2);margin-top:.9rem;line-height:1.8;'
+    +   'background:var(--cin);border:1px solid var(--brd);border-radius:8px;padding:.6rem .8rem">'
+    +   '<div><strong style="color:var(--tx)">Medição</strong> — '
+    +     (faltaMed ? '<span style="color:var(--vm)">ainda não lida. Suba a medição em Controle de Pedidos.</span>'
+                    : cpEsc(_rjsMed.arquivo || '—') + ' · ' + cpNum(_rjsMed.linhas)
+                      + ' linha(s) rejeitada(s) → ' + cpNum(_rjsMed.chaves) + ' chave(s) RC+item')
+    +   '</div>'
+    +   '<div><strong style="color:var(--tx)">Levelboard</strong> — '
+    +     ((_rjsSla && _rjsSla.chaves)
+         ? cpEsc(_rjsSla.arquivo || '—') + ' · ' + cpNum(_rjsSla.chaves) + ' chave(s) com SLA/idas'
+           + (r.semSlaRc ? ' · <span style="color:var(--am)">' + cpNum(r.semSlaRc)
+                           + ' item(ns) sem SLA da RC</span>' : '')
+         : '<span style="color:var(--am)">sem SLA da RC. Suba o levelboard em Distribuição do MAPA.</span>')
+    +   '</div>'
+    +   '<div><strong style="color:var(--tx)">Rodrigo</strong> — '
+    +     (faltaRod ? '<span style="color:var(--am)">não subido ainda.</span>'
+                    : cpNum(_rjsRod.nMotivos) + ' item(ns) com padrão/justificativa'
+                      + (r.semPadrao ? ' · <span style="color:var(--am)">' + cpNum(r.semPadrao)
+                                       + ' sem padrão (rejeitado num cockpit anterior)</span>' : ''))
+    +   '</div>'
+    +   ((_rjsMed.posUsadas || []).length
+       ? '<div style="color:var(--am)">⚠ Na medição eu não achei o nome de algumas colunas e usei a '
+         + 'posição: ' + cpEsc((_rjsMed.posUsadas || []).join(' · ')) + '. Confira se bate.</div>' : '')
+    +   ((_rjsMed.chaves || 0) > (_rjsMed.comBruto || 0)
+       ? '<div style="color:var(--am)">⚠ Guardei a linha original da medição das primeiras '
+         + cpNum(_rjsMed.comBruto) + ' chaves; acima disso a exportação sai só com as colunas montadas.</div>' : '')
+    + '</div>';
+
+  // ── a lista ───────────────────────────────────────────────────
+  if (!n) {
+    h += '<div style="font-size:12px;color:var(--tx2);margin-top:.9rem">'
+      + (faltaMed ? 'Sem medição lida, não há o que mostrar.'
+                  : 'Nenhum item com STATUS_PROCESSO 8 e as duas colunas de eliminação vazias.')
+      + '</div>';
+  } else {
+    h += '<div style="overflow:auto;max-height:520px;margin-top:.9rem"><table><thead><tr>'
+      + RJS_COLS.map(function(c){
+          var num = ['slaPedido','slaRc','idas'].indexOf(c[1]) !== -1;
+          return '<th' + (num ? ' style="text-align:right"' : '') + '>' + cpEsc(c[0]) + '</th>';
+        }).join('')
+      + '</tr></thead><tbody>';
+    r.linhas.forEach(function(l){
+      var velho = (l.slaPedido || 0) >= 10;
+      h += '<tr' + (velho ? ' style="background:var(--vmc)"' : '') + '>'
+        + '<td style="font-weight:700;color:var(--az)">' + cpEsc(l.rc) + '</td>'
+        + '<td>' + cpEsc(l.itemRc || '—') + '</td>'
+        + '<td style="font-weight:600">' + cpEsc(l.pedido || '—') + '</td>'
+        + '<td>' + cpEsc(l.itemPedido || '—') + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(l.chaveComprador || '—') + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(l.comprador || '—') + '</td>'
+        + '<td>' + (l.dataPedido ? cpDataBR(l.dataPedido) : '—') + '</td>'
+        + '<td style="text-align:right;font-weight:700;color:' + (velho ? 'var(--vm)' : 'var(--tx)') + '">'
+        +   rjsNum(l.slaPedido) + '</td>'
+        + '<td style="text-align:right">' + rjsNum(l.slaRc) + '</td>'
+        + '<td style="text-align:right">' + rjsNum(l.idas) + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(l.padrao || '—') + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(l.justificativa || '—') + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+
+  // ── a cobrança ao contrário ───────────────────────────────────
+  if (r.fora.length) {
+    h += '<div style="margin-top:1rem;border:1.5px solid var(--am);border-radius:10px;'
+      +   'background:var(--amc);padding:.7rem .85rem">'
+      +   '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">'
+      +     '<strong style="font-size:12px">⚠ ' + cpNum(r.fora.length)
+      +       ' item(ns) apontado(s) pelo Rodrigo que não estão na medição</strong>'
+      +     '<button class="btn btn-s" style="font-size:11px;margin-left:auto"'
+      +       ' onclick="rjsBaixarFora()">⬇ Baixar a lista</button></div>'
+      +   '<div style="font-size:11px;color:var(--tx2);margin-bottom:.5rem">'
+      +     'Cada um destes é um rejeite que ninguém vai tratar pelo indicador enquanto ficar fora. '
+      +     'Vale conferir se o pedido saiu do status 8, se ganhou código de eliminação, ou se a '
+      +     'medição é de um recorte anterior ao cockpit.</div>'
+      +   '<div style="overflow:auto;max-height:260px"><table><thead><tr>'
+      +     '<th>Pedido</th><th>Item</th><th>Oportunidade</th>'
+      +     '<th style="text-align:right">SLA Pedido</th><th>Padrão rejeição</th>'
+      +     '<th>Justificativa</th><th>O pedido está na medição?</th>'
+      +   '</tr></thead><tbody>';
+    r.fora.forEach(function(f){
+      h += '<tr><td style="font-weight:700;color:var(--az)">' + cpEsc(f.pedido) + '</td>'
+        + '<td>' + cpEsc(f.item || '—') + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(f.op || '—') + '</td>'
+        + '<td style="text-align:right;font-weight:700">' + rjsNum(f.sla) + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(f.padrao || '—') + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(f.justificativa || '—') + '</td>'
+        + '<td style="font-size:10.5px;color:' + (f.pedidoNaMedicao ? 'var(--am)' : 'var(--vm)') + '">'
+        +   (f.pedidoNaMedicao ? 'sim, mas com outro item' : 'não') + '</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+  } else if (!faltaRod && !faltaMed) {
+    h += '<div class="al al-v" style="font-size:11.5px;margin-top:1rem">'
+      + '✓ Todo item apontado no último cockpit do Rodrigo tem par na medição.</div>';
+  }
+
+  // ── a regra escrita ───────────────────────────────────────────
+  h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:10px;line-height:1.7">'
+    + '<strong>A regra:</strong> da medição entram as linhas com <strong>STATUS_PROCESSO = 8</strong>, '
+    + '<strong>CODIGO_ELIMINACAO vazio</strong> e <strong>CODIGO_ELIMINACAO_ITEM_PEDIDO vazio</strong>; '
+    + 'a contagem é por <strong>Requisição + LINHAREQUISICAO</strong>, sem repetir. '
+    + 'O <strong>SLA Pedido</strong> vem do último cockpit do Rodrigo, casado por <strong>pedido</strong> '
+    + '(aquela aba não tem coluna de item). <strong>SLA RC</strong> e <strong>Idas ao Mercado</strong> '
+    + 'vêm do levelboard por <strong>RC + SEQ</strong>. <strong>Padrão</strong> e '
+    + '<strong>justificativa</strong> vêm da aba Dados por <strong>pedido + item</strong>, sempre do '
+    + 'cockpit mais recente. A exportação leva estas colunas e, no fim, a linha original da medição.'
+    + '</div></div>';
+  return h;
+}
+
+// ── exportação ────────────────────────────────────────────────────
+function rjsExportar(){
+  try {
+    var r = rjsMontar();
+    if (!r.linhas.length) { alert('Não há itens rejeitados para exportar.'); return; }
+    var cabMed = (_rjsMed.cabecalho || []).map(function(x){ return String(x || ''); });
+    var cab = RJS_COLS.map(function(c){ return c[0]; })
+      .concat(cabMed.map(function(c, i){ return 'MED · ' + (c || ('col ' + (i + 1))); }));
+    var linhas = [cab];
+    r.linhas.forEach(function(l){
+      var base = RJS_COLS.map(function(c){
+        var v = l[c[1]];
+        if (c[1] === 'dataPedido') return v ? cpDataBR(v) : '';
+        return (v == null) ? '' : v;
+      });
+      linhas.push(base.concat((l.bruto || []).map(function(x){ return x == null ? '' : x; })));
+    });
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(linhas), 'Rejeite Supervisor');
+    if (r.fora.length) {
+      var f = [['Pedido','Item','Oportunidade','SLA Pedido','Padrão rejeição','Justificativa','Pedido na medição']];
+      r.fora.forEach(function(o){
+        f.push([o.pedido, o.item, o.op, o.sla == null ? '' : o.sla,
+                o.padrao, o.justificativa, o.pedidoNaMedicao ? 'sim, outro item' : 'não']);
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(f), 'Fora do indicador');
+    }
+    XLSX.writeFile(wb, 'Rejeite_Supervisor_' + cpHojeISO().replace(/-/g, '') + '.xlsx');
+  } catch (e) { alert('Não consegui exportar: ' + e.message); }
+}
+
+function rjsBaixarFora(){
+  try {
+    var r = rjsMontar();
+    if (!r.fora.length) { alert('Nada fora do indicador.'); return; }
+    var f = [['Pedido','Item','Oportunidade','SLA Pedido','Padrão rejeição','Justificativa','Pedido na medição']];
+    r.fora.forEach(function(o){
+      f.push([o.pedido, o.item, o.op, o.sla == null ? '' : o.sla,
+              o.padrao, o.justificativa, o.pedidoNaMedicao ? 'sim, outro item' : 'não']);
+    });
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(f), 'Fora do indicador');
+    XLSX.writeFile(wb, 'Rejeite_fora_do_indicador_' + cpHojeISO().replace(/-/g, '') + '.xlsx');
+  } catch (e) { alert('Não consegui baixar: ' + e.message); }
+}
+
 
 // Status B: a lista é só leitura aqui. Quem trata é a aba do Controle de
 // Pedidos — este card existe para o André ver o tamanho da fila.
@@ -15300,7 +15842,7 @@ async function gpTrocarComentario(chave, valor){
 
 // ── o levelboard ──────────────────────────────────────────────────
 function gpLerLevelboard(linhas){
-  var r = { itens:{}, lidas:0, uteis:0, aviso:'', colunas:{} };
+  var r = { itens:{}, lidas:0, uteis:0, aviso:'', colunas:{}, sla:{}, comSla:0 };
   if (!linhas || !linhas.length) { r.aviso = 'Arquivo vazio.'; return r; }
   var iCab = -1, cabs = [];
   for (var k = 0; k < Math.min(linhas.length, 15); k++) {
@@ -15314,7 +15856,10 @@ function gpLerLevelboard(linhas){
   var ix = function(n){ return _cpAchaCol(cabs, n); };
   var col = { rc: ix(['RC']), seq: ix(['SEQ','ITEM']),
               neg: ix(['NEGOCIACAO']), forn: ix(['FORNECEDOR_GANHADOR_PATEC']),
-              nm: ix(['NM_PEDIDO']) };
+              nm: ix(['NM_PEDIDO']),
+              // o Rejeite Supervisor usa estas duas (BO e AM)
+              sla: ix(['SLA_DIAS','SLA_DIA','SLA']),
+              idas: ix(['QTD_IDAS_LEVEL','QTD_IDAS','IDAS_LEVEL']) };
   r.colunas = col;
   if (col.rc === -1) { r.aviso = 'Não achei a coluna RC no levelboard.'; return r; }
   var pega = function(l, j){ return j === -1 ? '' : String(l[j] == null ? '' : l[j]).trim(); };
@@ -15326,6 +15871,18 @@ function gpLerLevelboard(linhas){
     var neg  = cpDataISO(pega(l, col.neg));   // "solicitado" e vazio viram ''
     var forn = pega(l, col.forn);
     var nm   = pega(l, col.nm);
+    // SLA e idas ao mercado vão para um mapa à parte: eles existem em
+    // quase toda linha do levelboard, e enfiá-los no doc da negociação
+    // estouraria o limite de 1 MB do Firestore. Aqui fica só o essencial.
+    var slaT  = pega(l, col.sla), idasT = pega(l, col.idas);
+    if (slaT !== '' || idasT !== '') {
+      var kS = rc + '|' + pega(l, col.seq);
+      if (!r.sla[kS]) {
+        r.sla[kS] = [ slaT === '' ? null : (mdNum(slaT) || 0),
+                      idasT === '' ? null : (mdNum(idasT) || 0) ];
+        r.comSla++;
+      }
+    }
     if (!neg && !forn && !nm) continue;
     r.itens[rc + '|' + pega(l, col.seq)] = { negociacao:neg, fornecedor:forn, nmPedido:nm };
     r.uteis++;
@@ -15357,9 +15914,15 @@ async function gpUploadLevelboard(file){
     _gpLb = { itens:r.itens, arquivo:file.name, lidas:r.lidas, uteis:r.uteis,
               atualizadoEm:new Date().toISOString(), atualizadoPor:cpQuem() };
     var ok = await gpGravarLb();
+    var okSla = await rjsGravarSla(r, file.name);
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ <strong>' + cpEsc(file.name) + '</strong> — '
       + cpNum(r.lidas) + ' linhas, ' + cpNum(r.uteis) + ' com negociação/fornecedor/NM'
-      + (ok ? '.' : ' <span style="color:var(--am)">(não consegui gravar no Firebase)</span>') + '</span>';
+      + (ok ? '.' : ' <span style="color:var(--am)">(não consegui gravar no Firebase)</span>')
+      + (r.comSla ? ' · ' + cpNum(_rjsSla.chaves || r.comSla) + ' com SLA/idas para o Rejeite'
+                  + (okSla ? '' : ' <span style="color:var(--am)">(não gravou)</span>')
+                  + (_rjsSla.cortou ? ' <span style="color:var(--am)">(cortei em '
+                      + cpNum(RJS_SLA_MAX) + ')</span>' : '')
+                 : '') + '</span>';
     if (gpItens().length) {
       var casam = gpCasamComOMapa();
       if (st) st.innerHTML += casam
@@ -15372,6 +15935,25 @@ async function gpUploadLevelboard(file){
   } catch (e) {
     if (st) st.innerHTML = '<span style="color:var(--vm)">✗ Erro ao ler: ' + cpEsc(e.message) + '</span>';
   }
+}
+
+// O mapa RC|SEQ → [SLA_Dias, QTD_IDAS_LEVEL] mora num doc só dele.
+var RJS_SLA_MAX = 12000;
+var _rjsSla = { itens:{}, chaves:0, cortou:false, arquivo:'', atualizadoEm:'' };
+
+async function rjsGravarSla(r, arquivo){
+  try {
+    var ks = Object.keys(r.sla || {});
+    var cortou = ks.length > RJS_SLA_MAX;
+    var mapa = {};
+    ks.slice(0, RJS_SLA_MAX).forEach(function(k){ mapa[k] = r.sla[k]; });
+    _rjsSla = { itens:mapa, chaves:Object.keys(mapa).length, cortou:cortou,
+                arquivo:arquivo || '', atualizadoEm:new Date().toISOString() };
+    if (!_rjsSla.chaves) return false;
+    var db = getDB(); if (!db) return false;
+    await db.collection('config').doc('rejeite_sup_sla').set(_rjsSla);
+    return true;
+  } catch (e) { console.warn('rjsGravarSla:', e); return false; }
 }
 
 async function gpGravarLb(){
