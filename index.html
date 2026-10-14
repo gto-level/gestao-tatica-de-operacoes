@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/10 05:02';
+var GTO_BUILD = '14/10 06:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -11591,7 +11591,7 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
             convMapa:{}, convTotal:{ mem:0, emi:0, lib:0, aguard:0, rej:0, outro:0 },
             convVelhas:0, convDesde:'',
             rejMed:{}, rejMedTotal:0, donoPedido:{},
-            rejSup:[], rejSupTotal:0, rejSupCols:{}, rejSupPos:[],
+            rejSup:[], rejSupTotal:0, rejSupCols:{}, rejSupPos:[], rejSupPed:{},
             cockFunil:{ lidas:0, st3:0, semElim:0, rlrt:0, emLib:0,
                         colGer:'', colPsmv:'', colSt:'', colElim:'',
                         gerentes:{}, psmv:{}, status:{} } };
@@ -11705,6 +11705,29 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
       // CODIGO_ELIMINACAO_ITEM_PEDIDO vazio. Fica antes do corte por
       // comprador em branco: item rejeitado sem RESP_PEDIDO continua sendo
       // item rejeitado, e sumir com ele falsearia a conta.
+      // Retrato de cada pedido que passou pela medição, rejeitado ou não.
+      // É o que permite dizer, depois, POR QUE um item apontado pelo
+      // Rodrigo não entrou: nem está na medição, está com outro status, ou
+      // está em 8 mas foi tirado por um código de eliminação.
+      (function(){
+        if (iPdRej === -1) return;
+        var pd = _rjsN(lb[iPdRej]);
+        if (!pd) return;
+        var st8 = _cpStatusNum(lb[iSt]) === 8;
+        var temEl = _cpTemEliminacao(iElPed === -1 ? '' : lb[iElPed])
+                 || _cpTemEliminacao(iElIt  === -1 ? '' : lb[iElIt]);
+        var o = r.rejSupPed[pd];
+        if (!o) {
+          if (Object.keys(r.rejSupPed).length >= RJS_PED_MAX) return;
+          o = r.rejSupPed[pd] = { s:'', e:0 };
+        }
+        var stT = String(lb[iSt] == null ? '' : lb[iSt]).trim().replace(/\.0+$/, '');
+        if (stT && (',' + o.s + ',').indexOf(',' + stT + ',') === -1) {
+          o.s = o.s ? (o.s + ',' + stT) : stT;
+        }
+        if (st8 && temEl) o.e++;
+      })();
+
       if (iSt !== -1 && _cpStatusNum(lb[iSt]) === 8
           && !_cpTemEliminacao(iElPed === -1 ? '' : lb[iElPed])
           && !_cpTemEliminacao(iElIt  === -1 ? '' : lb[iElIt])) {
@@ -14546,8 +14569,10 @@ async function gpSalvarCockpit(med, arquivo){
 // A contagem do card é por chave RC + LINHAREQUISICAO, sem repetir: a
 // mesma RC/item pode vir em mais de uma linha de pedido.
 var RJS_BRUTO_MAX = 2500;
-var _rjsMed = { itens:[], linhas:0, chaves:0, posUsadas:[], cabecalho:[],
-                comBruto:0, arquivo:'', atualizadoEm:'', atualizadoPor:'' };
+var RJS_PED_MAX = 20000;
+var _rjsMed = { itens:[], linhas:0, chaves:0, posUsadas:[], pedidos:{},
+                cabecalho:[], comBruto:0, arquivo:'', atualizadoEm:'',
+                atualizadoPor:'' };
 var _rjsRod = { cockpit:{}, motivos:{}, nCockpit:0, nMotivos:0, nDados:0,
                 foraDoCockpit:0, arquivo:'', atualizadoEm:'', atualizadoPor:'' };
 
@@ -14594,6 +14619,7 @@ async function rjsSalvarMedicao(med, arquivo){
     });
     _rjsMed = { itens: itens.slice(0, 5000), linhas: +med.rejSupTotal || 0,
                 chaves: itens.length, posUsadas: med.rejSupPos || [],
+                pedidos: med.rejSupPed || {},
                 cabecalho: med.cabecalhoCompleto || [], comBruto: comBruto,
                 arquivo: arquivo || '', atualizadoEm:new Date().toISOString(),
                 atualizadoPor:cpQuem() };
@@ -15115,7 +15141,8 @@ async function rjAbrir(){
       if (docs[1] && docs[1].exists) {
         var M = docs[1].data() || {};
         _rjsMed = { itens:M.itens || [], linhas:+M.linhas || 0, chaves:+M.chaves || 0,
-                    posUsadas:M.posUsadas || [], cabecalho:M.cabecalho || [],
+                    posUsadas:M.posUsadas || [], pedidos:M.pedidos || {},
+                    cabecalho:M.cabecalho || [],
                     comBruto:+M.comBruto || 0, arquivo:M.arquivo || '',
                     atualizadoEm:M.atualizadoEm || '', atualizadoPor:M.atualizadoPor || '' };
       }
@@ -15346,22 +15373,43 @@ function rjsMontar(){
     };
   });
 
+  // ── por que este item não entrou ──────────────────────────────
+  // Quatro desfechos possíveis, e cada um pede uma ação diferente. Dizer
+  // só "não está" obrigaria o André a abrir a medição item por item.
+  var ped = (_rjsMed && _rjsMed.pedidos) ? _rjsMed.pedidos : {};
+  var temRetrato = Object.keys(ped).length > 0;
+  var motivoDe = function(p, it){
+    if (porPedido[p]) return { cod:'outroItem',
+      txt:'o pedido está rejeitado na medição, mas em outro item' };
+    var o = ped[p];
+    if (!temRetrato) return { cod:'semRetrato', txt:'o pedido não está entre os rejeitados da medição' };
+    if (!o) return { cod:'foraDaMedicao', txt:'o pedido não aparece na medição' };
+    if (o.e) return { cod:'eliminado',
+      txt:'está em status 8, mas com código de eliminação — a regra tira' };
+    return { cod:'outroStatus',
+      txt:'está na medição com status ' + (o.s || '—') + ', não 8' };
+  };
+
   // o que o Rodrigo aponta e a medição não tem
   var fora = [];
   Object.keys(mot).forEach(function(k){
     if (porPedItem[k]) return;
     var pt = k.split('|'), c = cock[pt[0]] || {};
+    var m = motivoDe(pt[0], pt[1]);
     fora.push({ pedido:pt[0], item:pt[1], padrao:mot[k].padrao,
                 justificativa:mot[k].justificativa, sla:c.sla == null ? null : c.sla,
-                op:c.op || '', pedidoNaMedicao: !!porPedido[pt[0]] });
+                op:c.op || '', pedidoNaMedicao: !!porPedido[pt[0]],
+                motivo:m.txt, cod:m.cod });
   });
   // pedido do cockpit que nem motivo tem e também não está na medição
   Object.keys(cock).forEach(function(p){
     if (porPedido[p]) return;
     var temMotivo = Object.keys(mot).some(function(k){ return k.split('|')[0] === p; });
     if (temMotivo) return;
+    var m2 = motivoDe(p, '');
     fora.push({ pedido:p, item:'', padrao:'', justificativa:'',
-                sla:cock[p].sla, op:cock[p].op || '', pedidoNaMedicao:false });
+                sla:cock[p].sla, op:cock[p].op || '', pedidoNaMedicao:false,
+                motivo:m2.txt, cod:m2.cod });
   });
   fora.sort(function(a, b){ return String(a.pedido).localeCompare(String(b.pedido)); });
 
@@ -15387,7 +15435,22 @@ function rjsMontar(){
              dela:  Object.keys(cock).slice(0, 3) };
   }
 
-  return { linhas:linhas, fora:fora, diag:diag,
+  // A conta que tem de fechar, e em que unidade. 170 LINHAS do último
+  // cockpit viram 151 PEDIDOS, que na aba Dados viram N ITENS
+  // (pedido+item) — é este N que se compara com a medição, não as 170.
+  var conta = {
+    linhasCockpit: +(_rjsRod.nCockpit || 0),
+    pedidosCockpit: Object.keys(cock).length,
+    apontados: Object.keys(mot).length + fora.filter(function(f){ return !f.item; }).length,
+    casados: 0, fora: fora.length
+  };
+  conta.casados = conta.apontados - conta.fora;
+
+  var porMotivo = {};
+  fora.forEach(function(f){ porMotivo[f.motivo] = (porMotivo[f.motivo] || 0) + 1; });
+
+  return { linhas:linhas, fora:fora, diag:diag, conta:conta, porMotivo:porMotivo,
+           temRetrato:temRetrato,
            semPadrao: linhas.filter(function(l){ return !l.padrao; }).length,
            semSlaRc:  semSla };
 }
@@ -15426,11 +15489,11 @@ function rjSupervisorHTML(){
     +     '<div style="font-size:10px;color:var(--tx2)">chaves RC + item da RC</div></div>'
     +   '<div style="flex:1;min-width:150px;background:var(--cin);border:1px solid var(--brd);'
     +     'border-radius:10px;padding:.7rem .9rem">'
-    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2);letter-spacing:.4px">NO CADERNO DO RODRIGO</div>'
+    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2);letter-spacing:.4px">APONTADOS E CASADOS</div>'
     +     '<div style="font-size:24px;font-weight:800;color:var(--tx);line-height:1.1">'
-    +       cpNum(r.linhas.filter(function(l){ return l.noCockpit; }).length) + '</div>'
-    +     '<div style="font-size:10px;color:var(--tx2)">de ' + cpNum(_rjsRod.nCockpit || 0)
-    +       ' linha(s) do último cockpit</div></div>'
+    +       cpNum(r.conta.casados) + '</div>'
+    +     '<div style="font-size:10px;color:var(--tx2)">de ' + cpNum(r.conta.apontados)
+    +       ' item(ns) apontado(s) pelo Rodrigo</div></div>'
     +   '<div style="flex:1;min-width:150px;background:' + (r.fora.length ? 'var(--amc)' : 'var(--vdc)')
     +     ';border:1px solid ' + (r.fora.length ? 'var(--am)' : 'var(--vd)') + ';border-radius:10px;padding:.7rem .9rem">'
     +     '<div style="font-size:9px;font-weight:700;color:var(--tx2);letter-spacing:.4px">FORA DO INDICADOR</div>'
@@ -15438,6 +15501,30 @@ function rjSupervisorHTML(){
     +       ';line-height:1.1">' + cpNum(r.fora.length) + '</div>'
     +     '<div style="font-size:10px;color:var(--tx2)">apontados pelo Rodrigo e sem par na medição</div></div>'
     + '</div>';
+
+  // ── a conta, em voz alta ──────────────────────────────────────
+  // O André somou 170 − 148 = 22 e estranhou o 20. Eram unidades
+  // diferentes: 170 são LINHAS do cockpit, 148 são ITENS da medição. Esta
+  // linha mostra a conversão de uma para a outra, para a conta fechar na
+  // tela em vez de na cabeça dele.
+  if (!faltaRod) {
+    h += '<div style="font-size:11.5px;color:var(--tx2);background:var(--cin);'
+      +   'border:1px solid var(--brd);border-radius:8px;padding:.6rem .8rem;margin-bottom:.9rem;'
+      +   'line-height:1.8">'
+      +   '<strong style="color:var(--tx)">Como a conta fecha:</strong> '
+      +   cpNum(r.conta.linhasCockpit) + ' linha(s) no último cockpit → '
+      +   cpNum(r.conta.pedidosCockpit) + ' pedido(s) distinto(s) → '
+      +   '<strong>' + cpNum(r.conta.apontados) + '</strong> item(ns) apontado(s) (pedido + item) · '
+      +   '<strong style="color:var(--vd)">' + cpNum(r.conta.casados) + ' casaram</strong> com a medição · '
+      +   '<strong style="color:' + (r.conta.fora ? 'var(--am)' : 'var(--vd)') + '">'
+      +   cpNum(r.conta.fora) + ' não</strong>.'
+      +   (r.conta.linhasCockpit !== r.conta.apontados
+         ? '<div style="font-size:10.5px">Linha não é item: o mesmo pedido aparece mais de uma vez '
+           + 'no cockpit, e é a aba <strong>Dados</strong> que diz quais itens dele foram rejeitados. '
+           + 'Por isso o número a cobrar é ' + cpNum(r.conta.apontados) + ', não '
+           + cpNum(r.conta.linhasCockpit) + '.</div>' : '')
+      + '</div>';
+  }
 
   // ── o upload do Rodrigo ───────────────────────────────────────
   h += '<div style="border:2px dashed var(--brd);border-radius:10px;padding:1rem;text-align:center;'
@@ -15539,13 +15626,21 @@ function rjSupervisorHTML(){
       +     '<button class="btn btn-s" style="font-size:11px;margin-left:auto"'
       +       ' onclick="rjsBaixarFora()">⬇ Baixar a lista</button></div>'
       +   '<div style="font-size:11px;color:var(--tx2);margin-bottom:.5rem">'
-      +     'Cada um destes é um rejeite que ninguém vai tratar pelo indicador enquanto ficar fora. '
-      +     'Vale conferir se o pedido saiu do status 8, se ganhou código de eliminação, ou se a '
-      +     'medição é de um recorte anterior ao cockpit.</div>'
+      +     'Cada um destes é um rejeite que ninguém vai tratar pelo indicador enquanto ficar fora.'
+      +     (r.temRetrato ? '' : ' <span style="color:var(--am)">Suba a medição de novo para eu '
+                                 + 'conseguir dizer o motivo de cada um.</span>')
+      +   '</div>'
+      +   '<div style="font-size:11.5px;margin-bottom:.6rem;line-height:1.9">'
+      +     (Object.keys(r.porMotivo)
+              .sort(function(x, y){ return r.porMotivo[y] - r.porMotivo[x]; })
+              .map(function(m){
+                return '<div><strong>' + r.porMotivo[m] + '</strong> — ' + cpEsc(m) + '</div>';
+              }).join(''))
+      +   '</div>'
       +   '<div style="overflow:auto;max-height:260px"><table><thead><tr>'
       +     '<th>Pedido</th><th>Item</th><th>Oportunidade</th>'
       +     '<th style="text-align:right">SLA Pedido</th><th>Padrão rejeição</th>'
-      +     '<th>Justificativa</th><th>O pedido está na medição?</th>'
+      +     '<th>Justificativa</th><th>Por que ficou de fora</th>'
       +   '</tr></thead><tbody>';
     r.fora.forEach(function(f){
       h += '<tr><td style="font-weight:700;color:var(--az)">' + cpEsc(f.pedido) + '</td>'
@@ -15554,8 +15649,8 @@ function rjSupervisorHTML(){
         + '<td style="text-align:right;font-weight:700">' + rjsNum(f.sla) + '</td>'
         + '<td style="font-size:10.5px">' + cpEsc(f.padrao || '—') + '</td>'
         + '<td style="font-size:10.5px">' + cpEsc(f.justificativa || '—') + '</td>'
-        + '<td style="font-size:10.5px;color:' + (f.pedidoNaMedicao ? 'var(--am)' : 'var(--vm)') + '">'
-        +   (f.pedidoNaMedicao ? 'sim, mas com outro item' : 'não') + '</td></tr>';
+        + '<td style="font-size:10.5px;color:' + (f.cod === 'outroItem' ? 'var(--am)' : 'var(--vm)') + '">'
+        +   cpEsc(f.motivo || '—') + '</td></tr>';
     });
     h += '</tbody></table></div></div>';
   } else if (!faltaRod && !faltaMed) {
@@ -15597,10 +15692,10 @@ function rjsExportar(){
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(linhas), 'Rejeite Supervisor');
     if (r.fora.length) {
-      var f = [['Pedido','Item','Oportunidade','SLA Pedido','Padrão rejeição','Justificativa','Pedido na medição']];
+      var f = [['Pedido','Item','Oportunidade','SLA Pedido','Padrão rejeição','Justificativa','Por que ficou de fora']];
       r.fora.forEach(function(o){
         f.push([o.pedido, o.item, o.op, o.sla == null ? '' : o.sla,
-                o.padrao, o.justificativa, o.pedidoNaMedicao ? 'sim, outro item' : 'não']);
+                o.padrao, o.justificativa, o.motivo || '']);
       });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(f), 'Fora do indicador');
     }
@@ -15612,10 +15707,10 @@ function rjsBaixarFora(){
   try {
     var r = rjsMontar();
     if (!r.fora.length) { alert('Nada fora do indicador.'); return; }
-    var f = [['Pedido','Item','Oportunidade','SLA Pedido','Padrão rejeição','Justificativa','Pedido na medição']];
+    var f = [['Pedido','Item','Oportunidade','SLA Pedido','Padrão rejeição','Justificativa','Por que ficou de fora']];
     r.fora.forEach(function(o){
       f.push([o.pedido, o.item, o.op, o.sla == null ? '' : o.sla,
-              o.padrao, o.justificativa, o.pedidoNaMedicao ? 'sim, outro item' : 'não']);
+              o.padrao, o.justificativa, o.motivo || '']);
     });
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(f), 'Fora do indicador');
