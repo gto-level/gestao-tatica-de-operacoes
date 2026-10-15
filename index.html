@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 17:10';
+var GTO_BUILD = '15/10 18:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -11818,6 +11818,7 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
       return r;
     }
     r.formato = 'cru';
+    var _nPed = 0;
     for (var b = iCab + 1; b < linhas.length; b++) {
       var lb = linhas[b] || [];
       var nomeB = String(lb[iQuem] == null ? '' : lb[iQuem]).trim();
@@ -11840,8 +11841,12 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
                  || _cpTemEliminacao(iElIt  === -1 ? '' : lb[iElIt]);
         var o = r.rejSupPed[pd];
         if (!o) {
-          if (Object.keys(r.rejSupPed).length >= RJS_PED_MAX) return;
+          // Contador, não Object.keys: contar as chaves A CADA LINHA faz a
+          // leitura crescer ao quadrado — numa medição de 119 mil linhas
+          // isso sozinho levava a leitura de segundos para minutos.
+          if (_nPed >= RJS_PED_MAX) return;
           o = r.rejSupPed[pd] = { s:'', e:0 };
+          _nPed++;
         }
         var stT = String(lb[iSt] == null ? '' : lb[iSt]).trim().replace(/\.0+$/, '');
         if (stT && (',' + o.s + ',').indexOf(',' + stT + ',') === -1) {
@@ -12167,9 +12172,22 @@ async function cpHandleUpload(file){
   var data = cpDataSel();
   if (st) st.innerHTML = '⏳ Lendo a medição...';
   if (lt) lt.innerHTML = '';
+  // A leitura trava a aba inteira enquanto roda: num arquivo de 33 MB
+  // são segundos de tela parada. Entre uma etapa e outra eu devolvo o
+  // fôlego ao navegador para ele pintar o aviso — assim dá para ver que
+  // está andando em vez de achar que travou.
+  var _respira = function(){ return new Promise(function(ok){ setTimeout(ok, 0); }); };
+  var _passo = async function(txt){
+    if (st) st.innerHTML = '⏳ ' + txt;
+    await _respira();
+  };
+  var _t0 = Date.now();
   try {
     _cpUltimoArquivo = file;
+    var _mb = Math.round((file.size || 0) / 104857.6) / 10;
+    await _passo('Lendo a medição' + (_mb ? ' (' + String(_mb).replace('.', ',') + ' MB)' : '') + '...');
     var buf = await file.arrayBuffer();
+    await _passo('Abrindo a planilha...');
     var wb = _lerWorkbookBR(buf, file.name);
 
     // O arquivo pode ter mais de uma planilha — e a medição nem sempre está
@@ -12177,6 +12195,9 @@ async function cpHandleUpload(file){
     var nomes = wb.SheetNames || [];
     var med = null;
     for (var ip = 0; ip < nomes.length; ip++) {
+      await _passo('Conferindo as linhas' + (nomes.length > 1
+        ? ' · planilha ' + (ip + 1) + ' de ' + nomes.length + ' (' + cpEsc(nomes[ip]) + ')' : '')
+        + '...');
       var linhasP = XLSX.utils.sheet_to_json(wb.Sheets[nomes[ip]], { header:1, defval:'', raw:true });
       var mp = cpLerMedicao(linhasP, data);
       mp.planilha = nomes[ip];
@@ -12185,6 +12206,8 @@ async function cpHandleUpload(file){
         || ((mp.total || 0) === (med.total || 0) && (mp.naData || 0) > (med.naData || 0));
       if (melhorQue) med = mp;
     }
+    await _passo('Gravando...');
+    med.segundos = Math.round((Date.now() - _t0) / 100) / 10;
     if (!med) med = cpLerMedicao([], data);
     med.planilhas = nomes;
     med.arquivoInfo = _cpIdentidadeArquivo(file);
@@ -12308,6 +12331,9 @@ function cpTextoLeitura(med, data){
            + med.planilhas.length + ').');
   t.push(med.formato === 'dinamizado' ? 'Arquivo já somado por comprador.'
                                       : cpNum(med.lidas) + ' linhas consideradas.');
+  // O tempo de leitura fica escrito: é assim que uma lentidão nova
+  // aparece sozinha, em vez de virar "hoje está devagar".
+  if (med.segundos) t.push('Lido em ' + String(med.segundos).replace('.', ',') + 's.');
   if (med.eliminadas) t.push(cpNum(med.eliminadas) + ' item(ns) eliminado(s) fora da conta.');
   else if (med.feitosComCodigo) t.push('<span style="color:var(--am)">' + cpNum(med.feitosComCodigo)
     + ' item(ns) feito(s) com código de eliminação — estão contando. '
