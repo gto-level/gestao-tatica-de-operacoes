@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 03:05';
+var GTO_BUILD = '15/10 06:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -822,7 +822,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <button class="btn btn-p" onclick="arjGerar()" style="flex:1;justify-content:center;font-size:13px;padding:10px">🖨️ Gerar slide</button>
-          <button class="btn btn-s" onclick="arjGravarHoje()">💾 Gravar o dia de hoje</button>
+          <button class="btn btn-s" onclick="arjGravarHoje()">💾 Registrar a base de hoje</button>
           <button class="btn btn-s" onclick="arjAbrir()">↻ Atualizar</button>
         </div>
         <div id="arj-aviso" style="font-size:12px;margin-top:.7rem"></div>
@@ -12094,6 +12094,7 @@ async function cpHandleUpload(file){
     await gpSalvarMemorizados(med, file.name);
     await monSalvarConversao(med, file.name);
     await rjsSalvarMedicao(med, file.name);
+    try { await rjlCarregar(); await rjlAplicarSupervisor(); } catch (e) {}
     try { await rjHistGravar(); } catch (e) {}
     try { if (document.getElementById('rj-supervisor')) rjDesenhar(); } catch (e) {}
 
@@ -14756,6 +14757,9 @@ async function gpUploadRejeitados(file){
     // mostrar a lista nova sem precisar de F5. Redesenha ANTES do recado —
     // o redesenho troca o innerHTML e levaria o recado junto.
     try { if (document.getElementById('rj-fornecedor')) rjDesenhar(); } catch (e) {}
+    // A planilha nova é a fotografia do que ainda está rejeitado: quem
+    // estava aberto e não veio nela foi resolvido.
+    try { await rjlCarregar(); await rjlAplicarFornecedor(); } catch (e) {}
     try { await rjHistGravar(); } catch (e) {}
     st = document.getElementById('gp-rej-status');
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ <strong>' + cpEsc(file.name) + '</strong> — '
@@ -15389,6 +15393,7 @@ async function rjsUploadRodrigo(file){
       var db = getDB();
       if (db) { await db.collection('config').doc('rejeite_sup_rodrigo').set(_rjsRod); ok = true; }
     } catch (e2) { console.warn('rjsUploadRodrigo gravar:', e2); }
+    try { await rjlCarregar(); await rjlAplicarSupervisor(); } catch (e) {}
     try { await rjHistGravar(); } catch (e) {}
     rjDesenhar();
     st = document.getElementById('rjs-rod-status');
@@ -15688,12 +15693,26 @@ function arjDados(ini, fim){
   var slaSup = {}, slaForn = {};
   ORDEM.forEach(function(k){ slaSup[k] = 0; slaForn[k] = 0; });
   var somaS = 0, comS = 0, somaF = 0, comF = 0, valS = [], valF = [];
+  // O SLA vem do registro: o que a planilha trouxe mais os dias
+  // corridos desde aquele upload. Num dia sem planilha nova daquele
+  // lado, o número sobe mesmo assim — que é o que acontece na vida real.
+  var hojeISO = cpHojeISO();
+  var porChaveS = {}, porChaveF = {};
+  rjlLista('s').forEach(function(it){ porChaveS[String(it.k).slice(2)] = it; });
+  rjlLista('f').forEach(function(it){ porChaveF[String(it.k).slice(2)] = it; });
+
   sup.forEach(function(l){
-    slaSup[faixa(l.slaPedido)]++;
-    if (l.slaPedido != null) { somaS += (+l.slaPedido || 0); comS++; valS.push(+l.slaPedido || 0); }
+    var it = porChaveS[_rjsN(l.rc) + '|' + _rjsN(l.itemRc)];
+    var v = it ? rjlSla(it, hojeISO) : l.slaPedido;
+    l.slaHoje = v;
+    slaSup[faixa(v)]++;
+    if (v != null) { somaS += (+v || 0); comS++; valS.push(+v || 0); }
   });
   forn.forEach(function(i){
-    var dd = (i.dias === '' || i.dias == null) ? null : (+i.dias || 0);
+    var it2 = porChaveF[_rjsN(i.pedido)];
+    var dd = it2 ? rjlSla(it2, hojeISO)
+                 : ((i.dias === '' || i.dias == null) ? null : (+i.dias || 0));
+    i.diasHoje = dd;
     slaForn[faixa(dd)]++;
     if (dd != null) { somaF += dd; comF++; valF.push(dd); }
   });
@@ -15725,11 +15744,14 @@ function arjDados(ini, fim){
   return {
     forn:forn, sup:sup, q:q, fora:r.fora.length,
     total: forn.length + sup.length,
-    serie: rjHistSerie(ini, fim),
-    resolvidos: rjHistResolvidos(fim),
-    mov: rjHistMovimento(fim),
-    movSup: rjHistMovimento(fim, 's'),
-    movForn: rjHistMovimento(fim, 'f'),
+    // A evolução e o movimento saem do REGISTRO DE ITENS, não de
+    // retratos diários: assim um dia sem ninguém abrir a tela continua
+    // tendo valor, e o resolvido é o item que sumiu da planilha nova
+    // daquele lado — nunca uma diferença entre fotos.
+    serie: rjlSerie(ini, fim),
+    mov: rjlMovimento(fim),
+    movSup: rjlMovimento(fim, 's'),
+    movForn: rjlMovimento(fim, 'f'),
     slaSup:slaSup, slaForn:slaForn, ordemSla:ORDEM,
     mediaSup: comS ? Math.round(somaS / comS * 10) / 10 : null,
     mediaForn: comF ? Math.round(somaF / comF * 10) / 10 : null,
@@ -15788,6 +15810,21 @@ function arjMovimentoHTML(m, comp){
 // verde o total, laranja o supervisor, vermelho o fornecedor, azul o
 // resolvido — e essa mesma cor segue no gráfico e nas barras daquele
 // lado o slide inteiro. O resto é o padrão do PATEC.
+// O card só mostra percentual quando houve base nova entre os dois
+// retratos. Sem base nova, 0% seria uma mentira educada: ninguém mediu
+// nada, e não é que ninguém resolveu nada.
+// Agora a conta é por item, e vale todo dia: dos que estavam abertos
+// ontem, quantos foram concluídos hoje. Não depende de ter subido
+// planilha — se nenhuma veio, nada foi concluído e 0% é a verdade.
+function _arjPctTexto(m){
+  if (!m || !m.base) return '—';
+  return String(m.pct).replace('.', ',') + '%';
+}
+function _arjPctSub(m){
+  if (!m || !m.base) return 'ainda sem base anterior';
+  return _arjN(m.saiu) + ' dos ' + _arjN(m.base) + ' que estavam abertos em ' + _arjBR(m.de);
+}
+
 function arjCard(rot, val, sub, cor){
   return '<div class="mcard" style="background:#fff !important;border:1.5px solid '
     +   cor + ' !important">'
@@ -15823,9 +15860,7 @@ function arjSlideHTML(op){
             _arjN(d.q.level) + ' Level · ' + _arjN(d.q.petro) + ' Petrobras', corS)
       +   arjCard('Rejeite Fornecedor', _arjN(d.forn.length),
             _arjN(d.foraPrazo) + ' fora do prazo', corF)
-      +   arjCard('% resolvidos', d.mov ? (String(d.mov.pct).replace('.', ',') + '%') : '—',
-            d.mov ? _arjN(d.mov.saiu) + ' dos ' + _arjN(d.mov.base) + ' de ' + _arjBR(d.mov.de)
-                  : 'preciso de dois dias', corP)
+      +   arjCard('% resolvidos', _arjPctTexto(d.mov), _arjPctSub(d.mov), corP)
       + '</div></div>';
 
     secs += '<div class="two-col" style="grid-template-columns:1.25fr 1fr">'
@@ -15838,15 +15873,16 @@ function arjSlideHTML(op){
       +   '</div>'
       +   '<div>'
       +     (op.incSla
-          ? '<div class="col-tit">Supervisor — dias parados desde o envio do cockpit'
-            + _arjMedia(d.mediaSup, d.medianaSup, d.dataSup)
-            + '</div>' + tempoHTML(d.slaSup, corS, d.sup.length)
+          // A média e a mediana saíram daqui: num título de slide elas
+          // viravam uma frase longa que ninguém lia inteira. Quem quiser
+          // o número encontra na tela do gerador.
+          ? '<div class="col-tit">Supervisor — dias parados desde o envio do cockpit</div>'
+            + tempoHTML(d.slaSup, corS, d.sup.length)
             // Respiro entre os dois: são coisas diferentes, e coladas
             // pareciam uma lista só de nove faixas.
             + '<div style="height:12px;margin:9px 0 0;border-top:1px solid #e3e8ef"></div>'
-            + '<div class="col-tit">Fornecedor — dias parados desde a rejeição'
-            + _arjMedia(d.mediaForn, d.medianaForn, d.dataForn)
-            + '</div>' + tempoHTML(d.slaForn, corF, d.forn.length)
+            + '<div class="col-tit">Fornecedor — dias parados desde a rejeição</div>'
+            + tempoHTML(d.slaForn, corF, d.forn.length)
           : '')
       +   '</div>'
       + '</div>'
@@ -15982,7 +16018,8 @@ async function arjAbrir(){
         db.collection('config').doc('rejeite_sup_medicao').get(),
         db.collection('config').doc('rejeite_sup_sla').get(),
         db.collection('config').doc('rejeite_sup_rodrigo').get(),
-        db.collection('config').doc(RJH_DOC).get()
+        db.collection('config').doc(RJH_DOC).get(),
+        db.collection('config').doc(RJL_DOC).get()
       ]);
       if (docs[0] && docs[0].exists) {
         var R = docs[0].data() || {};
@@ -16013,31 +16050,51 @@ async function arjAbrir(){
         var H = docs[4].data() || {};
         _rjHist = { dias:H.dias || {}, atualizadoEm:H.atualizadoEm || '' };
       }
+      if (docs[5] && docs[5].exists) {
+        var Lg = docs[5].data() || {};
+        _rjl = { itens:Lg.itens || {}, upload:Lg.upload || { f:'', s:'' },
+                 atualizadoEm:Lg.atualizadoEm || '', atualizadoPor:Lg.atualizadoPor || '' };
+      }
     }
   } catch (e) { console.warn('arjAbrir:', e); }
   var dt = document.getElementById('arj-data');
   if (dt && !dt.value) dt.value = cpHojeISO();
 
-  // Dia sem upload deixaria buraco na linha. Abrir a tela grava o retrato
-  // de hoje se ainda não existir — repete o número da véspera, o que é
-  // honesto: nada mudou porque nada foi atualizado.
+  // O registro por item não precisa de retrato diário: ele reconstrói
+  // qualquer dia sozinho. Só semeio o registro quando ele ainda está
+  // vazio e já existe base carregada — assim a primeira abertura já
+  // mostra alguma coisa em vez de uma tela vazia.
   try {
-    if (!(_rjHist.dias || {})[cpHojeISO()]) await rjHistGravar();
-  } catch (e) { console.warn('arjAbrir gravar hoje:', e); }
+    if (!Object.keys(_rjl.itens || {}).length) {
+      var semeou = false;
+      if (await rjlAplicarFornecedor()) semeou = true;
+      if (await rjlAplicarSupervisor()) semeou = true;
+      if (semeou && av) av.innerHTML = '<span style="color:var(--tx2)">Registro de itens '
+        + 'iniciado com a base de hoje. A partir do próximo upload ele passa a marcar '
+        + 'quem saiu.</span>';
+    }
+  } catch (e) { console.warn('arjAbrir semear:', e); }
 
   if (av) av.innerHTML = '';
   arjDesenharResumo();
 }
 
+// Reaplica as bases que estão carregadas agora como se fossem um
+// upload de hoje. Serve para quando a planilha foi subida por outra
+// pessoa e o registro ficou para trás — não inventa nada: usa
+// exatamente a mesma regra do upload.
 async function arjGravarHoje(){
   var av = document.getElementById('arj-aviso');
-  if (av) av.innerHTML = '⏳ Gravando o retrato de hoje...';
-  var ok = await rjHistGravar();
+  if (av) av.innerHTML = '⏳ Atualizando o registro com a base de hoje...';
+  var f = false, sup = false;
+  try { f = await rjlAplicarFornecedor(); } catch (e) {}
+  try { sup = await rjlAplicarSupervisor(); } catch (e) {}
   if (av) {
-    av.innerHTML = ok
-      ? '<span style="color:var(--vd)">✓ Retrato de ' + cpDataBR(cpHojeISO()) + ' gravado.</span>'
-      : '<span style="color:var(--am)">Não gravei: as bases ainda estão vazias nesta frente, '
-        + 'ou o Firebase recusou.</span>';
+    av.innerHTML = (f || sup)
+      ? '<span style="color:var(--vd)">✓ Registro atualizado com '
+        + (f && sup ? 'as duas bases' : (f ? 'a base do fornecedor' : 'a base do supervisor'))
+        + ' de ' + cpDataBR(cpHojeISO()) + '.</span>'
+      : '<span style="color:var(--am)">Não há base carregada nesta frente para registrar.</span>';
   }
   arjDesenharResumo();
 }
@@ -16069,11 +16126,9 @@ function arjDesenharResumo(){
     +     'border-radius:10px;padding:.7rem .9rem;text-align:center">'
     +     '<div style="font-size:9px;font-weight:700;color:var(--tx2)">% RESOLVIDOS</div>'
     +     '<div style="font-size:24px;font-weight:800;color:var(--azm)">'
-    +       (d.mov ? String(d.mov.pct).replace('.', ',') + '%' : '—') + '</div>'
+    +       _arjPctTexto(d.mov) + '</div>'
     +     '<div style="font-size:10px;color:var(--tx2)">'
-    +       (d.mov ? cpNum(d.mov.saiu) + ' dos ' + cpNum(d.mov.base) + ' de '
-                     + cpDataBR(d.mov.de)
-                   : 'preciso de 2 dias') + '</div></div>'
+    +       (d.mov ? _arjPctSub(d.mov) : 'preciso de 2 dias') + '</div></div>'
     + '</div>';
 
   if (d.mov) {
@@ -16090,6 +16145,11 @@ function arjDesenharResumo(){
       +   (m.voltaram
          ? '<div style="color:var(--am)">⚠ ' + cpNum(m.voltaram) + ' dos que entraram já tinham '
            + 'saído antes: voltaram para a lista, então não estavam resolvidos.</div>' : '')
+      +   '<div style="font-size:10.5px">Última planilha de cada lado: fornecedor '
+      +     (m.uploadF ? cpDataBR(m.uploadF) : '—') + ' · supervisor '
+      +     (m.uploadS ? cpDataBR(m.uploadS) : '—')
+      +     '. Um lado só conclui item quando chega planilha dele — a falta de upload do outro '
+      +     'nunca fecha nada.</div>'
       +   '<div style="font-size:10.5px;color:var(--tx2)">A base não é congelada — por isso o '
       +     'percentual é sempre sobre a base ANTERIOR, nunca sobre a de hoje. '
       +     (m.fecha ? 'A conta fecha: ' + cpNum(m.base) + ' − ' + cpNum(m.saiu) + ' + '
@@ -16100,17 +16160,26 @@ function arjDesenharResumo(){
 
   h += '<div style="font-size:11.5px;color:var(--tx2);line-height:1.8;background:var(--cin);'
     +   'border:1px solid var(--brd);border-radius:8px;padding:.6rem .8rem">'
-    +   '<div><strong style="color:var(--tx)">Como a média de dias é calculada</strong> — '
-    +     'ela sai só da planilha que está carregada agora, nunca de uma soma entre uploads. '
-    +     'No Fornecedor é a média da coluna DIAS_REJEITADO dos pedidos da lista de hoje; no '
-    +     'Supervisor, a média do "Tempo desde o envio" do último cockpit do Rodrigo. Subir uma '
-    +     'planilha nova substitui a anterior: o item que continuar rejeitado entra com o número '
-    +     'de dias que a planilha nova trouxer, e quem saiu deixa de pesar. Por isso ela sobe '
-    +     'sozinha quando a fila não anda, mesmo sem entrar item novo.</div>'
-    +   '<div><strong style="color:var(--tx)">Como eu sei que um item foi tratado</strong> — '
-    +     'ele sai da lista. No Supervisor, deixa de ser STATUS_PROCESSO 8 na medição; no '
-    +     'Fornecedor, some da planilha de rejeitados. É o único sinal que os arquivos dão: '
-    +     'nenhum dos dois tem um campo dizendo "resolvido".</div>'
+    +   '<div><strong style="color:var(--tx)">Dias parados</strong> — Supervisor: média '
+    +     (d.mediaSup == null ? '—' : String(d.mediaSup).replace('.', ',')) + ' dias, metade até '
+    +     (d.medianaSup == null ? '—' : String(d.medianaSup).replace('.', ','))
+    +     (d.dataSup ? ' (base de ' + cpDataBR(d.dataSup) + ')' : '')
+    +     ' · Fornecedor: média '
+    +     (d.mediaForn == null ? '—' : String(d.mediaForn).replace('.', ',')) + ' dias, metade até '
+    +     (d.medianaForn == null ? '—' : String(d.medianaForn).replace('.', ','))
+    +     (d.dataForn ? ' (base de ' + cpDataBR(d.dataForn) + ')' : '')
+    +     '. Os dois relógios são diferentes, então não se comparam entre si.</div>'
+    +   '<div><strong style="color:var(--tx)">Como o item é acompanhado</strong> — cada item '
+    +     'tem uma vida no registro: entra no dia em que aparece pela primeira vez numa '
+    +     'planilha, fica aberto enquanto reaparecer, e é dado por <strong>concluído</strong> '
+    +     'no dia em que chega uma planilha nova <em>daquele lado</em> e ele não está nela. '
+    +     'Isso é por item e é contínuo — não é comparação entre fotos do dia.</div>'
+    +   '<div><strong style="color:var(--tx)">Uploads independentes</strong> — dia de subir só '
+    +     'o fornecedor, dia de subir só o Rodrigo, dia de subir os dois. A planilha de um lado '
+    +     'nunca conclui item do outro: a avaliação só roda no lado que recebeu arquivo.</div>'
+    +   '<div><strong style="color:var(--tx)">SLA</strong> — o número que a planilha trouxe mais '
+    +     'os dias corridos desde aquele upload. Ele cresce sozinho todo dia até o item sair da '
+    +     'base, mesmo nos dias em que nenhuma planilha nova chega.</div>'
     +   '<div><strong style="color:var(--tx)">Histórico</strong> — '
     +     (serie.length
         ? cpNum(serie.length) + ' dia(s) gravado(s), de ' + cpDataBR(serie[0].dia)
@@ -16137,10 +16206,11 @@ function arjDesenharResumo(){
     if (comMed.length > 1) {
       h += '<div style="margin-top:1rem;border-top:1px dashed var(--brd);padding-top:.8rem">'
         + '<div style="font-size:11.5px;font-weight:700;color:var(--tx);margin-bottom:2px">'
-        +   'Média de dias parados, dia a dia</div>'
+        +   'Média de dias na base, dia a dia</div>'
         + '<div style="font-size:10.5px;color:var(--tx2);margin-bottom:6px">'
-        +   'Subindo, a fila está envelhecendo: está entrando menos gente nova do que item '
-        +   'velho que fica. Descendo, o contrário.</div>'
+        +   'Conta desde o dia em que o item entrou na base, não o SLA que a planilha traz — '
+        +   'é o único relógio que dá para reconstruir para qualquer data passada. Subindo, '
+        +   'a fila está envelhecendo; descendo, o contrário.</div>'
         + arjGrafLinhas(comMed, [
             { campo:'medSup',  nome:'Supervisor', cor:'#E08A1E' },
             { campo:'medForn', nome:'Fornecedor', cor:'#C62828' }
@@ -16149,6 +16219,288 @@ function arjDesenharResumo(){
     }
   }
   box.innerHTML = h + '</div>';
+}
+
+
+// ══════════════════ REGISTRO DE ITENS DO REJEITE ═════════════════
+// O monitoramento é por ITEM e é contínuo, não uma comparação entre
+// retratos do dia. Cada item tem uma vida: entra quando aparece pela
+// primeira vez numa planilha, continua aberto enquanto reaparecer, e é
+// CONCLUÍDO no dia em que uma planilha nova daquele lado não o traz
+// mais. O SLA dele cresce dia a dia até isso acontecer.
+//
+// Os dois lados têm uploads independentes: tem dia de subir só o
+// fornecedor, dia de subir só o Rodrigo, dia de subir os dois. Por isso
+// a conclusão de um lado SÓ é avaliada quando chega planilha daquele
+// lado — a ausência de upload do outro nunca conclui nada.
+//
+// É este registro que responde "quantos estavam abertos no dia X" para
+// qualquer dia, sem depender de alguém ter aberto a tela naquele dia.
+var RJL_DOC = 'rejeite_itens';
+var RJL_MAX = 6000;          // itens guardados
+var RJL_GUARDA_RESOLVIDO = 180;   // dias que um resolvido fica no registro
+var _rjl = { itens:{}, upload:{ f:'', s:'' }, atualizadoEm:'', atualizadoPor:'' };
+
+function rjlChave(lado, k){ return (lado === 'f' ? 'F|' : 'S|') + k; }
+
+// Dias corridos entre duas datas ISO.
+function rjlDias(de, ate){
+  if (!de || !ate) return 0;
+  var a = new Date(de + 'T12:00:00'), b = new Date(ate + 'T12:00:00');
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return 0;
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+
+// Cada item guarda as PASSAGENS dele pela base: [{de, fim}]. Um item
+// que foi concluído e voltou tem duas passagens — e é isso que permite
+// o gráfico de um dia antigo continuar certo depois que ele voltou.
+// Reabrir apagando a conclusão reescreveria a história.
+function rjlPassagens(it){ return (it && it.per) ? it.per : []; }
+function rjlAberta(it){
+  var p = rjlPassagens(it);
+  var u = p[p.length - 1];
+  return (u && !u.fim) ? u : null;
+}
+function rjlEntrada(it){
+  var p = rjlPassagens(it);
+  return p.length ? p[0].de : '';
+}
+function rjlAbertoEm(it, dia){
+  return rjlPassagens(it).some(function(x){
+    return x.de <= dia && (!x.fim || x.fim > dia);
+  });
+}
+
+// O SLA de hoje: o que a planilha trouxe, mais os dias que passaram
+// desde aquele upload. É isto que faz o número crescer sozinho nos dias
+// em que não chega planilha nova daquele lado. Item concluído congela
+// no dia em que saiu.
+function rjlSla(it, hoje){
+  if (!it) return null;
+  var ab = rjlAberta(it);
+  var p = rjlPassagens(it);
+  var ate = ab ? (hoje || cpHojeISO()) : ((p[p.length - 1] || {}).fim || hoje || cpHojeISO());
+  var base = (it.sla == null || it.sla === '') ? null : (+it.sla || 0);
+  if (base == null) {
+    var de = ab ? ab.de : ((p[p.length - 1] || {}).de || '');
+    return de ? rjlDias(de, ate) : null;
+  }
+  return base + rjlDias(it.lido || ate, ate);
+}
+
+// ── aplica uma planilha nova de um lado ──────────────────────────
+// itens: a fotografia completa do que está rejeitado naquele lado hoje.
+// O que não vier aqui, e estiver aberto NESTE lado, é dado por concluído.
+function rjlAplicar(lado, itens, data){
+  data = data || cpHojeISO();
+  _rjl.itens = _rjl.itens || {};
+  var vistos = {};
+
+  (itens || []).forEach(function(o){
+    if (!o || !o.chave) return;
+    var k = rjlChave(lado, o.chave);
+    vistos[k] = 1;
+    var it = _rjl.itens[k];
+    if (!it) {
+      if (Object.keys(_rjl.itens).length >= RJL_MAX) return;
+      _rjl.itens[k] = { l:lado, per:[{ de:data, fim:'' }], lido:data,
+                        sla:(o.sla == null ? null : +o.sla), nv:0, d:o.d || {} };
+      return;
+    }
+    if (!rjlAberta(it)) {         // estava concluído e voltou: nova passagem
+      it.per.push({ de:data, fim:'' });
+      it.nv = (+it.nv || 0) + 1;
+    }
+    it.lido = data;
+    if (o.sla != null) it.sla = +o.sla;
+    if (o.d) it.d = o.d;
+  });
+
+  Object.keys(_rjl.itens).forEach(function(k){
+    var it = _rjl.itens[k];
+    if (it.l !== lado || vistos[k]) return;
+    var ab = rjlAberta(it);
+    if (ab && ab.de <= data) ab.fim = data;
+  });
+
+  _rjl.upload = _rjl.upload || { f:'', s:'' };
+  _rjl.upload[lado] = data;
+  _rjl.atualizadoEm = new Date().toISOString();
+  _rjl.atualizadoPor = cpQuem();
+  rjlPodar();
+}
+
+// Item resolvido há muito tempo sai do registro; aberto nunca sai.
+function rjlPodar(){
+  var hoje = cpHojeISO();
+  Object.keys(_rjl.itens).forEach(function(k){
+    var it = _rjl.itens[k];
+    if (rjlAberta(it)) return;
+    var p = rjlPassagens(it);
+    var ult = (p[p.length - 1] || {}).fim || '';
+    if (ult && rjlDias(ult, hoje) > RJL_GUARDA_RESOLVIDO) delete _rjl.itens[k];
+  });
+}
+
+async function rjlGravar(){
+  try {
+    var db = getDB(); if (!db) return false;
+    await db.collection('config').doc(RJL_DOC).set(_rjl);
+    return true;
+  } catch (e) { console.warn('rjlGravar:', e); return false; }
+}
+
+async function rjlCarregar(){
+  try {
+    var db = getDB(); if (!db) return;
+    var doc = await db.collection('config').doc(RJL_DOC).get();
+    if (doc && doc.exists) {
+      var d = doc.data() || {};
+      _rjl = { itens:d.itens || {}, upload:d.upload || { f:'', s:'' },
+               atualizadoEm:d.atualizadoEm || '', atualizadoPor:d.atualizadoPor || '' };
+    }
+  } catch (e) { console.warn('rjlCarregar:', e); }
+}
+
+// ── as leituras ──────────────────────────────────────────────────
+function rjlLista(lado, dia){
+  var d = dia || cpHojeISO();
+  return Object.keys(_rjl.itens || {}).map(function(k){
+    var it = _rjl.itens[k]; it.k = k; return it;
+  }).filter(function(it){
+    if (lado && it.l !== lado) return false;
+    return rjlAbertoEm(it, d);
+  });
+}
+
+// Cada CONCLUSÃO conta uma vez. Um item que saiu, voltou e saiu de novo
+// foi resolvido duas vezes — e as duas aparecem no dia em que
+// aconteceram, sem reescrever o passado.
+function rjlResolvidos(ini, fim, lado){
+  var out = [];
+  Object.keys(_rjl.itens || {}).forEach(function(k){
+    var it = _rjl.itens[k];
+    if (lado && it.l !== lado) return;
+    rjlPassagens(it).forEach(function(x){
+      if (!x.fim) return;
+      if (ini && x.fim < ini) return;
+      if (fim && x.fim > fim) return;
+      out.push({ k:k, l:it.l, fim:x.fim, de:x.de, d:it.d || {} });
+    });
+  });
+  return out;
+}
+
+// Quantos estavam abertos em cada dia — reconstruído do registro, sem
+// depender de alguém ter aberto a tela naquele dia.
+function rjlSerie(ini, fim){
+  var ks = Object.keys(_rjl.itens || {});
+  if (!ks.length) return [];
+  var hoje = fim || cpHojeISO();
+  var min = '';
+  ks.forEach(function(k){
+    var de = rjlEntrada(_rjl.itens[k]);
+    if (de && (!min || de < min)) min = de;
+  });
+  var de0 = (ini && ini > min) ? ini : min;
+  if (!de0) return [];
+  var out = [], d = new Date(de0 + 'T12:00:00'), lim = new Date(hoje + 'T12:00:00');
+  var guarda = 0;
+  while (d <= lim && guarda++ < 400) {
+    var dia = d.toISOString().slice(0, 10);
+    var f = 0, sp = 0;
+    ks.forEach(function(k){
+      var it = _rjl.itens[k];
+      if (!rjlAbertoEm(it, dia)) return;
+      if (it.l === 'f') f++; else sp++;
+    });
+    // média de dias na base naquele dia: o relógio que dá para
+    // reconstruir para qualquer data é "desde que o item entrou".
+    var sF = 0, sS = 0;
+    ks.forEach(function(k){
+      var it = _rjl.itens[k];
+      if (!rjlAbertoEm(it, dia)) return;
+      var ab = null;
+      rjlPassagens(it).forEach(function(x){
+        if (x.de <= dia && (!x.fim || x.fim > dia)) ab = x;
+      });
+      var v = ab ? rjlDias(ab.de, dia) : 0;
+      if (it.l === 'f') sF += v; else sS += v;
+    });
+    out.push({ dia:dia, forn:f, sup:sp, total:f + sp,
+               medForn: f ? Math.round(sF / f * 10) / 10 : null,
+               medSup:  sp ? Math.round(sS / sp * 10) / 10 : null,
+               resolvidos: rjlResolvidos(dia, dia).length });
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+
+// O movimento do dia, por item: quantos dos que estavam abertos ontem
+// foram concluídos hoje, e quantos entraram hoje.
+function rjlMovimento(fim, lado){
+  var hoje = fim || cpHojeISO();
+  var ontem = (function(){
+    var d = new Date(hoje + 'T12:00:00'); d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+  })();
+  var aberHoje = rjlLista(lado, hoje), aberOntem = rjlLista(lado, ontem);
+  if (!aberHoje.length && !aberOntem.length) return null;
+  var saiu = rjlResolvidos(hoje, hoje, lado).length;
+  var novas = aberHoje.filter(function(it){
+    var ab = rjlAberta(it); return ab && ab.de === hoje;
+  });
+  var voltaram = novas.filter(function(it){ return (+it.nv || 0) > 0; }).length;
+  return {
+    de:ontem, ate:hoje,
+    base:aberOntem.length, saiu:saiu, entrou:novas.length, hoje:aberHoje.length,
+    ficaram:aberOntem.length - saiu, voltaram:voltaram,
+    baseConta:aberOntem.length, saiuConta:saiu,
+    pct: aberOntem.length ? Math.round(saiu / aberOntem.length * 1000) / 10 : 0,
+    fecha: (aberOntem.length - saiu + novas.length) === aberHoje.length,
+    uploadF:(_rjl.upload || {}).f || '', uploadS:(_rjl.upload || {}).s || ''
+  };
+}
+
+// ── os uploads alimentam o registro ──────────────────────────────
+// Fornecedor: a chave é o pedido; o SLA é DIAS_REJEITADO.
+function rjlDoFornecedor(){
+  return ((_gpRej && _gpRej.itens) || []).map(function(i){
+    return { chave: _rjsN(i.pedido),
+             sla: (i.dias === '' || i.dias == null) ? null : (+i.dias || 0),
+             d: { pedido:i.pedido, grupo:i.grupo, motivo:i.motivo, prazo:i.prazo,
+                  resp:i.resp, forn:i.forn } };
+  }).filter(function(o){ return !!o.chave; });
+}
+
+// Supervisor: a chave é RC + item da RC; o SLA é o tempo desde o envio
+// do cockpit. Só vale como fotografia quando as duas pontas (medição e
+// Rodrigo) estão carregadas — senão a lista sai curta e concluiria item
+// que só está faltando porque a outra planilha não veio.
+function rjlDoSupervisor(){
+  var r = null;
+  try { r = rjsMontar(); } catch (e) { return null; }
+  if (!r || !r.linhas.length) return null;
+  return r.linhas.map(function(l){
+    return { chave: _rjsN(l.rc) + '|' + _rjsN(l.itemRc),
+             sla: (l.slaPedido == null) ? null : (+l.slaPedido || 0),
+             d: { rc:l.rc, itemRc:l.itemRc, pedido:l.pedido, comprador:l.comprador,
+                  padrao:l.padrao, slaRc:l.slaRc, idas:l.idas } };
+  });
+}
+
+async function rjlAplicarFornecedor(data){
+  var itens = rjlDoFornecedor();
+  if (!itens.length) return false;
+  rjlAplicar('f', itens, data);
+  return await rjlGravar();
+}
+
+async function rjlAplicarSupervisor(data){
+  var itens = rjlDoSupervisor();
+  if (!itens || !itens.length) return false;
+  rjlAplicar('s', itens, data);
+  return await rjlGravar();
 }
 
 // ══════════════════ HISTÓRICO DO REJEITE ═════════════════════════
@@ -16167,7 +16519,17 @@ var RJH_DIAS_COM_CHAVE = 40;
 var _rjHist = { dias:{}, atualizadoEm:'' };
 
 function rjHistSnapshot(){
-  var f = { n:0, soma:0, com:0, fora:0, motivos:{}, chaves:[] };
+  // A identidade da planilha de cada lado. É ela que distingue "ninguém
+  // resolveu nada" de "ninguém subiu base nova" — dois fatos diferentes
+  // que davam o mesmo 0% na tela.
+  var srcF = (_gpRej && _gpRej.atualizadoEm) ? String(_gpRej.atualizadoEm) : '';
+  var srcS = ((_rjsMed && _rjsMed.atualizadoEm) ? String(_rjsMed.atualizadoEm) : '')
+           + '|' + ((_rjsRod && _rjsRod.atualizadoEm) ? String(_rjsRod.atualizadoEm) : '');
+  // kv marca que ESTE retrato guardou chaves. Lista vazia porque tudo
+  // foi resolvido é um dado; dia antigo que já perdeu as chaves na poda
+  // é ausência de dado. Sem a marca, os dois viravam a mesma coisa e o
+  // dia em que a fila zerasse sumia da conta.
+  var f = { n:0, soma:0, com:0, fora:0, motivos:{}, chaves:[], src:srcF, kv:1 };
   ((_gpRej && _gpRej.itens) || []).forEach(function(i){
     f.n++;
     var d = +i.dias;
@@ -16178,7 +16540,7 @@ function rjHistSnapshot(){
     if (i.pedido) f.chaves.push(String(i.pedido));
   });
 
-  var s = { n:0, lv:0, pb:0, sem:0, soma:0, com:0, padroes:{}, chaves:[], fora:0 };
+  var s = { n:0, lv:0, pb:0, sem:0, soma:0, com:0, padroes:{}, chaves:[], fora:0, src:srcS, kv:1 };
   var r = null;
   try { r = rjsMontar(); } catch (e) { r = null; }
   if (r) {
@@ -16213,8 +16575,8 @@ async function rjHistGravar(dia){
       ds = Object.keys(_rjHist.dias).sort();
     }
     ds.slice(0, Math.max(0, ds.length - RJH_DIAS_COM_CHAVE)).forEach(function(k){
-      if (_rjHist.dias[k].f) _rjHist.dias[k].f.chaves = [];
-      if (_rjHist.dias[k].s) _rjHist.dias[k].s.chaves = [];
+      if (_rjHist.dias[k].f) { _rjHist.dias[k].f.chaves = []; _rjHist.dias[k].f.kv = 0; }
+      if (_rjHist.dias[k].s) { _rjHist.dias[k].s.chaves = []; _rjHist.dias[k].s.kv = 0; }
     });
     _rjHist.atualizadoEm = new Date().toISOString();
 
@@ -16271,23 +16633,46 @@ function rjHistMovimento(fim, lado){
   // Um dia "tem retrato" quando guardou chave de qualquer um dos dois
   // lados. Olhando só um lado, o conjunto pode ser vazio de verdade —
   // fornecedor zerado é um dado, não é ausência de dado.
-  var chavesDe = function(o){
+  var chavesDe = function(o, qual){
     if (!o) return null;
     var f = (o.f && o.f.chaves) || [], s2 = (o.s && o.s.chaves) || [];
-    if (!f.length && !s2.length) return null;
+    // retratos antigos não têm a marca kv — para eles, ter chave é a prova
+    var temF = (o.f && o.f.kv != null) ? !!o.f.kv : !!f.length;
+    var temS = (o.s && o.s.kv != null) ? !!o.s.kv : !!s2.length;
+    if (!temF && !temS) return null;
+    if (qual === 'f' && !temF) return null;
+    if (qual === 's' && !temS) return null;
     var m = {};
-    if (lado !== 's') f.forEach(function(k){ m['F' + k] = 1; });
-    if (lado !== 'f') s2.forEach(function(k){ m['S' + k] = 1; });
+    if (qual !== 's') f.forEach(function(k){ m['F' + k] = 1; });
+    if (qual !== 'f') s2.forEach(function(k){ m['S' + k] = 1; });
     return m;
   };
-  var hoje = chavesDe(_rjHist.dias[ds[ds.length - 1]]);
+  var srcDe = function(o, qual){
+    if (!o) return '';
+    var a = (o.f && o.f.src) || '', b = (o.s && o.s.src) || '';
+    return qual === 'f' ? a : (qual === 's' ? b : (a + '§' + b));
+  };
+
+  var iHoje = ds.length - 1;
+  var hoje = chavesDe(_rjHist.dias[iHoje !== -1 ? ds[iHoje] : ''], lado);
   if (!hoje) return null;
   var ant = null, dAnt = '', iAnt = -1;
   for (var i = ds.length - 2; i >= 0; i--) {
-    var c = chavesDe(_rjHist.dias[ds[i]]);
+    var c = chavesDe(_rjHist.dias[ds[i]], lado);
     if (c) { ant = c; dAnt = ds[i]; iAnt = i; break; }
   }
   if (!ant) return null;
+
+  // ── a base mudou de verdade entre os dois retratos? ────────────
+  // Abrir a tela grava o retrato do dia mesmo sem upload nenhum. Sem
+  // isto, o card dizia "0% resolvidos" quando a verdade era "ainda não
+  // chegou base nova" — e 0% soa como equipe parada.
+  var srcH = srcDe(_rjHist.dias[ds[iHoje]], lado);
+  var srcA = srcDe(_rjHist.dias[dAnt], lado);
+  var baseNova = !!(srcH && srcA && srcH !== srcA) || (!srcH && !srcA ? false : !srcA || !srcH);
+  // quais lados trouxeram base nova (serve para o card combinado)
+  var novoF = srcDe(_rjHist.dias[ds[iHoje]], 'f') !== srcDe(_rjHist.dias[dAnt], 'f');
+  var novoS = srcDe(_rjHist.dias[ds[iHoje]], 's') !== srcDe(_rjHist.dias[dAnt], 's');
 
   var kAnt = Object.keys(ant), kHoje = Object.keys(hoje);
   var saiu = kAnt.filter(function(k){ return !hoje[k]; });
@@ -16296,17 +16681,30 @@ function rjHistMovimento(fim, lado){
   // dos que entraram, quais já tinham estado na lista em algum retrato antigo
   var jaVistos = {};
   for (var j = 0; j < iAnt; j++) {
-    var c2 = chavesDe(_rjHist.dias[ds[j]]);
+    var c2 = chavesDe(_rjHist.dias[ds[j]], lado);
     if (c2) Object.keys(c2).forEach(function(k){ jaVistos[k] = 1; });
   }
   var voltaram = entrou.filter(function(k){ return jaVistos[k]; });
+
+  // O percentual sai sobre a base anterior DOS LADOS QUE TÊM BASE NOVA.
+  // Se só o fornecedor foi atualizado, incluir o supervisor no
+  // denominador afundaria o indicador sem ninguém ter feito nada errado.
+  var baseConta = kAnt.length, saiuConta = saiu.length;
+  if (!lado && (novoF !== novoS)) {
+    var pre = novoF ? 'F' : 'S';
+    baseConta = kAnt.filter(function(k){ return k.charAt(0) === pre; }).length;
+    saiuConta = saiu.filter(function(k){ return k.charAt(0) === pre; }).length;
+  }
 
   return {
     de:dAnt, ate:ds[ds.length - 1],
     base:kAnt.length, saiu:saiu.length, entrou:entrou.length, hoje:kHoje.length,
     ficaram: kAnt.length - saiu.length,
     voltaram: voltaram.length,
-    pct: kAnt.length ? Math.round(saiu.length / kAnt.length * 1000) / 10 : 0,
+    baseNova: baseNova, novoF: novoF, novoS: novoS,
+    baseConta: baseConta, saiuConta: saiuConta,
+    soUmLado: (!lado && (novoF !== novoS)) ? (novoF ? 'fornecedor' : 'supervisor') : '',
+    pct: baseConta ? Math.round(saiuConta / baseConta * 1000) / 10 : 0,
     fecha: (kAnt.length - saiu.length + entrou.length) === kHoje.length
   };
 }
