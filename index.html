@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 06:00';
+var GTO_BUILD = '15/10 07:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15727,6 +15727,10 @@ function arjDados(ini, fim){
     return a.length % 2 ? a[m] : Math.round((a[m - 1] + a[m]) / 2 * 10) / 10;
   };
 
+  var serie = rjlSerie(ini, fim);
+  var perIni = serie.length ? serie[0].dia : (ini || cpHojeISO());
+  var perFim = serie.length ? serie[serie.length - 1].dia : (fim || cpHojeISO());
+
   var motivosForn = {}, gruposForn = {}, foraPrazo = 0;
   forn.forEach(function(i){
     motivosForn[i.motivo || '(sem motivo)'] = (motivosForn[i.motivo || '(sem motivo)'] || 0) + 1;
@@ -15748,10 +15752,13 @@ function arjDados(ini, fim){
     // retratos diários: assim um dia sem ninguém abrir a tela continua
     // tendo valor, e o resolvido é o item que sumiu da planilha nova
     // daquele lado — nunca uma diferença entre fotos.
-    serie: rjlSerie(ini, fim),
-    mov: rjlMovimento(fim),
-    movSup: rjlMovimento(fim, 's'),
-    movForn: rjlMovimento(fim, 'f'),
+    serie: serie,
+    // A janela da conta é a MESMA do gráfico ao lado: o que a linha
+    // mostra e o que o card conta têm de falar do mesmo período, senão
+    // um desmente o outro na mesma folha.
+    mov: rjlMovimento(perIni, perFim),
+    movSup: rjlMovimento(perIni, perFim, 's'),
+    movForn: rjlMovimento(perIni, perFim, 'f'),
     slaSup:slaSup, slaForn:slaForn, ordemSla:ORDEM,
     mediaSup: comS ? Math.round(somaS / comS * 10) / 10 : null,
     mediaForn: comF ? Math.round(somaF / comF * 10) / 10 : null,
@@ -15821,8 +15828,10 @@ function _arjPctTexto(m){
   return String(m.pct).replace('.', ',') + '%';
 }
 function _arjPctSub(m){
-  if (!m || !m.base) return 'ainda sem base anterior';
-  return _arjN(m.saiu) + ' dos ' + _arjN(m.base) + ' que estavam abertos em ' + _arjBR(m.de);
+  if (!m || !m.base) return 'sem itens no período';
+  var per = (m.de === m.ate) ? 'em ' + _arjBR(m.ate)
+                             : _arjBR(m.de) + ' a ' + _arjBR(m.ate);
+  return _arjN(m.saiu) + ' concluídos de ' + _arjN(m.base) + ' · ' + per;
 }
 
 function arjCard(rot, val, sub, cor){
@@ -16150,11 +16159,11 @@ function arjDesenharResumo(){
       +     (m.uploadS ? cpDataBR(m.uploadS) : '—')
       +     '. Um lado só conclui item quando chega planilha dele — a falta de upload do outro '
       +     'nunca fecha nada.</div>'
-      +   '<div style="font-size:10.5px;color:var(--tx2)">A base não é congelada — por isso o '
-      +     'percentual é sempre sobre a base ANTERIOR, nunca sobre a de hoje. '
-      +     (m.fecha ? 'A conta fecha: ' + cpNum(m.base) + ' − ' + cpNum(m.saiu) + ' + '
-                       + cpNum(m.entrou) + ' = ' + cpNum(m.hoje) + '.'
-                     : '')
+      +   '<div style="font-size:10.5px;color:var(--tx2)">O denominador é quem passou pela '
+      +     'lista no período, não só o saldo da véspera: quem entrou e saiu dentro da janela '
+      +     'sumiria da conta e o percentual ficaria maior do que a verdade. '
+      +     (m.fecha ? 'A conta fecha: ' + cpNum(m.base) + ' − ' + cpNum(m.saiu) + ' = '
+                       + cpNum(m.hoje) + '.' : '')
       +   '</div></div>';
   }
 
@@ -16436,28 +16445,64 @@ function rjlSerie(ini, fim){
   return out;
 }
 
-// O movimento do dia, por item: quantos dos que estavam abertos ontem
-// foram concluídos hoje, e quantos entraram hoje.
-function rjlMovimento(fim, lado){
-  var hoje = fim || cpHojeISO();
-  var ontem = (function(){
-    var d = new Date(hoje + 'T12:00:00'); d.setDate(d.getDate() - 1);
+// O movimento de um PERÍODO, por item. A conta é:
+//
+//   quem já estava aberto na véspera do período
+//   + quem entrou durante o período
+//   − quem foi concluído durante o período
+//   = quem está aberto no fim
+//
+// Medir só "hoje contra ontem" dava 0% em todo dia sem upload, o que não
+// é informação nenhuma. Com a janela do slide, o número responde à
+// pergunta que a reunião faz: nesta semana, quanto da fila andou.
+function rjlMovimento(ini, fim, lado){
+  // compatibilidade: chamada antiga rjlMovimento(fim, lado)
+  if (ini && (lado === undefined) && (fim === 'f' || fim === 's' || fim === undefined)) {
+    lado = fim; fim = ini; ini = '';
+  }
+  var ate = fim || cpHojeISO();
+  var de = ini || ate;
+  var vespera = (function(){
+    var d = new Date(de + 'T12:00:00'); d.setDate(d.getDate() - 1);
     return d.toISOString().slice(0, 10);
   })();
-  var aberHoje = rjlLista(lado, hoje), aberOntem = rjlLista(lado, ontem);
-  if (!aberHoje.length && !aberOntem.length) return null;
-  var saiu = rjlResolvidos(hoje, hoje, lado).length;
-  var novas = aberHoje.filter(function(it){
-    var ab = rjlAberta(it); return ab && ab.de === hoje;
+
+  var aberFim = rjlLista(lado, ate);
+  var aberVespera = rjlLista(lado, vespera);
+  var entrou = 0;
+  Object.keys(_rjl.itens || {}).forEach(function(k){
+    var it = _rjl.itens[k];
+    if (lado && it.l !== lado) return;
+    rjlPassagens(it).forEach(function(x){
+      if (x.de >= de && x.de <= ate) entrou++;
+    });
   });
-  var voltaram = novas.filter(function(it){ return (+it.nv || 0) > 0; }).length;
+  var saiu = rjlResolvidos(de, ate, lado).length;
+  if (!aberFim.length && !aberVespera.length && !entrou && !saiu) return null;
+
+  var base = aberVespera.length + entrou;
+  var voltaram = 0;
+  Object.keys(_rjl.itens || {}).forEach(function(k){
+    var it = _rjl.itens[k];
+    if (lado && it.l !== lado) return;
+    rjlPassagens(it).forEach(function(x, i){
+      if (i > 0 && x.de >= de && x.de <= ate) voltaram++;
+    });
+  });
+
   return {
-    de:ontem, ate:hoje,
-    base:aberOntem.length, saiu:saiu, entrou:novas.length, hoje:aberHoje.length,
-    ficaram:aberOntem.length - saiu, voltaram:voltaram,
-    baseConta:aberOntem.length, saiuConta:saiu,
-    pct: aberOntem.length ? Math.round(saiu / aberOntem.length * 1000) / 10 : 0,
-    fecha: (aberOntem.length - saiu + novas.length) === aberHoje.length,
+    de:de, vespera:vespera, ate:ate,
+    // "base" é tudo que passou pela lista no período, não só o saldo
+    // da véspera: senão quem entrou e saiu dentro da janela sumia da
+    // conta e o percentual ficava maior do que a verdade.
+    base:base, saiu:saiu, entrou:entrou, hoje:aberFim.length,
+    aberturaPeriodo: aberVespera.length,
+    ficaram: base - saiu,
+    voltaram: voltaram,
+    primeiroDia: aberVespera.length === 0 && entrou > 0,
+    baseConta:base, saiuConta:saiu,
+    pct: base ? Math.round(saiu / base * 1000) / 10 : 0,
+    fecha: (base - saiu) === aberFim.length,
     uploadF:(_rjl.upload || {}).f || '', uploadS:(_rjl.upload || {}).s || ''
   };
 }
