@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 09:30';
+var GTO_BUILD = '15/10 10:45';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -19677,9 +19677,55 @@ async function mdrEsquecerLotes(){
 
 // PATEC e PATEC manual aparecem na Governança, mas não são repartidos
 // pela matriz de atividades — ninguém marcou atividade para eles.
-function mdEntraNaDistribuicao(it){
-  for (var i = 0; i < MD_STATUS.length; i++) if (MD_STATUS[i].chave === it.statusChave) return true;
-  return false;
+// Os dois status de PATEC só entram na distribuição quando o item já
+// está APTO A PEDIDO: data de negociação mais dois dias úteis, vencidos
+// até o dia da distribuição. Item negociado ontem ainda não pode ir para
+// a fila de ninguém — e item sem data de negociação muito menos, porque
+// aí não se sabe sequer quando ele fica apto.
+var MD_PRECISA_APTO = ['patec', 'patecman'];
+
+function mdDataNegociacao(it){
+  var k = gpChave(it);
+  var man = (typeof _gpNeg !== 'undefined' && _gpNeg[k]) ? _gpNeg[k] : {};
+  var lb  = (typeof _gpLb !== 'undefined' && _gpLb.itens) ? (_gpLb.itens[k] || {}) : {};
+  // mesma ordem da Governança: a digitada vence, depois a da aba do
+  // MAPA, por último a do levelboard.
+  return man.data || it.negociacao || lb.negociacao || '';
+}
+
+// Devolve { apto, dataNeg, libera } para os dois status de PATEC.
+function mdAptoPedido(it, dia){
+  var hoje = dia || mdDataSel();
+  var dataNeg = mdDataNegociacao(it);
+  if (!dataNeg) return { apto:false, dataNeg:'', libera:'', motivo:'sem data de negociação' };
+  var libera = gpMaisDiasUteis(dataNeg, 2);
+  return { apto: !!libera && libera <= hoje, dataNeg:dataNeg, libera:libera,
+           motivo: (libera && libera <= hoje) ? '' : 'apto só em ' + cpDataBR(libera) };
+}
+
+function mdEntraNaDistribuicao(it, dia){
+  var achou = false;
+  for (var i = 0; i < MD_STATUS.length; i++) {
+    if (MD_STATUS[i].chave === it.statusChave) { achou = true; break; }
+  }
+  if (!achou) return false;
+  if (MD_PRECISA_APTO.indexOf(it.statusChave) !== -1) return mdAptoPedido(it, dia).apto;
+  return true;
+}
+
+// Quantos de cada status de PATEC estão aptos hoje, e quantos esperam.
+function mdContaAptos(dia){
+  var r = {};
+  MD_PRECISA_APTO.forEach(function(ch){ r[ch] = { total:0, aptos:0, semData:0 }; });
+  ((_mdBase && _mdBase.itens) || []).forEach(function(it){
+    var o = r[it.statusChave];
+    if (!o) return;
+    o.total++;
+    var a = mdAptoPedido(it, dia);
+    if (a.apto) o.aptos++;
+    else if (!a.dataNeg) o.semData++;
+  });
+  return r;
 }
 
 function mdBlocos(itens){
@@ -20008,7 +20054,13 @@ async function mdDistribuir(){
     if (st) st.innerHTML = '<span style="color:var(--vm)">Marque na tabela quem atua em cada atividade.</span>';
     return;
   }
-  var itensMapa = temMapa ? _mdBase.itens.filter(mdEntraNaDistribuicao) : [];
+  // CUIDADO: filter passa (valor, índice, array). Chamar
+  // mdEntraNaDistribuicao direto faria o índice virar o "dia" da regra
+  // dos dois dias úteis — e a cada linha a data mudaria.
+  var _diaDist = (_mdCfg.dataDist || mdDataSel());
+  var itensMapa = temMapa
+    ? _mdBase.itens.filter(function(it){ return mdEntraNaDistribuicao(it, _diaDist); })
+    : [];
   // os rejeitados da Governança entram como mais uma atividade
   var temRej = !!(_gpRej && _gpRej.itens && _gpRej.itens.length);
   if (temRej) itensMapa = itensMapa.concat(mdItensRejeitados());
@@ -20032,12 +20084,20 @@ async function mdDistribuir(){
   // o lote só passa a contar como "já rodou" depois de distribuído
   await mdrRegistrarLotes(itensReap, mdDataSel(), mdrDataLoteDaTela());
   if (temReap) mdrRenderResumo(_mdrBase);
+  var _ap = mdContaAptos(_diaDist);
+  var _espera = (_ap.patec.total - _ap.patec.aptos) + (_ap.patecman.total - _ap.patecman.aptos);
   if (st) st.innerHTML = '<span style="color:var(--vd)">✓ Distribuição feita: ' + cpNum(res.distribuidos)
     + ' itens entre ' + res.lista.filter(function(p){ return p.n; }).length + ' comprador(es)'
     + (res.reap ? ' (' + cpNum(res.reap) + ' de reap)' : '') + ' · '
     + cpNum(res.fila.length) + ' na fila'
     + (res.semAtividade.length ? ' · ' + cpNum(res.semAtividade.length) + ' sem ninguém na atividade' : '')
-    + '.</span>';
+    + '.</span>'
+    + (_espera ? '<div style="font-size:11px;color:var(--am);margin-top:4px">⏳ '
+        + cpNum(_espera) + ' item(ns) de PATEC ficaram de fora por ainda não estarem aptos a '
+        + 'pedido (negociação + 2 dias úteis)'
+        + ((_ap.patec.semData + _ap.patecman.semData)
+           ? ' — ' + cpNum(_ap.patec.semData + _ap.patecman.semData) + ' deles sem data de negociação'
+           : '') + '.</div>' : '');
 }
 
 // ── telas ─────────────────────────────────────────────────────────
@@ -20052,12 +20112,29 @@ function mdRenderResumo(){
       + '<div class="kc-v"' + (cor ? ' style="color:' + cor + '"' : '') + '>' + val + '</div>'
       + (sub ? '<div class="kc-s">' + sub + '</div>' : '') + '</div>';
   };
+  // Nos dois cards de PATEC o número do arquivo não é o número que vai
+  // ser distribuído: só vai quem está apto a pedido. Mostrar 40 e
+  // distribuir 21 sem dizer nada é a receita para o André achar que o
+  // dashboard perdeu itens.
+  var aptos = mdContaAptos(mdDataSel());
   var h = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem;margin-top:.9rem">';
   MD_STATUS.forEach(function(x){
     var n = b.porStatus[x.chave] || 0;
-    h += card(x.nome.toUpperCase(), cpNum(n), cpPctTxt(cpPct(n, b.total)) + ' do total', x.cor);
+    var sub = cpPctTxt(cpPct(n, b.total)) + ' do total';
+    var ap = aptos[x.chave];
+    if (ap && ap.total) {
+      sub = '<strong style="color:' + (ap.aptos ? 'var(--vd)' : 'var(--am)') + '">'
+          + cpNum(ap.aptos) + ' apto(s) hoje</strong> · ' + cpNum(ap.total - ap.aptos)
+          + ' aguardando os 2 dias'
+          + (ap.semData ? ' (' + cpNum(ap.semData) + ' sem data)' : '');
+    }
+    h += card(x.nome.toUpperCase(), cpNum(n), sub, x.cor);
   });
-  h += card('TOTAL PARA A EQUIPE', cpNum(b.total), 'de ' + cpNum(b.lidas) + ' linhas do MAPA');
+  var _espera = (aptos.patec.total - aptos.patec.aptos)
+              + (aptos.patecman.total - aptos.patecman.aptos);
+  h += card('TOTAL PARA A EQUIPE', cpNum(b.total - _espera),
+        _espera ? 'de ' + cpNum(b.total) + ' · ' + cpNum(_espera) + ' de PATEC ainda não aptos'
+                : 'de ' + cpNum(b.lidas) + ' linhas do MAPA');
   h += '</div>';
 
   var alto = b.itens.filter(function(i){ return i.slaAlto; }).length;
