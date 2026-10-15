@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/10 11:55';
+var GTO_BUILD = '15/10 00:45';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -813,10 +813,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
           <div>
             <div style="font-size:11px;font-weight:700;color:var(--tx2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">📋 Seções do slide</div>
             <div style="display:flex;flex-direction:column;gap:4px">
-              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-visao" checked> Visão geral + evolução</label>
-              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-sup" checked> Detalhe — Rejeite Supervisor</label>
-              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-forn" checked> Detalhe — Rejeite Fornecedor</label>
-              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-sla" checked> SLA e % resolvidos</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-visao" checked> Geral — cards, tempo e evolução</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:6px;margin-left:20px"><input type="checkbox" id="arj-inc-sla" checked> incluir o tempo parado</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-sup" checked> Rejeite Supervisor</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-forn" checked> Rejeite Fornecedor</label>
             </div>
           </div>
         </div>
@@ -15547,11 +15547,40 @@ function _arjBR(d){ return d ? String(d).split('-').reverse().join('/') : ''; }
 // ── gráfico de linhas ─────────────────────────────────────────────
 function arjGrafLinhas(serie, series, op){
   op = op || {};
-  var L = op.largura || 1120, A = op.altura || 250;
-  var mE = 44, mD = 14, mT = 16, mB = 34;
-  if (!serie.length) {
-    return '<div style="font-size:12px;color:#777;padding:20px;text-align:center">'
-      + 'Sem histórico ainda. Cada upload grava o dia — a evolução aparece a partir do segundo.</div>';
+  var comp = !!op.compacto;
+  var L = op.largura || (comp ? 470 : 1120), A = op.altura || (comp ? 150 : 250);
+  var mE = comp ? 30 : 44, mD = comp ? 26 : 14, mT = comp ? 12 : 16, mB = comp ? 26 : 34;
+  // Um ponto não é uma linha. Com um retrato só, o gráfico fica um eixo
+  // vazio com três bolinhas soltas no meio — e quem olha pergunta se
+  // quebrou. Melhor dizer o que está acontecendo e quando ele começa.
+  if (serie.length < 2) {
+    var hoje = serie[0];
+    // Na coluna estreita não cabe o bloco inteiro — uma frase basta.
+    if (comp) {
+      return '<div style="border:1px dashed #cbd3de;border-radius:6px;background:#fafbfc;'
+        + 'padding:10px;text-align:center;font-size:10px;color:#777;line-height:1.6">'
+        + (hoje ? '<strong style="color:#444">' + _arjBR(hoje.dia) + '</strong> é o único retrato '
+                  + 'no histórico — a linha começa no segundo dia.'
+                : 'Sem retrato no histórico ainda.') + '</div>';
+    }
+    return '<div style="border:1px dashed #cbd3de;border-radius:8px;background:#fafbfc;'
+      +   'padding:16px 18px;text-align:center">'
+      +   '<div style="font-size:12.5px;font-weight:700;color:#444;margin-bottom:4px">'
+      +     (hoje ? 'Um retrato só no histórico — o de ' + _arjBR(hoje.dia)
+                  : 'Nenhum retrato no histórico ainda') + '</div>'
+      +   (hoje
+        ? '<div style="font-size:19px;font-weight:800;color:#1B5E20;margin:6px 0">'
+          + _arjN(hoje.total) + '<span style="font-size:11px;font-weight:600;color:#777"> no total · </span>'
+          + '<span style="color:#E08A1E">' + _arjN(hoje.sup) + '</span>'
+          + '<span style="font-size:11px;font-weight:600;color:#777"> supervisor · </span>'
+          + '<span style="color:#C62828">' + _arjN(hoje.forn) + '</span>'
+          + '<span style="font-size:11px;font-weight:600;color:#777"> fornecedor</span></div>' : '')
+      +   '<div style="font-size:11px;color:#777;line-height:1.7;max-width:640px;margin:0 auto">'
+      +     'Cada ponto da linha é <strong>um dia</strong>, e o valor é quantos itens estavam na '
+      +     'lista naquele dia. Com um ponto só não há linha para desenhar. O próximo retrato '
+      +     'nasce sozinho no próximo upload de planilha — ou amanhã, quando alguém abrir esta '
+      +     'tela. A partir daí a linha começa, e o % resolvidos também.'
+      +   '</div></div>';
   }
   var max = 0;
   serie.forEach(function(p){ series.forEach(function(s){ if (p[s.campo] > max) max = p[s.campo]; }); });
@@ -15561,54 +15590,65 @@ function arjGrafLinhas(serie, series, op){
   var py = function(v){ return mT + ly - (v / max) * ly; };
 
   var h = '<svg viewBox="0 0 ' + L + ' ' + A + '" style="width:100%;height:auto;display:block">';
-  for (var g = 0; g <= 4; g++) {
-    var vy = mT + (g / 4) * ly, vv = Math.round(max - (g / 4) * max);
+  var nL = comp ? 2 : 4;
+  for (var g = 0; g <= nL; g++) {
+    var vy = mT + (g / nL) * ly, vv = Math.round(max - (g / nL) * max);
     h += '<line x1="' + mE + '" y1="' + vy + '" x2="' + (L - mD) + '" y2="' + vy
       + '" stroke="#e3e8ef" stroke-width="1"/>'
-      + '<text x="' + (mE - 6) + '" y="' + (vy + 4) + '" text-anchor="end" font-size="10" fill="#8a94a6">'
-      + vv + '</text>';
+      + '<text x="' + (mE - 5) + '" y="' + (vy + 4) + '" text-anchor="end" font-size="'
+      + (comp ? 8 : 10) + '" fill="#8a94a6">' + vv + '</text>';
   }
-  var passo = Math.max(1, Math.ceil(serie.length / 12));
+  var passo = Math.max(1, Math.ceil(serie.length / (comp ? 5 : 12)));
   serie.forEach(function(p, i){
     if (i % passo && i !== serie.length - 1) return;
-    h += '<text x="' + px(i) + '" y="' + (A - 12) + '" text-anchor="middle" font-size="10" fill="#8a94a6">'
+    h += '<text x="' + px(i) + '" y="' + (A - (comp ? 8 : 12)) + '" text-anchor="middle" font-size="'
+      + (comp ? 8 : 10) + '" fill="#8a94a6">'
       + _arjEsc(p.dia.slice(8, 10) + '/' + p.dia.slice(5, 7)) + '</text>';
   });
   series.forEach(function(s){
     var d = serie.map(function(p, i){ return (i ? 'L' : 'M') + px(i) + ' ' + py(p[s.campo]); }).join(' ');
-    h += '<path d="' + d + '" fill="none" stroke="' + s.cor + '" stroke-width="2.5" '
-      + 'stroke-linejoin="round" stroke-linecap="round"/>';
+    h += '<path d="' + d + '" fill="none" stroke="' + s.cor + '" stroke-width="'
+      + (comp ? 2 : 2.5) + '" stroke-linejoin="round" stroke-linecap="round"/>';
     serie.forEach(function(p, i){
-      h += '<circle cx="' + px(i) + '" cy="' + py(p[s.campo]) + '" r="3.2" fill="#fff" stroke="'
-        + s.cor + '" stroke-width="2"/>';
+      h += '<circle cx="' + px(i) + '" cy="' + py(p[s.campo]) + '" r="' + (comp ? 2.4 : 3.2)
+        + '" fill="#fff" stroke="' + s.cor + '" stroke-width="' + (comp ? 1.6 : 2) + '"/>';
     });
     var ult = serie[serie.length - 1];
-    h += '<text x="' + (px(serie.length - 1) - 2) + '" y="' + (py(ult[s.campo]) - 9)
-      + '" text-anchor="end" font-size="11" font-weight="700" fill="' + s.cor + '">'
+    h += '<text x="' + (px(serie.length - 1) + (comp ? 4 : -2)) + '" y="'
+      + (py(ult[s.campo]) + (comp ? 3 : -9)) + '" text-anchor="' + (comp ? 'start' : 'end')
+      + '" font-size="' + (comp ? 10 : 11) + '" font-weight="700" fill="' + s.cor + '">'
       + _arjN(ult[s.campo]) + '</text>';
   });
-  h += '</svg><div style="display:flex;gap:16px;justify-content:center;margin-top:4px">'
-    + series.map(function(s){
-        return '<span style="font-size:10px;color:#555;display:flex;align-items:center;gap:5px">'
-          + '<span style="width:12px;height:3px;background:' + s.cor + ';border-radius:2px;'
-          + 'display:inline-block"></span>' + _arjEsc(s.nome) + '</span>'; }).join('')
-    + '</div>';
+  h += '</svg>';
+  // Uma linha só não precisa de legenda: o título já diz de quem ela é.
+  if (series.length > 1) {
+    h += '<div style="display:flex;gap:16px;justify-content:center;margin-top:4px">'
+      + series.map(function(s){
+          return '<span style="font-size:10px;color:#555;display:flex;align-items:center;gap:5px">'
+            + '<span style="width:12px;height:3px;background:' + s.cor + ';border-radius:2px;'
+            + 'display:inline-block"></span>' + _arjEsc(s.nome) + '</span>'; }).join('')
+      + '</div>';
+  }
   return h;
 }
 
 // ── barras horizontais ────────────────────────────────────────────
-function arjBarras(pares, cor, limite){
+function arjBarras(pares, cor, limite, estreito){
   var lista = pares.slice(0, limite || 8);
   if (!lista.length) return '<div style="font-size:11px;color:#777">Sem itens.</div>';
   var max = lista[0][1] || 1;
+  // O rótulo nunca quebra em duas linhas: o CSS corta com reticências e o
+  // texto inteiro fica no title. Linha de altura fixa deixa as duas
+  // colunas do slide alinhadas entre si.
   return lista.map(function(p){
     var pc = Math.round((p[1] / max) * 100);
     return '<div class="gov-row">'
-      + '<div class="gov-lbl" title="' + _arjEsc(p[0]) + '">' + _arjEsc(String(p[0]).slice(0, 48))
-      +   (String(p[0]).length > 48 ? '…' : '') + '</div>'
+      + '<div class="gov-lbl"' + (estreito ? ' style="width:168px"' : '')
+      +   ' title="' + _arjEsc(p[0]) + '">' + _arjEsc(p[0]) + '</div>'
       + '<div class="gov-bar-wrap"><div class="gov-bar" style="width:' + pc + '%;background:'
       +   cor + '"></div></div>'
-      + '<div class="gov-cnt">' + _arjN(p[1]) + '</div></div>';
+      + '<div class="gov-cnt"' + (estreito ? ' style="width:38px"' : '') + '>'
+      +   _arjN(p[1]) + '</div></div>';
   }).join('');
 }
 
@@ -15667,6 +15707,8 @@ function arjDados(ini, fim){
     serie: rjHistSerie(ini, fim),
     resolvidos: rjHistResolvidos(fim),
     mov: rjHistMovimento(fim),
+    movSup: rjHistMovimento(fim, 's'),
+    movForn: rjHistMovimento(fim, 'f'),
     slaSup:slaSup, slaForn:slaForn, ordemSla:ORDEM,
     mediaSup: comS ? Math.round(somaS / comS * 10) / 10 : null,
     mediaForn: comF ? Math.round(somaF / comF * 10) / 10 : null,
@@ -15681,38 +15723,48 @@ function arjDados(ini, fim){
 // A tira que mostra a base não ser congelada: o que havia, o que saiu, o
 // que entrou e o que ficou. Com ela, "30% resolvidos" e um total que
 // subiu deixam de ser contraditórios.
-function arjMovimentoHTML(m){
+function arjMovimentoHTML(m, comp){
   var cel = function(rot, val, cor, sub){
-    return '<div style="flex:1;min-width:110px;text-align:center;padding:4px 6px">'
-      + '<div style="font-size:9.5px;font-weight:700;color:#555;text-transform:uppercase;'
-      +   'letter-spacing:.3px">' + _arjEsc(rot) + '</div>'
-      + '<div style="font-size:19px;font-weight:800;color:' + cor + ';line-height:1.1">'
-      +   _arjEsc(val) + '</div>'
-      + '<div style="font-size:9.5px;color:#777">' + sub + '</div></div>';
+    return '<div style="flex:1;min-width:' + (comp ? '70px' : '110px') + ';text-align:center;'
+      +   'padding:' + (comp ? '2px 3px' : '4px 6px') + '">'
+      + '<div style="font-size:' + (comp ? 8 : 9.5) + 'px;font-weight:700;color:#555;'
+      +   'text-transform:uppercase;letter-spacing:.3px">' + _arjEsc(rot) + '</div>'
+      + '<div style="font-size:' + (comp ? 15 : 19) + 'px;font-weight:800;color:' + cor
+      +   ';line-height:1.1">' + _arjEsc(val) + '</div>'
+      + '<div style="font-size:' + (comp ? 8 : 9.5) + 'px;color:#777">' + sub + '</div></div>';
   };
   var seta = function(){
-    return '<div style="font-size:15px;color:#aaa;align-self:center;padding:0 2px">→</div>';
+    return '<div style="font-size:' + (comp ? 11 : 15) + 'px;color:#aaa;align-self:center;'
+      + 'padding:0 2px">→</div>';
   };
   return '<div style="border:1px solid #ddd;border-radius:6px;background:#fafbfc;'
-    +   'display:flex;flex-wrap:wrap;align-items:stretch;padding:4px 6px;margin-bottom:8px">'
-    +   cel('Havia em ' + _arjBR(m.de), _arjN(m.base), '#1a1a1a', 'retrato anterior')
+    +   'display:flex;flex-wrap:wrap;align-items:stretch;padding:4px 6px;margin:6px 0 8px">'
+    +   cel('Havia em ' + _arjBR(m.de), _arjN(m.base), '#1a1a1a',
+          comp ? 'anterior' : 'retrato anterior')
     +   seta()
     +   cel('Saíram', '−' + _arjN(m.saiu), '#2e7d32',
-          String(m.pct).replace('.', ',') + '% da base anterior')
+          String(m.pct).replace('.', ',') + (comp ? '%' : '% da base anterior'))
     +   seta()
     +   cel('Entraram', '+' + _arjN(m.entrou), '#c62828',
-          m.voltaram ? m.voltaram + ' já tinham saído antes' : 'novos no período')
+          m.voltaram ? m.voltaram + (comp ? ' voltaram' : ' já tinham saído antes')
+                     : (comp ? 'novos' : 'novos no período'))
     +   seta()
     +   cel('Hoje', _arjN(m.hoje), '#1a1a1a',
-          (m.hoje === m.base ? 'igual ao anterior'
-            : (m.hoje > m.base ? '+' : '−') + _arjN(Math.abs(m.hoje - m.base)) + ' no saldo'))
+          (m.hoje === m.base ? (comp ? 'igual' : 'igual ao anterior')
+            : (m.hoje > m.base ? '+' : '−') + _arjN(Math.abs(m.hoje - m.base))
+              + (comp ? '' : ' no saldo')))
     + '</div>';
 }
 
-function arjCard(rot, val, sub, fundo){
-  return '<div class="mcard" style="background:' + fundo + ' !important">'
+// Os quatro cards do topo. A borda e o número levam a cor do lado —
+// verde o total, laranja o supervisor, vermelho o fornecedor, azul o
+// resolvido — e essa mesma cor segue no gráfico e nas barras daquele
+// lado o slide inteiro. O resto é o padrão do PATEC.
+function arjCard(rot, val, sub, cor){
+  return '<div class="mcard" style="background:#fff !important;border:1.5px solid '
+    +   cor + ' !important">'
     + '<div class="mcard-lbl">' + _arjEsc(rot) + '</div>'
-    + '<div class="mcard-val">' + _arjEsc(val) + '</div>'
+    + '<div class="mcard-val" style="color:' + cor + ' !important">' + _arjEsc(val) + '</div>'
     + '<div class="mcard-sub">' + sub + '</div></div>';
 }
 
@@ -15722,104 +15774,84 @@ function arjSlideHTML(op){
   var corF = '#C62828', corS = '#E08A1E', corT = '#1B5E20', corP = '#3266AD';
   var secs = '';
 
+  // Faixas de tempo parado, enxutas: rótulo, barra e "n · %".
+  var tempoHTML = function(mapa, cor, total){
+    return d.ordemSla.filter(function(k){ return mapa[k]; }).map(function(k){
+      var n = mapa[k], pc = total ? Math.round(n / total * 100) : 0;
+      return '<div class="gov-row"><div class="gov-lbl">' + _arjEsc(k) + '</div>'
+        + '<div class="gov-bar-wrap"><div class="gov-bar" style="width:' + pc
+        +   '%;background:' + cor + '"></div></div>'
+        + '<div class="gov-cnt">' + _arjN(n) + ' · ' + pc + '%</div></div>';
+    }).join('');
+  };
+
+  // ── 1. GERAL: cards, evolução e tempo parado ───────────────────
   if (op.incVisao) {
-    secs += '<div><div class="sec-title">📊 Visão geral — pedidos rejeitados em ' + _arjBR(op.data || '')
-      + '</div>'
-      + '<div class="mapa-grid" style="margin-bottom:10px">'
-      +   arjCard('Total rejeitado', _arjN(d.total), 'supervisor + fornecedor', '#f5f5f5')
+    secs += '<div><div class="sec-title">📊 Geral — pedidos rejeitados em '
+      + _arjBR(op.data || '') + '</div>'
+      + '<div class="mapa-grid">'
+      +   arjCard('Total rejeitado', _arjN(d.total), 'supervisor + fornecedor', corT)
       +   arjCard('Rejeite Supervisor', _arjN(d.sup.length),
-            _arjN(d.q.level) + ' Level · ' + _arjN(d.q.petro) + ' Petrobras', '#FFF8E1')
+            _arjN(d.q.level) + ' Level · ' + _arjN(d.q.petro) + ' Petrobras', corS)
       +   arjCard('Rejeite Fornecedor', _arjN(d.forn.length),
-            _arjN(d.foraPrazo) + ' fora do prazo', '#FDECEA')
+            _arjN(d.foraPrazo) + ' fora do prazo', corF)
       +   arjCard('% resolvidos', d.mov ? (String(d.mov.pct).replace('.', ',') + '%') : '—',
-            d.mov
-              ? _arjN(d.mov.saiu) + ' dos ' + _arjN(d.mov.base) + ' que havia em '
-                + _arjBR(d.mov.de)
-              : 'preciso de dois dias no histórico', '#EBF0FA')
-      + '</div>'
-      + (d.mov ? arjMovimentoHTML(d.mov) : '')
-      + '<div class="sec-title" style="margin-top:4px">📈 Evolução — itens rejeitados por dia</div>'
-      + arjGrafLinhas(d.serie, [
-          { campo:'total', nome:'Total', cor:corT },
-          { campo:'sup',   nome:'Supervisor', cor:corS },
-          { campo:'forn',  nome:'Fornecedor', cor:corF }
-        ]) + '</div>';
-  }
+            d.mov ? _arjN(d.mov.saiu) + ' dos ' + _arjN(d.mov.base) + ' de ' + _arjBR(d.mov.de)
+                  : 'preciso de dois dias', corP)
+      + '</div></div>';
 
-  if (op.incSup) {
-    secs += '<div><div class="sec-title">👤 Rejeite Supervisor — ' + _arjN(d.sup.length) + ' item(ns)</div>'
-      + '<div class="two-col">'
-      +   '<div><div class="col-tit">Por padrão de rejeição</div>'
-      +     arjBarras(d.padroesSup, corS, 8) + '</div>'
-      +   '<div><div class="col-tit">De quem é o erro</div>'
-      +     arjBarras([['Erros Level', d.q.level], ['Erros Petrobras', d.q.petro]]
-            .concat(d.q.sem ? [['Sem classificação', d.q.sem]] : []), corS, 3)
-      +     '<div class="nota">'
-      +       (d.fora ? '⚠ ' + _arjN(d.fora) + ' item(ns) apontado(s) pelo Rodrigo sem par na medição.'
-                      : '✓ Todo item apontado pelo Rodrigo tem par na medição.')
-      +     '</div>'
-      +     (d.compradores.length
-          ? '<div class="col-tit" style="margin-top:10px">Por comprador</div>'
-            + arjBarras(d.compradores, corP, 5) : '')
+    secs += '<div class="two-col" style="grid-template-columns:1.25fr 1fr">'
+      +   '<div><div class="col-tit">Evolução — itens rejeitados por dia</div>'
+      +     arjGrafLinhas(d.serie, [
+              { campo:'total', nome:'Total', cor:corT },
+              { campo:'sup',   nome:'Supervisor', cor:corS },
+              { campo:'forn',  nome:'Fornecedor', cor:corF }
+            ], { largura:660, altura:196 })
       +   '</div>'
-      + '</div></div>';
-  }
-
-  if (op.incForn) {
-    secs += '<div><div class="sec-title">🏭 Rejeite Fornecedor — ' + _arjN(d.forn.length)
-      + ' pedido(s)</div>'
-      + '<div class="two-col">'
-      +   '<div><div class="col-tit">Por motivo de recusa</div>'
-      +     arjBarras(d.motivosForn, corF, 8) + '</div>'
-      +   '<div><div class="col-tit">Por grupo de compras</div>'
-      +     arjBarras(d.gruposForn, corF, 6) + '</div>'
-      + '</div></div>';
-  }
-
-  if (op.incSla) {
-    var linhaSla = function(mapa, cor, total){
-      return d.ordemSla.filter(function(k){ return mapa[k]; })
-        .map(function(k){ return [k, mapa[k]]; })
-        .map(function(p){
-          var pc = total ? Math.round(p[1] / total * 100) : 0;
-          return '<div class="gov-row"><div class="gov-lbl">' + _arjEsc(p[0]) + '</div>'
-            + '<div class="gov-bar-wrap"><div class="gov-bar" style="width:' + pc
-            +   '%;background:' + cor + '"></div></div>'
-            + '<div class="gov-cnt">' + _arjN(p[1]) + ' itens · ' + pc + '%</div></div>';
-        }).join('');
-    };
-    secs += '<div><div class="sec-title">⏱ Há quanto tempo cada item está parado</div>'
-      + '<div class="two-col">'
-      +   '<div><div class="col-tit">Supervisor — tempo desde o envio do cockpit'
-      +     (d.mediaSup != null ? ' · média ' + String(d.mediaSup).replace('.', ',') + ' dias' : '')
-      +     '</div>'
-      +     '<div class="nota" style="margin:0 0 6px">quantos dos ' + _arjN(d.sup.length)
-      +       ' itens estão em cada faixa, e quanto isso é do total</div>'
-      +     linhaSla(d.slaSup, corS, d.sup.length) + '</div>'
-      +   '<div><div class="col-tit">Fornecedor — dias rejeitado'
-      +     (d.mediaForn != null ? ' · média ' + String(d.mediaForn).replace('.', ',') + ' dias' : '')
-      +     '</div>'
-      +     '<div class="nota" style="margin:0 0 6px">quantos dos ' + _arjN(d.forn.length)
-      +       ' pedidos estão em cada faixa, e quanto isso é do total</div>'
-      +     linhaSla(d.slaForn, corF, d.forn.length) + '</div>'
+      +   '<div>'
+      +     (op.incSla
+          ? '<div class="col-tit">Supervisor — dias desde o envio do cockpit'
+            + (d.mediaSup != null ? ' · média ' + String(d.mediaSup).replace('.', ',') : '')
+            + '</div>' + tempoHTML(d.slaSup, corS, d.sup.length)
+            // Respiro entre os dois: são coisas diferentes, e coladas
+            // pareciam uma lista só de nove faixas.
+            + '<div style="height:12px;margin:9px 0 0;border-top:1px solid #e3e8ef"></div>'
+            + '<div class="col-tit">Fornecedor — dias rejeitado'
+            + (d.mediaForn != null ? ' · média ' + String(d.mediaForn).replace('.', ',') : '')
+            + '</div>' + tempoHTML(d.slaForn, corF, d.forn.length)
+          : '')
+      +   '</div>'
       + '</div>'
-      + '<div class="nota">'
-      +   '<strong>Resolvido = saiu da lista.</strong> No Supervisor, o item deixou de ser '
-      +   'STATUS_PROCESSO 8 na medição; no Fornecedor, o pedido saiu da planilha de rejeitados. '
-      +   'Nenhuma das duas fontes tem um campo "tratado" — sair da lista é o sinal que elas dão. '
-      +   'A base não é congelada, então o percentual é sempre sobre a BASE ANTERIOR: quem entrou '
-      +   'depois não entra na conta de quem foi tratado.'
-      +   (d.mov
-        ? ' Entre ' + _arjBR(d.mov.de) + ' e ' + _arjBR(d.mov.ate) + ': dos '
-          + _arjN(d.mov.base) + ' que havia, ' + _arjN(d.mov.saiu) + ' saíram ('
-          + String(d.mov.pct).replace('.', ',') + '%) e ' + _arjN(d.mov.ficaram)
-          + ' continuam; entraram ' + _arjN(d.mov.entrou) + ' novos, fechando em '
-          + _arjN(d.mov.hoje) + '.'
-          + (d.mov.voltaram
-             ? ' ⚠ ' + _arjN(d.mov.voltaram) + ' dos que entraram já tinham saído antes — '
-               + 'voltaram para a lista, então não estavam resolvidos.' : '')
-        : ' Ainda só existe um retrato no histórico, então não há com o que comparar.')
-      + '</div></div>';
+      + (d.mov ? arjMovimentoHTML(d.mov) : '');
+  }
+
+  // ── 2. Os dois lados, em colunas paralelas ─────────────────────
+  if (op.incSup || op.incForn) {
+    var colSup = '<div></div>', colForn = '<div></div>';
+    if (op.incSup) {
+      colSup = '<div><div class="sec-title">👤 Rejeite Supervisor — ' + _arjN(d.sup.length)
+        + ' item(ns)</div>'
+        + '<div class="col-tit">De quem é o erro</div>'
+        + arjBarras([['Erros Level', d.q.level], ['Erros Petrobras', d.q.petro]]
+            .concat(d.q.sem ? [['Sem classificação', d.q.sem]] : []), corS, 3, true)
+        + '<div class="col-tit" style="margin-top:8px">Por padrão de rejeição</div>'
+        + arjBarras(d.padroesSup, corS, 6, true)
+        + (d.movSup ? arjMovimentoHTML(d.movSup, true) : '')
+        + '</div>';
+    }
+    if (op.incForn) {
+      colForn = '<div><div class="sec-title" style="color:#7a1414;border-color:#7a1414">'
+        + '🏭 Rejeite Fornecedor — ' + _arjN(d.forn.length) + ' pedido(s)</div>'
+        + '<div class="col-tit">Dentro ou fora do prazo de recusa</div>'
+        + arjBarras([['Fora do prazo', d.foraPrazo],
+                     ['No prazo', d.forn.length - d.foraPrazo]], corF, 2, true)
+        + '<div class="col-tit" style="margin-top:8px">Por motivo de recusa</div>'
+        + arjBarras(d.motivosForn, corF, 6, true)
+        + (d.movForn ? arjMovimentoHTML(d.movForn, true) : '')
+        + '</div>';
+    }
+    secs += '<div class="two-col" style="grid-template-columns:1fr 1fr;gap:20px">'
+      + colSup + colForn + '</div>';
   }
 
   return { html: secs, dados: d };
@@ -15858,7 +15890,7 @@ function arjGerar(){
     + '.hdr-right{text-align:right;color:rgba(255,255,255,.9)}\n'
     + '.hdr-right .brand{font-size:22px;font-weight:900;letter-spacing:-1px}\n'
     + '.hdr-right .sub{font-size:10px;opacity:.8;margin-top:1px}\n'
-    + '.body{padding:8px 16px;display:grid;gap:8px}\n'
+    + '.body{padding:8px 16px;display:grid;gap:9px}\n'
     + '.sec-title{font-size:10px;font-weight:700;color:#1b5e20;text-transform:uppercase;'
     +   'letter-spacing:.8px;border-bottom:2px solid #1b5e20;padding-bottom:3px;margin-bottom:7px}\n'
     + '.mapa-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}\n'
@@ -15867,16 +15899,19 @@ function arjGerar(){
     +   'justify-content:center}\n'
     + '.mcard-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;'
     +   'margin-bottom:3px;color:#1a1a1a !important}\n'
-    + '.mcard-val{font-size:20px;font-weight:800;line-height:1;margin-bottom:1px;'
+    + '.mcard-val{font-size:26px;font-weight:800;line-height:1.05;margin-bottom:1px;'
     +   'color:#1a1a1a !important}\n'
     + '.mcard-sub{font-size:10px;color:#777}\n'
-    + '.two-col{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start}\n'
-    + '.col-tit{font-size:11px;font-weight:700;text-transform:uppercase;color:#555;margin-bottom:6px}\n'
-    + '.gov-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}\n'
-    + '.gov-lbl{font-size:10px;font-weight:600;color:#333;width:230px;flex-shrink:0}\n'
-    + '.gov-bar-wrap{flex:1;background:#f0f0f0;border-radius:4px;height:14px;overflow:hidden}\n'
+    + '.two-col{display:grid;grid-template-columns:1.4fr 1fr;gap:18px;align-items:start}\n'
+    + '.col-tit{font-size:10.5px;font-weight:700;text-transform:uppercase;color:#555;'
+    +   'margin-bottom:5px;letter-spacing:.2px}\n'
+    + '.gov-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}\n'
+    + '.gov-lbl{font-size:10px;font-weight:600;color:#333;width:200px;flex-shrink:0;'
+    +   'white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\n'
+    + '.gov-bar-wrap{flex:1;background:#f0f0f0;border-radius:4px;height:13px;overflow:hidden}\n'
     + '.gov-bar{height:100%;border-radius:4px}\n'
-    + '.gov-cnt{font-size:11px;font-weight:700;color:#333;width:96px;text-align:right;flex-shrink:0}\n'
+    + '.gov-cnt{font-size:10.5px;font-weight:700;color:#333;width:74px;text-align:right;'
+    +   'flex-shrink:0}\n'
     + '.nota{font-size:10px;color:#777;margin-top:6px}\n'
     + '.ftr{background:#1b5e20;padding:7px 28px;display:flex;justify-content:space-between;'
     +   'align-items:center;margin-top:10px}\n'
@@ -16173,16 +16208,19 @@ function rjHistSerie(ini, fim){
 // E conto à parte os que VOLTARAM: item que saiu num retrato e reapareceu
 // depois não foi resolvido coisa nenhuma — contá-lo como resolvido sem
 // dizer que voltou seria maquiar o indicador.
-function rjHistMovimento(fim){
+function rjHistMovimento(fim, lado){
   var ds = Object.keys(_rjHist.dias || {}).sort().filter(function(d){ return !fim || d <= fim; });
   if (ds.length < 2) return null;
+  // Um dia "tem retrato" quando guardou chave de qualquer um dos dois
+  // lados. Olhando só um lado, o conjunto pode ser vazio de verdade —
+  // fornecedor zerado é um dado, não é ausência de dado.
   var chavesDe = function(o){
     if (!o) return null;
     var f = (o.f && o.f.chaves) || [], s2 = (o.s && o.s.chaves) || [];
     if (!f.length && !s2.length) return null;
     var m = {};
-    f.forEach(function(k){ m['F' + k] = 1; });
-    s2.forEach(function(k){ m['S' + k] = 1; });
+    if (lado !== 's') f.forEach(function(k){ m['F' + k] = 1; });
+    if (lado !== 'f') s2.forEach(function(k){ m['S' + k] = 1; });
     return m;
   };
   var hoje = chavesDe(_rjHist.dias[ds[ds.length - 1]]);
