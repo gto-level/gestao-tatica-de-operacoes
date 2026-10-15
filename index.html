@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 18:05';
+var GTO_BUILD = '15/10 18:45';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15623,6 +15623,36 @@ function rjsRodDrop(e){
   if (f) rjsUploadRodrigo(f);
 }
 
+// A medição pode ser subida AQUI também. É o mesmo arquivo e a mesma
+// leitura do Controle de Pedidos — só que sem precisar trocar de tela e
+// voltar para ver o resultado. O diagnóstico aparece na hora, embaixo.
+function rjsMedDrop(e){
+  e.preventDefault();
+  var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) rjsUploadMedicao(f);
+}
+
+async function rjsUploadMedicao(file){
+  if (!file) return;
+  var st = document.getElementById('rjs-med-status');
+  if (st) st.innerHTML = '⏳ Lendo a medição... (um arquivo de 30 MB leva alguns segundos)';
+  try {
+    // cpHandleUpload é a leitura oficial: a mesma data, as mesmas regras
+    // e as mesmas gravações. Aqui só se aproveita dela.
+    await cpHandleUpload(file);
+    if (st) {
+      var n = (_rjsMed && _rjsMed.itens) ? _rjsMed.itens.length : 0;
+      st.innerHTML = n
+        ? '<span style="color:var(--vd)">✓ ' + cpNum(n) + ' item(ns) rejeitado(s) na medição.</span>'
+        : '<span style="color:var(--am)">A medição foi lida, mas nenhuma linha passou na regra '
+          + 'do rejeite. O bloco abaixo diz onde elas pararam.</span>';
+    }
+  } catch (e) {
+    if (st) st.innerHTML = '<span style="color:var(--vm)">✗ Erro ao ler: ' + cpEsc(e.message) + '</span>';
+  }
+  try { rjDesenhar(); } catch (e2) {}
+}
+
 async function rjsUploadRodrigo(file){
   if (!file) return;
   var st = document.getElementById('rjs-rod-status');
@@ -17490,6 +17520,31 @@ function rjSupervisorHTML(){
       + '</div>';
   }
 
+  // ── o diagnóstico vem ANTES de tudo quando não há item ────────
+  // Estava no pé da tela, depois dos uploads: quem abria via "0" no card
+  // e a explicação ficava fora do campo de visão.
+  if (!n && _rjsMed && _rjsMed.funil && _rjsMed.funil.lidas) {
+    h += '<div style="font-size:12px;color:var(--tx2)">'
+      +   'Eu li a medição, mas nenhuma linha passou na regra do rejeite — '
+      +   'o funil abaixo diz onde elas pararam.</div>'
+      + rjsFunilHTML();
+  }
+
+  // ── o upload da medição, aqui mesmo ───────────────────────────
+  h += '<div style="border:2px dashed var(--brd);border-radius:10px;padding:.8rem;text-align:center;'
+    +   'cursor:pointer;background:var(--cin);margin-bottom:.6rem"'
+    +   ' onclick="document.getElementById(\'rjs-med-input\').click()"'
+    +   ' ondragover="event.preventDefault()" ondrop="rjsMedDrop(event)">'
+    +   '<div style="font-size:18px;margin-bottom:.2rem">📊</div>'
+    +   '<div style="font-size:13px;font-weight:600">Arraste aqui a medição</div>'
+    +   '<div style="font-size:11px;color:var(--tx2);margin-top:4px">'
+    +     'é o mesmo arquivo do <strong>Controle de Pedidos</strong> — subir por aqui poupa a ida '
+    +     'e volta e mostra o resultado na hora</div>'
+    +   '<input type="file" id="rjs-med-input" accept=".xlsb,.xlsx,.xls,.csv" style="display:none"'
+    +     ' onchange="rjsUploadMedicao(this.files[0]); this.value=\'\';">'
+    + '</div>'
+    + '<div id="rjs-med-status" style="margin-bottom:.8rem;font-size:12px"></div>';
+
   // ── o upload do Rodrigo ───────────────────────────────────────
   h += '<div style="border:2px dashed var(--brd);border-radius:10px;padding:1rem;text-align:center;'
     +   'cursor:pointer;background:var(--cin)"'
@@ -17516,9 +17571,17 @@ function rjSupervisorHTML(){
   h += '<div style="font-size:11px;color:var(--tx2);margin-top:.9rem;line-height:1.8;'
     +   'background:var(--cin);border:1px solid var(--brd);border-radius:8px;padding:.6rem .8rem">'
     +   '<div><strong style="color:var(--tx)">Medição</strong> — '
-    +     (faltaMed ? '<span style="color:var(--vm)">ainda não lida. Suba a medição em Controle de Pedidos.</span>'
-                    : cpEsc(_rjsMed.arquivo || '—') + ' · ' + cpNum(_rjsMed.linhas)
-                      + ' linha(s) rejeitada(s) → ' + cpNum(_rjsMed.chaves) + ' chave(s) RC+item')
+    +     (faltaMed
+         ? ((_rjsMed && _rjsMed.funil && _rjsMed.funil.lidas)
+            // Lida e sem item é outra coisa que não lida: dizer "não lida"
+            // mandava procurar um upload que já tinha sido feito.
+            ? '<span style="color:var(--am)">' + cpEsc(_rjsMed.arquivo || 'lida')
+              + ' · ' + cpNum(_rjsMed.funil.lidas) + ' linha(s) lida(s), '
+              + '<strong>nenhuma passou na regra do rejeite</strong>.</span>'
+            : '<span style="color:var(--vm)">ainda não lida. Suba a medição aqui em cima '
+              + 'ou em Controle de Pedidos.</span>')
+         : cpEsc(_rjsMed.arquivo || '—') + ' · ' + cpNum(_rjsMed.linhas)
+           + ' linha(s) rejeitada(s) → ' + cpNum(_rjsMed.chaves) + ' chave(s) RC+item')
     +   '</div>'
     +   '<div><strong style="color:var(--tx)">Levelboard</strong> — '
     +     ((_rjsSla && _rjsSla.chaves)
@@ -17560,14 +17623,12 @@ function rjSupervisorHTML(){
   // ── a lista ───────────────────────────────────────────────────
   if (!n) {
     var leuAlgo = !!(_rjsMed && _rjsMed.funil && _rjsMed.funil.lidas);
-    h += '<div style="font-size:12px;color:var(--tx2);margin-top:.9rem">'
-      + (faltaMed
-         ? (leuAlgo
-            ? 'Eu li a medição, mas nenhuma linha passou na regra do rejeite — o funil abaixo diz onde elas pararam.'
-            : 'Sem medição lida, não há o que mostrar.')
-         : 'Nenhum item com STATUS_PROCESSO 8 e as duas colunas de eliminação vazias.')
-      + '</div>'
-      + rjsFunilHTML();
+    // o funil já foi mostrado lá em cima quando a medição foi lida
+    h += leuAlgo ? ''
+       : '<div style="font-size:12px;color:var(--tx2);margin-top:.9rem">'
+         + (faltaMed ? 'Sem medição lida, não há o que mostrar.'
+                     : 'Nenhum item com STATUS_PROCESSO 8 e as duas colunas de eliminação vazias.')
+         + '</div>';
   } else {
     h += (_rjsMed && _rjsMed.funil && _rjsMed.funil.lidas
        ? '<details style="margin-top:.6rem"><summary style="cursor:pointer;font-size:11.5px;'
