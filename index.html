@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 07:10';
+var GTO_BUILD = '15/10 09:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1542,6 +1542,12 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
             <div id="md-resumo"></div>
             <div style="display:flex;gap:8px;margin-top:.9rem;flex-wrap:wrap">
               <button class="btn btn-p" onclick="mdDistribuir()">⚖ Distribuir entre a equipe</button>
+              <button class="btn btn-s" onclick="mdExportarDistribuicao()">⬇ Exportar MAPA distribuído</button>
+            </div>
+            <div style="font-size:10.5px;color:var(--tx2);margin-top:6px;line-height:1.6">
+              A exportação devolve o arquivo com as <strong>colunas originais</strong>, em cinco abas
+              — MAPA, Emitir Pedido PATEC, Emitir Pedido Manual, Negociar e Abrir PATEC — com o
+              <strong>analista</strong> e a <strong>data da distribuição</strong> nas duas primeiras colunas.
             </div>
             <div style="font-size:10.5px;color:var(--tx2);margin-top:6px;line-height:1.6">
               A mesma oportunidade fica sempre com o mesmo comprador, nunca é dividida ·
@@ -14075,7 +14081,10 @@ function mdDinheiro(v){
 
 // ── leitura do MAPA ───────────────────────────────────────────────
 function mdLerMapa(linhas, forcar){
-  var r = { itens:[], total:0, porStatus:{}, aviso:'', dpvGrupos:0, lidas:0 };
+  var r = { itens:[], total:0, porStatus:{}, aviso:'', dpvGrupos:0, lidas:0,
+            // o cabeçalho e as linhas cruas ficam guardados: é com eles
+            // que a exportação devolve as colunas do arquivo original
+            cabecalho:[] };
   MD_STATUS.forEach(function(x){ r.porStatus[x.chave] = 0; });
   if (!linhas || !linhas.length) { r.aviso = 'Arquivo vazio.'; return r; }
 
@@ -14095,6 +14104,8 @@ function mdLerMapa(linhas, forcar){
                      : 'Não achei a coluna ANALISTA_AUTOMATICO — isto é o MAPA mesmo?';
     return r;
   }
+
+  r.cabecalho = (linhas[iCab] || []).map(function(x){ return x == null ? '' : String(x); });
 
   var ix = function(nomes){ return _cpAchaCol(cabs, nomes); };
   var col = {
@@ -14188,6 +14199,10 @@ function mdLerMapa(linhas, forcar){
     };
     it.chave = it.rc + '|' + it.seq;
     it.prioritario = mdPrioEh(it.rc, it.seq);
+    // A linha inteira do Excel, como veio. Remontar as colunas a partir
+    // dos campos lidos perderia tudo que o dashboard não usa — e o que
+    // o André exporta é o arquivo dele, não o meu resumo.
+    it.bruto = (l || []).map(function(x){ return x == null ? '' : x; });
     r.itens.push(it);
     if (r.porStatus[ch] !== undefined) r.porStatus[ch]++;
     else r.porStatus[ch] = 1;
@@ -14223,6 +14238,13 @@ async function mdLerArquivo(file){
   var r = mdLerMapa(linhas);
   r.arquivo = file.name; r.aba = nome;
 
+  // Cada aba tem o seu próprio cabeçalho, e a exportação precisa do
+  // certo para cada grupo.
+  r.cabPorAba = {};
+  r.cabPorAba[nome] = r.cabecalho || [];
+  r.abaMapa = nome;
+  r.itens.forEach(function(i){ if (!i.deAba) i.deAba = nome; });
+
   r.abasPedido = [];
   MD_ABAS_PEDIDO.forEach(function(ap){
     var sn = _mdAchaAba(wb.SheetNames || [], ap.abas);
@@ -14240,6 +14262,7 @@ async function mdLerArquivo(file){
       return;
     }
     r.itens = r.itens.filter(function(i){ return i.statusChave !== ap.chave; });
+    r.cabPorAba[sn] = sub.cabecalho || [];
     sub.itens.forEach(function(i){ i.deAba = sn; r.itens.push(i); });
     r.abasPedido.push({ aba: sn, chave: ap.chave, achou: true, n: sub.itens.length });
   });
@@ -19853,6 +19876,115 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   res.lista = pessoas.map(function(n){ return res.pessoas[n]; });
   res.distribuidos = res.lista.reduce(function(m, p){ return m + p.n; }, 0);
   return res;
+}
+
+
+// ══════════════════ EXPORTAR A DISTRIBUIÇÃO DO MAPA ══════════════
+// O que sai daqui é o arquivo do André de volta, com as colunas
+// originais intactas, só que repartido em cinco abas e com duas colunas
+// na frente: quem vai tratar e a data da distribuição.
+//
+// As linhas são as CRUAS do Excel, guardadas no upload. Remontar as
+// colunas a partir dos campos que o dashboard lê devolveria um resumo,
+// não o arquivo dele — e é o arquivo que a equipe usa para trabalhar.
+//
+// O recorte de colunas de cada aba é o que ele pediu: na MAPA começa na
+// B (a A é o ANALISTA_AUTOMATICO, que a própria aba já diz), nas outras
+// começa na A. Todas vão até a última coluna do arquivo.
+var MDX_ABAS = [
+  { nome:'MAPA',                  chaves:['emitir'],              de:'mapa',     col0:1 },
+  { nome:'Emitir Pedido PATEC',   chaves:['patec'],               de:'patec',    col0:0 },
+  { nome:'Emitir Pedido Manual',  chaves:['patecman'],            de:'patecman', col0:0 },
+  { nome:'Negociar',              chaves:['negociar','dpv'],      de:'mapa',     col0:1 },
+  { nome:'Abrir PATEC',           chaves:['patecgm','pateciden'], de:'mapa',     col0:1 }
+];
+
+// De qual aba do arquivo veio cada grupo — é dela que sai o cabeçalho.
+function mdxCabecalho(grupo, itens){
+  var cab = (_mdBase && _mdBase.cabPorAba) ? _mdBase.cabPorAba : {};
+  if (grupo.de === 'mapa') return cab[(_mdBase && _mdBase.abaMapa) || 'MAPA'] || [];
+  // nas abas de pedido, o nome real pode variar entre arquivos
+  var deAba = '';
+  (itens || []).some(function(i){ if (i.deAba) { deAba = i.deAba; return true; } return false; });
+  if (deAba && cab[deAba]) return cab[deAba];
+  var achou = [];
+  Object.keys(cab).forEach(function(k){
+    if (!achou.length && /pedido/i.test(k) && (grupo.de === 'patecman'
+        ? /manual/i.test(k) : !/manual/i.test(k))) achou = cab[k];
+  });
+  return achou;
+}
+
+// Os itens distribuídos de um grupo, na ordem em que a equipe vai tratar.
+function mdxItens(grupo){
+  if (!_mdDist || !_mdDist.res || !_mdDist.res.lista) return [];
+  var out = [];
+  _mdDist.res.lista.forEach(function(p){
+    (p.itens || []).forEach(function(it){
+      if (grupo.chaves.indexOf(it.statusChave) === -1) return;
+      if (!it.bruto || !it.bruto.length) return;    // item sem linha crua (reap, rejeitado)
+      out.push({ pessoa:p.nome, it:it });
+    });
+  });
+  // a fila (quem não coube na semana) entra sem analista, para ninguém
+  // sumir do arquivo
+  (_mdDist.res.fila || []).forEach(function(it){
+    if (grupo.chaves.indexOf(it.statusChave) === -1) return;
+    if (!it.bruto || !it.bruto.length) return;
+    out.push({ pessoa:'', it:it });
+  });
+  out.sort(function(a, b){
+    if (a.pessoa !== b.pessoa) return String(a.pessoa).localeCompare(String(b.pessoa));
+    if ((a.it.dia || 0) !== (b.it.dia || 0)) return (a.it.dia || 99) - (b.it.dia || 99);
+    return String(a.it.rc).localeCompare(String(b.it.rc));
+  });
+  return out;
+}
+
+function mdxDataDist(){
+  return (_mdDist && _mdDist.data) ? _mdDist.data : mdDataSel();
+}
+
+function mdExportarDistribuicao(){
+  try {
+    if (!_mdDist || !_mdDist.res) {
+      alert('Faça a distribuição antes de exportar.');
+      return null;
+    }
+    if (!_mdBase || !_mdBase.cabPorAba) {
+      alert('A base do MAPA não está carregada nesta sessão. Suba o MAPA de novo e distribua.');
+      return null;
+    }
+    var dataBR = cpDataBR(mdxDataDist());
+    var wb = XLSX.utils.book_new();
+    var resumo = [];
+
+    MDX_ABAS.forEach(function(g){
+      var linhas = mdxItens(g);
+      var cab = mdxCabecalho(g, linhas.map(function(x){ return x.it; }));
+      var larg = cab.length;
+      linhas.forEach(function(x){ if (x.it.bruto.length > larg) larg = x.it.bruto.length; });
+
+      var fatia = function(arr){
+        var out = [];
+        for (var j = g.col0; j < larg; j++) out.push(arr[j] == null ? '' : arr[j]);
+        return out;
+      };
+      var corpo = [['Analista', 'Data da distribuição'].concat(fatia(cab))];
+      linhas.forEach(function(x){
+        corpo.push([x.pessoa || '(na fila)', dataBR].concat(fatia(x.it.bruto)));
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(corpo), g.nome);
+      resumo.push({ aba:g.nome, n:linhas.length, colunas:corpo[0].length });
+    });
+
+    var nome = 'MAPA_distribuido_' + String(mdxDataDist()).replace(/-/g, '') + '.xlsx';
+    XLSX.writeFile(wb, nome);
+    return { arquivo:nome, abas:resumo };
+  } catch (e) {
+    alert('Não consegui exportar: ' + e.message);
+    return null;
+  }
 }
 
 async function mdDistribuir(){
