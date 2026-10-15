@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 12:05';
+var GTO_BUILD = '15/10 12:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -19957,15 +19957,17 @@ var MDX_ABAS = [
 
 // ── a coluna ORP/PMM ─────────────────────────────────────────────
 // Sai do N_ACOMPANHAMENTO: quando ele traz PMM (PMM, PMM NINEX,
-// PMM INDIC_), a coluna leva o valor como está no arquivo; fora isso
-// fica em branco. No MAPA de hoje são 100 linhas: 97 PMM, 2 PMM NINEX
-// e 1 PMM INDIC_.
+// PMM INDIC_) ou ORP (ORP DPV), a coluna leva o valor como está no
+// arquivo; fora isso fica em branco. É por conter o texto, não por
+// ser igual a ele — assim variação escrita diferente (FD_ORP DPV,
+// PMM_ORPDPV, ORP INDIC_) também é destacada.
 //
 // A aba Emitir pedido manual não tem a coluna N_ACOMPANHAMENTO — ali o
 // valor é buscado na aba MAPA pelo RC_ITEM, que é o RC com o SEQ
 // colado. Sem isso aquela aba sairia sempre vazia.
 function mdxEhPmm(v){
-  return String(v == null ? '' : v).toUpperCase().indexOf('PMM') !== -1;
+  var t = String(v == null ? '' : v).toUpperCase();
+  return t.indexOf('PMM') !== -1 || t.indexOf('ORP') !== -1;
 }
 
 var _mdxAcompIdx = null;
