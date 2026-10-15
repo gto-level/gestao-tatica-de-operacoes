@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 01:50';
+var GTO_BUILD = '15/10 03:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15542,6 +15542,17 @@ function _arjEsc(v){
   });
 }
 function _arjN(v){ return cpNum(v == null ? 0 : v); }
+// "média 7,7" sozinho não diz média de quê. Aqui fica "média 7,7 dias ·
+// metade até 5", que é a leitura que a pessoa faz em voz alta.
+function _arjMedia(media, mediana, data){
+  if (media == null) return '';
+  var t = ' · média ' + String(media).replace('.', ',') + ' dias';
+  if (mediana != null) t += ' · metade até ' + String(mediana).replace('.', ',');
+  // Só avisa quando a fonte NÃO é de hoje: no dia a dia normal o rótulo
+  // fica limpo, e no dia em que a planilha atrasou o aviso aparece.
+  if (data && data !== cpHojeISO()) t += ' · base de ' + _arjBR(data);
+  return t;
+}
 function _arjBR(d){ return d ? String(d).split('-').reverse().join('/') : ''; }
 
 // ── gráfico de linhas ─────────────────────────────────────────────
@@ -15676,16 +15687,26 @@ function arjDados(ini, fim){
   var ORDEM = ['até 2 dias','3 a 5 dias','6 a 10 dias','11 a 20 dias','mais de 20 dias','sem SLA'];
   var slaSup = {}, slaForn = {};
   ORDEM.forEach(function(k){ slaSup[k] = 0; slaForn[k] = 0; });
-  var somaS = 0, comS = 0, somaF = 0, comF = 0;
+  var somaS = 0, comS = 0, somaF = 0, comF = 0, valS = [], valF = [];
   sup.forEach(function(l){
     slaSup[faixa(l.slaPedido)]++;
-    if (l.slaPedido != null) { somaS += (+l.slaPedido || 0); comS++; }
+    if (l.slaPedido != null) { somaS += (+l.slaPedido || 0); comS++; valS.push(+l.slaPedido || 0); }
   });
   forn.forEach(function(i){
-    var d = (i.dias === '' || i.dias == null) ? null : (+i.dias || 0);
-    slaForn[faixa(d)]++;
-    if (d != null) { somaF += d; comF++; }
+    var dd = (i.dias === '' || i.dias == null) ? null : (+i.dias || 0);
+    slaForn[faixa(dd)]++;
+    if (dd != null) { somaF += dd; comF++; valF.push(dd); }
   });
+  // A média sozinha engana quando a cauda é longa: meia dúzia de itens
+  // parados há 40 dias puxa a média para cima e some com a maioria que
+  // está em 4. A mediana diz onde está o item do meio — as duas juntas
+  // mostram se a fila é homogênea ou se tem rabo.
+  var mediana = function(v){
+    if (!v.length) return null;
+    var a = v.slice().sort(function(x, y){ return x - y; });
+    var m = Math.floor(a.length / 2);
+    return a.length % 2 ? a[m] : Math.round((a[m - 1] + a[m]) / 2 * 10) / 10;
+  };
 
   var motivosForn = {}, gruposForn = {}, foraPrazo = 0;
   forn.forEach(function(i){
@@ -15712,6 +15733,13 @@ function arjDados(ini, fim){
     slaSup:slaSup, slaForn:slaForn, ordemSla:ORDEM,
     mediaSup: comS ? Math.round(somaS / comS * 10) / 10 : null,
     mediaForn: comF ? Math.round(somaF / comF * 10) / 10 : null,
+    medianaSup: mediana(valS), medianaForn: mediana(valF),
+    // De quando é cada fonte. Os dois lados são atualizados por uploads
+    // diferentes: se a planilha do Rodrigo é semanal e a de rejeitados é
+    // diária, o "dias parados" do supervisor está velho e o do
+    // fornecedor está fresco — e ninguém percebe olhando os números.
+    dataSup: (_rjsRod && _rjsRod.atualizadoEm) ? String(_rjsRod.atualizadoEm).slice(0, 10) : '',
+    dataForn: (_gpRej && _gpRej.atualizadoEm) ? String(_gpRej.atualizadoEm).slice(0, 10) : '',
     motivosForn:_arjOrdena(motivosForn), gruposForn:_arjOrdena(gruposForn),
     padroesSup:_arjOrdena(padroesSup), compradores:_arjOrdena(compradores),
     foraPrazo:foraPrazo
@@ -15810,14 +15838,14 @@ function arjSlideHTML(op){
       +   '</div>'
       +   '<div>'
       +     (op.incSla
-          ? '<div class="col-tit">Supervisor — dias desde o envio do cockpit'
-            + (d.mediaSup != null ? ' · média ' + String(d.mediaSup).replace('.', ',') : '')
+          ? '<div class="col-tit">Supervisor — dias parados desde o envio do cockpit'
+            + _arjMedia(d.mediaSup, d.medianaSup, d.dataSup)
             + '</div>' + tempoHTML(d.slaSup, corS, d.sup.length)
             // Respiro entre os dois: são coisas diferentes, e coladas
             // pareciam uma lista só de nove faixas.
             + '<div style="height:12px;margin:9px 0 0;border-top:1px solid #e3e8ef"></div>'
-            + '<div class="col-tit">Fornecedor — dias rejeitado'
-            + (d.mediaForn != null ? ' · média ' + String(d.mediaForn).replace('.', ',') : '')
+            + '<div class="col-tit">Fornecedor — dias parados desde a rejeição'
+            + _arjMedia(d.mediaForn, d.medianaForn, d.dataForn)
             + '</div>' + tempoHTML(d.slaForn, corF, d.forn.length)
           : '')
       +   '</div>'
@@ -16072,6 +16100,13 @@ function arjDesenharResumo(){
 
   h += '<div style="font-size:11.5px;color:var(--tx2);line-height:1.8;background:var(--cin);'
     +   'border:1px solid var(--brd);border-radius:8px;padding:.6rem .8rem">'
+    +   '<div><strong style="color:var(--tx)">Como a média de dias é calculada</strong> — '
+    +     'ela sai só da planilha que está carregada agora, nunca de uma soma entre uploads. '
+    +     'No Fornecedor é a média da coluna DIAS_REJEITADO dos pedidos da lista de hoje; no '
+    +     'Supervisor, a média do "Tempo desde o envio" do último cockpit do Rodrigo. Subir uma '
+    +     'planilha nova substitui a anterior: o item que continuar rejeitado entra com o número '
+    +     'de dias que a planilha nova trouxer, e quem saiu deixa de pesar. Por isso ela sobe '
+    +     'sozinha quando a fila não anda, mesmo sem entrar item novo.</div>'
     +   '<div><strong style="color:var(--tx)">Como eu sei que um item foi tratado</strong> — '
     +     'ele sai da lista. No Supervisor, deixa de ser STATUS_PROCESSO 8 na medição; no '
     +     'Fornecedor, some da planilha de rejeitados. É o único sinal que os arquivos dão: '
@@ -16094,6 +16129,24 @@ function arjDesenharResumo(){
         { campo:'sup',   nome:'Supervisor', cor:'#E08A1E' },
         { campo:'forn',  nome:'Fornecedor', cor:'#C62828' }
       ], { altura:230 }) + '</div>';
+
+    // A média de hoje é a foto de hoje. Para saber se a fila está
+    // envelhecendo ou rejuvenescendo, é preciso ver a média ao longo
+    // dos dias — o retrato já guarda a soma e a contagem de cada um.
+    var comMed = serie.filter(function(p){ return p.medSup != null || p.medForn != null; });
+    if (comMed.length > 1) {
+      h += '<div style="margin-top:1rem;border-top:1px dashed var(--brd);padding-top:.8rem">'
+        + '<div style="font-size:11.5px;font-weight:700;color:var(--tx);margin-bottom:2px">'
+        +   'Média de dias parados, dia a dia</div>'
+        + '<div style="font-size:10.5px;color:var(--tx2);margin-bottom:6px">'
+        +   'Subindo, a fila está envelhecendo: está entrando menos gente nova do que item '
+        +   'velho que fica. Descendo, o contrário.</div>'
+        + arjGrafLinhas(comMed, [
+            { campo:'medSup',  nome:'Supervisor', cor:'#E08A1E' },
+            { campo:'medForn', nome:'Fornecedor', cor:'#C62828' }
+          ], { altura:200 })
+        + '</div>';
+    }
   }
   box.innerHTML = h + '</div>';
 }
@@ -16190,8 +16243,12 @@ function rjHistSerie(ini, fim){
   return ds.map(function(d){
     var o = _rjHist.dias[d] || {};
     var f = o.f || {}, s = o.s || {};
+    var mS = (+s.com) ? Math.round((+s.soma) / (+s.com) * 10) / 10 : null;
+    var mF = (+f.com) ? Math.round((+f.soma) / (+f.com) * 10) / 10 : null;
     return { dia:d, forn:+f.n || 0, sup:+s.n || 0, total:(+f.n || 0) + (+s.n || 0),
-             lv:+s.lv || 0, pb:+s.pb || 0, sem:+s.sem || 0 };
+             lv:+s.lv || 0, pb:+s.pb || 0, sem:+s.sem || 0,
+             // média de dias parados daquele dia, de cada lado
+             medSup:mS, medForn:mF };
   });
 }
 
