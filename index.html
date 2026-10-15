@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 12:40';
+var GTO_BUILD = '15/10 13:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -29766,6 +29766,9 @@ var _GOV_DET_COLS = [
   { t:'Status do Patec',   k:'statusPatec', st:'font-weight:700' },
   { t:'Fila Level Board',  k:'fila' },
   { t:'SLA',               k:'sla',    st:'text-align:center' },
+  // Idas ao Mercado vem do Radar, na mesma posição da Planilha Crítica:
+  // logo depois do SLA. Item sem valor (ou zero) mostra um traço.
+  { t:'Idas Mercado',      k:'idas',   st:'text-align:center' },
   { t:'RC',                k:'rc',     st:'font-weight:700;color:var(--az)' },
   { t:'Item RC',           k:'itemRc' },
   { t:'Oportunidade',      k:'oport' },
@@ -29807,6 +29810,7 @@ function _govDetLinha(r, extra){
     statusPatec: ((typeof _govStatusPatecDe === 'function') ? _govStatusPatecDe(r) : '') || '—',
     fila:        r.fila || '—',
     sla:         r.sla || '—',
+    idas:        r.idas || '—',
     rc:          r.rc || '—',
     itemRc:      r.seq || r.item_rc || '—',
     oport:       r.num_oport || '—',
@@ -29834,14 +29838,14 @@ function _govDetLinhaFora(idx, rc, itemRc, campos, chaveGov){
       var trat = (typeof govTratCanonico === 'function') ? govTratCanonico(m.status || '') : (m.status || '');
       var st = '';
       try { st = govCalcStatus(govCalcPrazo(trat, m.envio || ''), m.finalizado || ''); } catch (e) {}
-      var base = { analista:'—', statusPatec:'—', fila:'—', sla:'—', rc:rc || '—',
+      var base = { analista:'—', statusPatec:'—', fila:'—', sla:'—', idas:'—', rc:rc || '—',
                    itemRc:itemRc || '—', oport:'—', itemOp:'—', trat:trat || '—', status:st || '—',
                    concluidoEm: m.finalizado ? String(m.finalizado).split('-').reverse().join('/') : '' };
       if (campos) Object.keys(campos).forEach(function(k){ if (campos[k]) base[k] = campos[k]; });
       return base;
     }
   }
-  var o = { analista:'—', statusPatec:'—', fila:'—', sla:'—', rc:rc || '—',
+  var o = { analista:'—', statusPatec:'—', fila:'—', sla:'—', idas:'—', rc:rc || '—',
             itemRc:itemRc || '—', oport:'—', itemOp:'—', trat:'—', status:'—', concluidoEm:'' };
   if (campos) Object.keys(campos).forEach(function(k){ if (campos[k]) o[k] = campos[k]; });
   return o;
@@ -29926,8 +29930,9 @@ function _govDetDefs(){
       lista:function(){
         return _govTopSla(10).map(function(x){
           return x._ref ? _govDetLinha(x._ref, { diasTxt:x.diasTxt })
-                        : { analista:x.analista, statusPatec:'—', fila:x.fila, sla:x.sla, rc:x.rc,
-                            itemRc:x.item, oport:'—', itemOp:'—', trat:x.trat, status:'—', diasTxt:x.diasTxt };
+                        : { analista:x.analista, statusPatec:'—', fila:x.fila, sla:x.sla, idas:'—',
+                            rc:x.rc, itemRc:x.item, oport:'—', itemOp:'—', trat:x.trat, status:'—',
+                            diasTxt:x.diasTxt };
         });
       },
       vazio:'Nada em tratamento com SLA para listar.'
