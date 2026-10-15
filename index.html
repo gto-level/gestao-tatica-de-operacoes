@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 18:45';
+var GTO_BUILD = '15/10 19:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -14841,6 +14841,19 @@ async function rjsSalvarMedicao(med, arquivo){
     } catch (e2) {
       _rjsMed.erro = (e2 && e2.message) ? String(e2.message) : 'o banco recusou a gravação';
       console.warn('rjsSalvarMedicao:', e2);
+      // Se o documento inteiro não entra, grava ao menos o diagnóstico:
+      // o funil, as colunas lidas e o erro. Assim, amanhã, a tela
+      // explica o que houve em vez de dizer "ainda não lida".
+      try {
+        await db.collection('config').doc('rejeite_sup_medicao').set({
+          v:2, linhas:doc.dados.linhas, chaves:0, itensJson:[], pedidosJson:[],
+          posUsadas:doc.dados.posUsadas, parciais:doc.dados.parciais,
+          funil:doc.dados.funil, cabecalho:doc.dados.cabecalho, comBruto:0,
+          arquivo:doc.dados.arquivo, atualizadoEm:doc.dados.atualizadoEm,
+          atualizadoPor:doc.dados.atualizadoPor,
+          cortou:'só o diagnóstico coube: ' + _rjsMed.erro
+        });
+      } catch (e3) { console.warn('rjsSalvarMedicao/mínimo:', e3); }
       return false;
     }
     return true;
@@ -14850,81 +14863,148 @@ async function rjsSalvarMedicao(med, arquivo){
   }
 }
 
-// Quanto o documento ocupa, em bytes — a mesma conta que o Firestore faz
-// por cima: o JSON inteiro.
+// Quanto o pedaço ocupa, em caracteres — a mesma conta que o Firestore
+// faz por cima: o JSON inteiro.
 function rjsBytes(o){
-  try { return JSON.stringify(o).length; } catch (e) { return 0; }
+  try { return typeof o === 'string' ? o.length : JSON.stringify(o).length; } catch (e) { return 0; }
 }
 
-var RJS_DOC_MAX = 850000;   // folga confortável para o limite de 1 MB
+var RJS_DOC_MAX = 820000;   // folga confortável para o limite de 1 MB
+var RJS_PARTE   = 300000;   // tamanho de cada pedaço de texto gravado
 
-// Corta na ordem do que menos faz falta: primeiro a linha crua dos itens
-// do fim da fila (só serve para o rabicho da exportação), depois o
-// retrato dos pedidos (só serve para explicar quem ficou de fora).
-// O documento é montado de baixo para cima — primeiro o que não pode
-// faltar, depois o que couber — em vez de montar inteiro e ir tirando.
-// Medir o documento todo a cada item que sai levava um minuto numa
-// medição grande, com a tela travada; assim mede-se cada pedaço uma vez.
+// ── por que o documento vai como TEXTO ───────────────────────────
+// O Firestore não limita só o tamanho: ele indexa cada chave de mapa e
+// cada item de lista do documento, e tem um teto de entradas de índice
+// por documento. O retrato dos pedidos é um mapa com dezenas de
+// milhares de chaves — sozinho ele estourava esse teto, e a gravação
+// era recusada mesmo quando o documento cabia em 1 MB. Era por isso que
+// a medição "não ficava salva" e a tela dizia "ainda não lida" no dia
+// seguinte: o erro acontecia e ninguém via.
+//
+// Texto longo não é indexado. Então os itens e o retrato vão como JSON
+// quebrado em pedaços — o mesmo conteúdo, duas ou três entradas de
+// índice em vez de cem mil.
+function rjsPartes(txt){
+  var out = [];
+  for (var i = 0; i < txt.length; i += RJS_PARTE) out.push(txt.slice(i, i + RJS_PARTE));
+  return out;
+}
+// O tamanho REAL do documento. Medir com JSON.stringify(d) mentia para
+// cima: os pedaços já são texto JSON, e stringificá-los de novo escapa
+// cada aspa e infla o número em quase metade. O Firestore conta os
+// caracteres do texto, não a versão escapada dele.
+function rjsTamanhoDoc(d){
+  var resto = {}, soma = 0;
+  Object.keys(d).forEach(function(k){
+    if (k === 'itensJson' || k === 'pedidosJson') {
+      (d[k] || []).forEach(function(t){ soma += String(t).length; });
+    } else { resto[k] = d[k]; }
+  });
+  return soma + rjsBytes(resto);
+}
+
+function rjsJuntar(partes){
+  if (!partes) return null;
+  var t = (typeof partes === 'string') ? partes : partes.join('');
+  if (!t) return null;
+  try { return JSON.parse(t); } catch (e) { return null; }
+}
+
+// O funil é pequeno, menos pela lista de status: um arquivo sujo pode
+// trazer centenas de valores diferentes, e aí ele também vira índice.
+function rjsFunilEnxuto(F){
+  if (!F) return {};
+  var g = {};
+  Object.keys(F).forEach(function(k){ if (k !== 'status') g[k] = F[k]; });
+  var st = F.status || {};
+  var ch = Object.keys(st).sort(function(a, b){ return (st[b] || 0) - (st[a] || 0); }).slice(0, 30);
+  g.status = {};
+  ch.forEach(function(k){ g.status[k] = st[k]; });
+  return g;
+}
+
+// Monta o documento na ordem do que não pode faltar: primeiro os itens
+// sem a linha crua, depois o retrato dos pedidos, e por último a linha
+// crua de cada item, enquanto couber.
 function rjsEnxugarMedicao(m){
   var orig = m.itens || [];
   var avisos = [];
-  var itens = orig.map(function(o){
+  var magros = orig.map(function(o){
     return { rc:o.rc, itemRc:o.itemRc, pedido:o.pedido, itemPedido:o.itemPedido,
              chaveComprador:o.chaveComprador, comprador:o.comprador,
              dataPedido:o.dataPedido, linhas:o.linhas, bruto:[] };
   });
-  var d = { itens:itens, linhas:m.linhas, chaves:m.chaves,
-            posUsadas:m.posUsadas || [], parciais:m.parciais || [],
-            pedidos:{}, funil:m.funil || {},
-            cabecalho:m.cabecalho || [], comBruto:0, arquivo:m.arquivo || '',
-            atualizadoEm:m.atualizadoEm || '', atualizadoPor:m.atualizadoPor || '' };
+  var d = { v:2, linhas:m.linhas, chaves:m.chaves,
+            posUsadas:(m.posUsadas || []).slice(0, 20),
+            parciais:(m.parciais || []).slice(0, 20),
+            funil: rjsFunilEnxuto(m.funil),
+            cabecalho:(m.cabecalho || []).slice(0, 300),
+            comBruto:0, arquivo:m.arquivo || '',
+            atualizadoEm:m.atualizadoEm || '', atualizadoPor:m.atualizadoPor || '',
+            itensJson:[], pedidosJson:[] };
   var sobra = RJS_DOC_MAX - rjsBytes(d);
 
-  // 1) o retrato dos pedidos — é o que explica quem ficou de fora
+  // 1) os itens, sem a linha crua. Se nem isso couber, corta a cauda.
+  var txtItens = JSON.stringify(magros);
+  if (txtItens.length > sobra) {
+    var cabemI = Math.max(0, Math.floor(magros.length * (sobra / txtItens.length)) - 1);
+    magros = magros.slice(0, cabemI);
+    txtItens = JSON.stringify(magros);
+    avisos.push('guardei ' + cabemI + ' dos ' + orig.length + ' item(ns)');
+  }
+  sobra -= txtItens.length;
+
+  // 2) o retrato dos pedidos — é o que explica quem ficou de fora
   var ped = m.pedidos || {}, chaves = Object.keys(ped);
   if (chaves.length) {
-    var tamPed = rjsBytes(ped), cabem = chaves.length;
-    if (tamPed > sobra) {
-      cabem = Math.max(0, Math.floor(chaves.length * (sobra / tamPed)) - 1);
-      avisos.push('guardei o retrato de ' + cabem + ' dos ' + chaves.length + ' pedido(s) da medição');
+    var txtPed = JSON.stringify(ped), guardados = chaves.length;
+    if (txtPed.length > sobra) {
+      guardados = Math.max(0, Math.floor(chaves.length * (sobra / txtPed.length)) - 1);
+      var corte = {};
+      for (var i = 0; i < guardados; i++) corte[chaves[i]] = ped[chaves[i]];
+      txtPed = guardados ? JSON.stringify(corte) : '';
+      avisos.push('guardei o retrato de ' + guardados + ' dos ' + chaves.length + ' pedido(s) da medição');
     }
-    for (var i = 0; i < cabem; i++) d.pedidos[chaves[i]] = ped[chaves[i]];
-    sobra -= Math.round(tamPed * (cabem / chaves.length));
+    if (txtPed) { d.pedidosJson = rjsPartes(txtPed); sobra -= txtPed.length; }
   }
 
-  // 2) a linha crua de cada item, enquanto couber
-  for (var j = 0; j < orig.length && sobra > 0; j++) {
-    var b = orig[j].bruto || [];
+  // 3) a linha crua de cada item, enquanto couber
+  var comBruto = 0;
+  for (var j = 0; j < magros.length && sobra > 0; j++) {
+    var b = (orig[j] || {}).bruto || [];
     if (!b.length) continue;
-    var custo = rjsBytes(b) + 10;
+    var custo = rjsBytes(b) + 12;
     if (custo > sobra) break;
-    itens[j].bruto = b.slice();
-    d.comBruto++; sobra -= custo;
+    magros[j].bruto = b.slice();
+    comBruto++; sobra -= custo;
   }
-  if (d.comBruto < (m.comBruto || 0)) {
-    avisos.unshift('guardei a linha original só das primeiras ' + d.comBruto + ' chave(s)');
+  d.comBruto = comBruto;
+  if (comBruto < (m.comBruto || 0)) {
+    avisos.unshift('guardei a linha original só das primeiras ' + comBruto + ' chave(s)');
   }
+  d.itensJson = rjsPartes(JSON.stringify(magros));
 
-  // 3) conferência: a conta acima é por estimativa, então o documento é
-  // medido de verdade uma última vez e, se ainda passar, sai mais um
-  // naco de linha crua por vez — poucas voltas, não uma por item.
-  var volta = 0;
-  while (rjsBytes(d) > RJS_DOC_MAX && volta++ < 50) {
-    var comB = [];
-    for (var k = 0; k < itens.length; k++) if (itens[k].bruto.length) comB.push(k);
-    if (!comB.length) break;
-    var tirar = Math.max(1, Math.ceil(comB.length * 0.15));
-    for (var t = 0; t < tirar; t++) {
-      itens[comB[comB.length - 1 - t]].bruto = [];
-      d.comBruto = Math.max(0, d.comBruto - 1);
-    }
-  }
-  while (rjsBytes(d) > RJS_DOC_MAX && Object.keys(d.pedidos).length) {
-    var cs = Object.keys(d.pedidos);
-    var fora = Math.max(1, Math.ceil(cs.length * 0.2));
-    for (var u = 0; u < fora; u++) delete d.pedidos[cs[cs.length - 1 - u]];
+  // 4) conferência: as contas acima são por estimativa. Se mesmo assim
+  // passar, sai o retrato — ele é o pedaço mais dispensável.
+  if (rjsTamanhoDoc(d) > RJS_DOC_MAX && d.pedidosJson.length) {
+    d.pedidosJson = [];
+    if (avisos.indexOf('retrato') === -1) avisos.push('não coube o retrato dos pedidos');
   }
   return { dados:d, cortou: avisos.join(' · ') };
+}
+
+// Lê o documento gravado, nos dois formatos: o novo, em texto, e o
+// antigo, em mapa — quem já tem o antigo no banco não perde nada.
+function rjsDoDoc(D){
+  D = D || {};
+  var itens = (D.v >= 2) ? (rjsJuntar(D.itensJson) || []) : (D.itens || []);
+  var ped   = (D.v >= 2) ? (rjsJuntar(D.pedidosJson) || {}) : (D.pedidos || {});
+  return { itens:itens, linhas:+D.linhas || 0, chaves:+D.chaves || 0,
+           posUsadas:D.posUsadas || [], parciais:D.parciais || [], pedidos:ped,
+           funil:D.funil || {}, cortou:D.cortou || '', erro:'',
+           cabecalho:D.cabecalho || [], comBruto:+D.comBruto || 0,
+           arquivo:D.arquivo || '', atualizadoEm:D.atualizadoEm || '',
+           atualizadoPor:D.atualizadoPor || '' };
 }
 
 // A planilha de rejeitados: conta só os grupos de compras da nossa lista.
@@ -15452,13 +15532,7 @@ async function rjAbrir(){
                    atualizadoEm:R.atualizadoEm || '', atualizadoPor:R.atualizadoPor || '' };
       }
       if (docs[1] && docs[1].exists) {
-        var M = docs[1].data() || {};
-        _rjsMed = { itens:M.itens || [], linhas:+M.linhas || 0, chaves:+M.chaves || 0,
-                    posUsadas:M.posUsadas || [], parciais:M.parciais || [], pedidos:M.pedidos || {},
-                    funil:M.funil || {}, cortou:M.cortou || '', erro:'',
-                    cabecalho:M.cabecalho || [],
-                    comBruto:+M.comBruto || 0, arquivo:M.arquivo || '',
-                    atualizadoEm:M.atualizadoEm || '', atualizadoPor:M.atualizadoPor || '' };
+        _rjsMed = rjsDoDoc(docs[1].data() || {});
       }
       if (docs[2] && docs[2].exists) {
         var S = docs[2].data() || {};
@@ -16342,12 +16416,7 @@ async function arjAbrir(){
                    atualizadoEm:R.atualizadoEm || '', atualizadoPor:R.atualizadoPor || '' };
       }
       if (docs[1] && docs[1].exists) {
-        var M = docs[1].data() || {};
-        _rjsMed = { itens:M.itens || [], linhas:+M.linhas || 0, chaves:+M.chaves || 0,
-                    posUsadas:M.posUsadas || [], parciais:M.parciais || [], pedidos:M.pedidos || {},
-                    funil:M.funil || {}, cortou:M.cortou || '', erro:'',
-                    cabecalho:M.cabecalho || [], comBruto:+M.comBruto || 0,
-                    arquivo:M.arquivo || '', atualizadoEm:M.atualizadoEm || '' };
+        _rjsMed = rjsDoDoc(docs[1].data() || {});
       }
       if (docs[2] && docs[2].exists) {
         var S = docs[2].data() || {};
@@ -18216,14 +18285,7 @@ async function gpAbrir(){
         db.collection('config').doc('rejeite_sup_rodrigo').get()
       ]);
       if (dR[0] && dR[0].exists) {
-        var RM = dR[0].data() || {};
-        _rjsMed = { itens:RM.itens || [], linhas:+RM.linhas || 0, chaves:+RM.chaves || 0,
-                    posUsadas:RM.posUsadas || [], parciais:RM.parciais || [],
-                    pedidos:RM.pedidos || {},
-                    funil:RM.funil || {}, cortou:RM.cortou || '', erro:'',
-                    cabecalho:RM.cabecalho || [], comBruto:+RM.comBruto || 0,
-                    arquivo:RM.arquivo || '', atualizadoEm:RM.atualizadoEm || '',
-                    atualizadoPor:RM.atualizadoPor || '' };
+        _rjsMed = rjsDoDoc(dR[0].data() || {});
       }
       if (dR[1] && dR[1].exists) {
         var RS = dR[1].data() || {};
