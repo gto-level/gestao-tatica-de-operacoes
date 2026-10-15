@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 10:45';
+var GTO_BUILD = '15/10 12:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -19937,13 +19937,76 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
 // O recorte de colunas de cada aba é o que ele pediu: na MAPA começa na
 // B (a A é o ANALISTA_AUTOMATICO, que a própria aba já diz), nas outras
 // começa na A. Todas vão até a última coluna do arquivo.
+// Colunas que saem da exportação, pelo NOME do cabeçalho — não pela
+// letra. O André conta as letras no arquivo exportado, que já tem
+// Analista e Data na frente, então "coluna F" lá é a D do original: ir
+// pelo nome evita esse deslocamento e sobrevive a uma coluna nova no
+// meio do arquivo.
+var MDX_TIRAR_SEMPRE = ['LOTES'];
+var MDX_TIRAR_PEDIDO = ['NUMERO_SOLICITACAO_MDG', 'MOTIVO_PARADA', 'REVALIDACAO'];
+
 var MDX_ABAS = [
   { nome:'MAPA',                  chaves:['emitir'],              de:'mapa',     col0:1 },
-  { nome:'Emitir Pedido PATEC',   chaves:['patec'],               de:'patec',    col0:0 },
-  { nome:'Emitir Pedido Manual',  chaves:['patecman'],            de:'patecman', col0:0 },
+  { nome:'Emitir Pedido PATEC',   chaves:['patec'],               de:'patec',    col0:0,
+    tirar: MDX_TIRAR_PEDIDO },
+  { nome:'Emitir Pedido Manual',  chaves:['patecman'],            de:'patecman', col0:0,
+    tirar: MDX_TIRAR_PEDIDO },
   { nome:'Negociar',              chaves:['negociar','dpv'],      de:'mapa',     col0:1 },
   { nome:'Abrir PATEC',           chaves:['patecgm','pateciden'], de:'mapa',     col0:1 }
 ];
+
+// ── a coluna ORP/PMM ─────────────────────────────────────────────
+// Sai do N_ACOMPANHAMENTO: quando ele traz PMM (PMM, PMM NINEX,
+// PMM INDIC_), a coluna leva o valor como está no arquivo; fora isso
+// fica em branco. No MAPA de hoje são 100 linhas: 97 PMM, 2 PMM NINEX
+// e 1 PMM INDIC_.
+//
+// A aba Emitir pedido manual não tem a coluna N_ACOMPANHAMENTO — ali o
+// valor é buscado na aba MAPA pelo RC_ITEM, que é o RC com o SEQ
+// colado. Sem isso aquela aba sairia sempre vazia.
+function mdxEhPmm(v){
+  return String(v == null ? '' : v).toUpperCase().indexOf('PMM') !== -1;
+}
+
+var _mdxAcompIdx = null;
+function mdxMontarIndiceAcomp(){
+  _mdxAcompIdx = {};
+  var abaMapa = (_mdBase && _mdBase.abaMapa) || 'MAPA';
+  ((_mdBase && _mdBase.itens) || []).forEach(function(it){
+    if (it.deAba !== abaMapa) return;
+    if (!it.acomp) return;
+    var k = String(it.rc || '') + String(it.seq || '');
+    if (k) _mdxAcompIdx[k] = it.acomp;
+  });
+}
+
+function mdxOrpPmm(it, cab){
+  if (it.acomp) return mdxEhPmm(it.acomp) ? String(it.acomp).trim() : '';
+  // sem a coluna na própria aba: procura pelo RC_ITEM na aba MAPA
+  if (_mdxAcompIdx === null) mdxMontarIndiceAcomp();
+  var iRi = -1;
+  for (var j = 0; j < (cab || []).length; j++) {
+    if (cpNormCab(cab[j]) === 'RC_ITEM') { iRi = j; break; }
+  }
+  var k = '';
+  if (iRi !== -1 && it.bruto) k = String(it.bruto[iRi] == null ? '' : it.bruto[iRi]).trim();
+  else k = String(it.rc || '') + String(it.seq || '');
+  k = k.replace(/\.0+$/, '');
+  var v = _mdxAcompIdx[k] || '';
+  return mdxEhPmm(v) ? String(v).trim() : '';
+}
+
+// Quais índices de coluna entram na exportação daquela aba.
+function mdxColunas(grupo, cab, larg){
+  var fora = MDX_TIRAR_SEMPRE.concat(grupo.tirar || []).map(cpNormCab);
+  var out = [];
+  for (var j = grupo.col0; j < larg; j++) {
+    var nome = cpNormCab(cab[j] == null ? '' : cab[j]);
+    if (nome && fora.indexOf(nome) !== -1) continue;
+    out.push(j);
+  }
+  return out;
+}
 
 // De qual aba do arquivo veio cada grupo — é dela que sai o cabeçalho.
 function mdxCabecalho(grupo, itens){
@@ -20002,6 +20065,7 @@ function mdExportarDistribuicao(){
       return null;
     }
     var dataBR = cpDataBR(mdxDataDist());
+    _mdxAcompIdx = null;          // o índice é refeito a cada exportação
     var wb = XLSX.utils.book_new();
     var resumo = [];
 
@@ -20011,14 +20075,14 @@ function mdExportarDistribuicao(){
       var larg = cab.length;
       linhas.forEach(function(x){ if (x.it.bruto.length > larg) larg = x.it.bruto.length; });
 
+      var cols = mdxColunas(g, cab, larg);
       var fatia = function(arr){
-        var out = [];
-        for (var j = g.col0; j < larg; j++) out.push(arr[j] == null ? '' : arr[j]);
-        return out;
+        return cols.map(function(j){ return arr[j] == null ? '' : arr[j]; });
       };
-      var corpo = [['Analista', 'Data da distribuição'].concat(fatia(cab))];
+      var corpo = [['Analista', 'Data da distribuição', 'ORP/PMM'].concat(fatia(cab))];
       linhas.forEach(function(x){
-        corpo.push([x.pessoa || '(na fila)', dataBR].concat(fatia(x.it.bruto)));
+        corpo.push([x.pessoa || '(na fila)', dataBR, mdxOrpPmm(x.it, cab)]
+          .concat(fatia(x.it.bruto)));
       });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(corpo), g.nome);
       resumo.push({ aba:g.nome, n:linhas.length, colunas:corpo[0].length });
