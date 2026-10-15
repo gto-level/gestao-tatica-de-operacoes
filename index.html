@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 15:20';
+var GTO_BUILD = '15/10 17:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -11687,31 +11687,79 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
   // cabeçalho vier escrito diferente. Quando a letra for usada, fica
   // registrado em rejSupPos e a tela avisa — chute silencioso aqui viraria
   // um indicador errado sem ninguém perceber.
-  var _posUsadas = [];
-  var _colOuLetra = function(nomes, pos, rotulo){
+  // Três tentativas, nesta ordem: o nome exato, um PEDAÇO do nome, e só
+  // então a letra. O pedaço é o que salva quando o arquivo chama a
+  // coluna de "COD ELIMINACAO ITEM" em vez do nome que eu conheço — e
+  // continua sendo o nome, não um chute de posição. A letra ficou por
+  // último porque é a única que erra calada quando o layout muda.
+  var _posUsadas = [], _parciais = [];
+  var _achaParcial = function(tem, naoTem){
+    for (var i = 0; i < cabs.length; i++) {
+      var c = cabs[i];
+      if (!c) continue;
+      var bate = true;
+      for (var t = 0; t < tem.length; t++) if (c.indexOf(tem[t]) === -1) { bate = false; break; }
+      if (!bate) continue;
+      if (naoTem) {
+        var veta = false;
+        for (var n = 0; n < naoTem.length; n++) if (c.indexOf(naoTem[n]) !== -1) { veta = true; break; }
+        if (veta) continue;
+      }
+      return i;
+    }
+    return -1;
+  };
+  var _colOuLetra = function(nomes, parcial, pos, rotulo){
     var j = _cpAchaCol(cabs, nomes);
     if (j !== -1) return j;
+    var tentativas = !parcial ? [] : (parcial.length ? parcial : [parcial]);
+    for (var t2 = 0; t2 < tentativas.length; t2++) {
+      j = _achaParcial(tentativas[t2].tem, tentativas[t2].naoTem);
+      if (j !== -1) {
+        // no aviso vai o nome COMO ESTÁ no arquivo, não o normalizado:
+        // é esse que o André vê quando abre a planilha
+        var cru = String((linhas[iCab] || [])[j] == null ? '' : (linhas[iCab] || [])[j]).trim();
+        _parciais.push(String(rotulo).replace(/^[A-Z]+ · /, '')
+                       + ' → ' + (cru || cabs[j] || ('coluna ' + (j + 1))));
+        return j;
+      }
+    }
     if (pos < cabs.length) { _posUsadas.push(rotulo); return pos; }
     return -1;
   };
   // CODIGO_ELIMINACAO (M) é outra coluna que CODIGO_ELIMINACAO_ITEM_PEDIDO (N):
   // o filtro do rejeite exige as DUAS vazias, então não dá para reaproveitar iEl.
-  var iElPed = _colOuLetra(['CODIGO_ELIMINACAO'], 12, 'M · CODIGO_ELIMINACAO');
-  var iElIt  = _cpAchaCol(cabs, ['CODIGO_ELIMINACAO_ITEM_PEDIDO']);
-  if (iElIt === -1) iElIt = _colOuLetra(['CODIGO_ELIMINACAO_ITEM_PEDIDO'], 13, 'N · CODIGO_ELIMINACAO_ITEM_PEDIDO');
-  var iLnPd  = _colOuLetra(['LINHAPEDIDO','LINHA_PEDIDO','ITEM_PEDIDO','ITEM_DO_PEDIDO'], 4, 'E · LINHAPEDIDO');
-  var iPdRej = (iPd !== -1) ? iPd : _colOuLetra(['PEDIDOS'], 3, 'D · PEDIDOS');
+  var iElIt  = _colOuLetra(['CODIGO_ELIMINACAO_ITEM_PEDIDO','COD_ELIMINACAO_ITEM_PEDIDO',
+                            'CODIGO_ELIMINACAO_ITEM'],
+                { tem:['ELIMINAC','ITEM'] }, 13, 'N · CODIGO_ELIMINACAO_ITEM_PEDIDO');
+  var iElPed = _colOuLetra(['CODIGO_ELIMINACAO','COD_ELIMINACAO','CODIGO_DE_ELIMINACAO',
+                            'CODIGO_ELIMINACAO_PEDIDO'],
+                { tem:['ELIMINAC'], naoTem:['ITEM'] }, 12, 'M · CODIGO_ELIMINACAO');
+  // "Item do pedido" só vale se a coluna falar de LINHA ou ITEM: sem
+  // isso, "RESP_PEDIDO" também contém PEDIDO e virava o item.
+  var _naoEPedido = ['ELIMINAC','DATA','VALOR','STATUS','RESP','COMPRADOR',
+                     'RESPONSAVEL','GRUPO','TIPO','TEXTO','DESCRICAO'];
+  var iLnPd  = _colOuLetra(['LINHAPEDIDO','LINHA_PEDIDO','ITEM_PEDIDO','ITEM_DO_PEDIDO'],
+                [{ tem:['LINHA','PEDIDO'], naoTem:['ELIMINAC'] },
+                 { tem:['ITEM','PEDIDO'],  naoTem:['ELIMINAC'] }], 4, 'E · LINHAPEDIDO');
+  var iPdRej = (iPd !== -1) ? iPd
+             : _colOuLetra(['PEDIDOS','N_PEDIDO','NR_PEDIDO','DOCUMENTO_COMPRA'],
+                 { tem:['PEDIDO'], naoTem:['LINHA','ITEM'].concat(_naoEPedido) },
+                 3, 'D · PEDIDOS');
   // A RC e o item da RC também têm letra de segurança (G e H, as que o
   // André passou). Sem isso, um cabeçalho escrito diferente deixava as
   // duas em branco e todas as linhas viravam a MESMA chave RC+item.
   var iRcRej = (iRc !== -1) ? iRc
-             : _colOuLetra(['REQUISICAO','REQUISICAO_COMPRA'], 6, 'G · REQUISICAO');
+             : _colOuLetra(['REQUISICAO','REQUISICAO_COMPRA','NUMERO_REQUISICAO'],
+                 { tem:['REQUISIC'], naoTem:['LINHA','ITEM','DATA'] }, 6, 'G · REQUISICAO');
   var iItRej = (iIt !== -1) ? iIt
-             : _colOuLetra(['LINHAREQUISICAO','LINHA_REQUISICAO'], 7, 'H · LINHAREQUISICAO');
+             : _colOuLetra(['LINHAREQUISICAO','LINHA_REQUISICAO'],
+                 { tem:['REQUISIC','LINHA'] }, 7, 'H · LINHAREQUISICAO');
   r.rejSupCols = { chave:iCh, pedido:iPdRej, linhaPedido:iLnPd, rc:iRcRej, itemRc:iItRej,
                    criacao:iDt, status:iSt, elimPedido:iElPed, elimItem:iElIt,
                    comprador:iQuem };
   r.rejSupPos = _posUsadas;
+  r.rejSupParciais = _parciais;
 
   r.colunas = { comprador:iQuem, status:iSt, data:iDt, eliminacao:iEl,
                 memorizado:iMem, emitido:iEmi, chave:iCh, pedido:iPd, rc:iRc, item:iIt,
@@ -12142,10 +12190,16 @@ async function cpHandleUpload(file){
     med.arquivoInfo = _cpIdentidadeArquivo(file);
     _cpLeituraCrua = { data:data, cabecalho: med.cabecalhoCompleto || [], linhas: med.linhasDoDia || [] };
     // o Cockpit não depende da data nem de a medição ter dado certo
-    await gpSalvarCockpit(med, file.name);
-    await gpSalvarMemorizados(med, file.name);
-    await monSalvarConversao(med, file.name);
-    await rjsSalvarMedicao(med, file.name);
+    // Cada uma por sua conta: antes, um erro na primeira derrubava o
+    // try inteiro e as de baixo — a medição do rejeite entre elas —
+    // nem chegavam a rodar, sem nada dizer na tela.
+    var _guarda = async function(nome, fn){
+      try { await fn(); } catch (e) { console.warn('cpHandleUpload/' + nome + ':', e); }
+    };
+    await _guarda('cockpit',     function(){ return gpSalvarCockpit(med, file.name); });
+    await _guarda('memorizados', function(){ return gpSalvarMemorizados(med, file.name); });
+    await _guarda('conversao',   function(){ return monSalvarConversao(med, file.name); });
+    await _guarda('rejeite',     function(){ return rjsSalvarMedicao(med, file.name); });
     try { await rjlCarregar(); await rjlAplicarSupervisor(); } catch (e) {}
     try { await rjHistGravar(); } catch (e) {}
     try { if (document.getElementById('rj-supervisor')) rjDesenhar(); } catch (e) {}
@@ -14686,7 +14740,12 @@ async function gpSalvarCockpit(med, arquivo){
 // A contagem do card é por chave RC + LINHAREQUISICAO, sem repetir: a
 // mesma RC/item pode vir em mais de uma linha de pedido.
 var RJS_BRUTO_MAX = 2500;
-var RJS_PED_MAX = 20000;
+// O retrato dos pedidos fica inteiro NA MEMÓRIA — quem corta é a
+// gravação (rjsEnxugarMedicao), que conhece o limite do documento. Com
+// o teto antigo de 20.000, uma medição de 119 mil linhas perdia pedido
+// pelo caminho e a tela dizia "não aparece na medição" sobre pedido que
+// aparecia. Mentira pior que silêncio.
+var RJS_PED_MAX = 400000;
 var _rjsMed = { itens:[], linhas:0, chaves:0, posUsadas:[], pedidos:{},
                 cabecalho:[], comBruto:0, arquivo:'', atualizadoEm:'',
                 atualizadoPor:'' };
@@ -14736,6 +14795,7 @@ async function rjsSalvarMedicao(med, arquivo){
     });
     _rjsMed = { itens: itens.slice(0, 5000), linhas: +med.rejSupTotal || 0,
                 chaves: itens.length, posUsadas: med.rejSupPos || [],
+                parciais: med.rejSupParciais || [],
                 pedidos: med.rejSupPed || {},
                 funil: med.rejSupFunil || {},
                 cabecalho: med.cabecalhoCompleto || [], comBruto: comBruto,
@@ -14788,7 +14848,8 @@ function rjsEnxugarMedicao(m){
              dataPedido:o.dataPedido, linhas:o.linhas, bruto:[] };
   });
   var d = { itens:itens, linhas:m.linhas, chaves:m.chaves,
-            posUsadas:m.posUsadas || [], pedidos:{}, funil:m.funil || {},
+            posUsadas:m.posUsadas || [], parciais:m.parciais || [],
+            pedidos:{}, funil:m.funil || {},
             cabecalho:m.cabecalho || [], comBruto:0, arquivo:m.arquivo || '',
             atualizadoEm:m.atualizadoEm || '', atualizadoPor:m.atualizadoPor || '' };
   var sobra = RJS_DOC_MAX - rjsBytes(d);
@@ -15367,7 +15428,7 @@ async function rjAbrir(){
       if (docs[1] && docs[1].exists) {
         var M = docs[1].data() || {};
         _rjsMed = { itens:M.itens || [], linhas:+M.linhas || 0, chaves:+M.chaves || 0,
-                    posUsadas:M.posUsadas || [], pedidos:M.pedidos || {},
+                    posUsadas:M.posUsadas || [], parciais:M.parciais || [], pedidos:M.pedidos || {},
                     funil:M.funil || {}, cortou:M.cortou || '', erro:'',
                     cabecalho:M.cabecalho || [],
                     comBruto:+M.comBruto || 0, arquivo:M.arquivo || '',
@@ -16227,7 +16288,7 @@ async function arjAbrir(){
       if (docs[1] && docs[1].exists) {
         var M = docs[1].data() || {};
         _rjsMed = { itens:M.itens || [], linhas:+M.linhas || 0, chaves:+M.chaves || 0,
-                    posUsadas:M.posUsadas || [], pedidos:M.pedidos || {},
+                    posUsadas:M.posUsadas || [], parciais:M.parciais || [], pedidos:M.pedidos || {},
                     funil:M.funil || {}, cortou:M.cortou || '', erro:'',
                     cabecalho:M.cabecalho || [], comBruto:+M.comBruto || 0,
                     arquivo:M.arquivo || '', atualizadoEm:M.atualizadoEm || '' };
@@ -17229,7 +17290,29 @@ function rjsFunilHTML(){
       + cpNum(v) + '</strong></div>';
   };
 
-  return '<div style="margin-top:.9rem;background:var(--amc);border:1px solid var(--am);'
+  // A lista das colunas do arquivo, com a letra de cada uma. É a
+  // resposta definitiva: olhando para ela dá para dizer, sem abrir a
+  // medição, qual coluna a regra deveria estar lendo.
+  var cab = (_rjsMed.cabecalho || []);
+  var letraDe = function(j){
+    var t = '', n0 = j;
+    do { t = String.fromCharCode(65 + (n0 % 26)) + t; n0 = Math.floor(n0 / 26) - 1; } while (n0 >= 0);
+    return t;
+  };
+  var listaCab = cab.length
+    ? '<details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700">'
+      + 'As ' + cpNum(cab.length) + ' colunas da medição, com a letra de cada uma</summary>'
+      + '<div style="margin-top:4px;font-size:10.5px;line-height:1.7;column-count:3;column-gap:14px">'
+      + cab.map(function(c, j){
+          return '<div><strong>' + letraDe(j) + '</strong> · ' + cpEsc(c || '(sem título)') + '</div>';
+        }).join('')
+      + '</div></details>'
+    : '';
+
+  // Amarelo só quando não sobrou nada: com itens na mão isto é
+  // conferência, não alerta.
+  var bg = F.ok ? 'var(--cin)' : 'var(--amc)', bd = F.ok ? 'var(--brd)' : 'var(--am)';
+  return '<div style="margin-top:.9rem;background:' + bg + ';border:1px solid ' + bd + ';'
     +   'border-radius:8px;padding:.7rem .9rem;font-size:11.5px;line-height:1.8">'
     +   '<div style="font-weight:700;color:var(--tx);margin-bottom:4px">'
     +     'Por onde as linhas da medição passaram</div>'
@@ -17254,6 +17337,57 @@ function rjsFunilHTML(){
     +   ((F.exElimItem || []).length
        ? '<div>Exemplos do código de eliminação do item: <code>'
          + F.exElimItem.map(function(x){ return cpEsc(x); }).join('</code> · <code>') + '</code></div>' : '')
+    +   rjsCruzaRodrigoHTML()
+    +   listaCab
+    + '</div>';
+}
+
+// O cruzamento que responde a pergunta de uma vez: dos pedidos que o
+// Rodrigo aponta, quantos a medição tem — e em que status eles estão
+// lá. Se todos estiverem em 3, o problema não é coluna nenhuma: é a
+// regra do status 8 não bater com o que o arquivo traz.
+function rjsCruzaRodrigoHTML(){
+  var cock = (_rjsRod && _rjsRod.cockpit) ? _rjsRod.cockpit : {};
+  var ped  = (_rjsMed && _rjsMed.pedidos) ? _rjsMed.pedidos : {};
+  var chaves = Object.keys(cock);
+  if (!chaves.length) return '';
+  if (!Object.keys(ped).length) {
+    return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--brd)">'
+      + '<strong>Cruzamento com o Rodrigo:</strong> não tenho o retrato dos pedidos da '
+      + 'medição guardado — suba a medição de novo para eu montá-lo.</div>';
+  }
+  var achados = 0, porStatus = {}, comElim = 0, exemplos = [];
+  chaves.forEach(function(p){
+    var o = ped[_rjsN(p)];
+    if (!o) return;
+    achados++;
+    var st = o.s || '(sem status)';
+    porStatus[st] = (porStatus[st] || 0) + 1;
+    if (o.e) comElim++;
+    if (exemplos.length < 3) exemplos.push(p + ' → status ' + st + (o.e ? ' (com eliminação)' : ''));
+  });
+  var lista = Object.keys(porStatus).sort(function(a, b){
+    return porStatus[b] - porStatus[a];
+  }).map(function(k){
+    return '<code>' + cpEsc(k) + '</code> ' + cpNum(porStatus[k]);
+  }).join(' · ');
+
+  return '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--brd)">'
+    + '<strong>Cruzamento com o Rodrigo:</strong> dos <strong>' + cpNum(chaves.length)
+    + '</strong> pedido(s) que ele aponta, <strong>' + cpNum(achados)
+    + '</strong> estão na medição'
+    + (achados < chaves.length
+       ? ' e <strong style="color:var(--vm)">' + cpNum(chaves.length - achados)
+         + '</strong> não aparecem nela' : '')
+    + '.'
+    + (lista ? '<div>Status deles na medição: ' + lista + '</div>' : '')
+    + (comElim ? '<div>' + cpNum(comElim) + ' com código de eliminação.</div>' : '')
+    + (exemplos.length ? '<div style="font-size:10.5px;color:var(--tx2)">Exemplos: '
+        + exemplos.map(function(x){ return cpEsc(x); }).join(' · ') + '</div>' : '')
+    + (_rjsMed.cortou
+       ? '<div style="color:var(--am);font-size:10.5px">⚠ O retrato guardado foi cortado para '
+         + 'caber no banco, então este cruzamento pode estar incompleto. Logo depois de subir '
+         + 'a medição ele está inteiro.</div>' : '')
     + '</div>';
 }
 
@@ -17382,6 +17516,9 @@ function rjSupervisorHTML(){
     +   ((_rjsMed.posUsadas || []).length
        ? '<div style="color:var(--am)">⚠ Na medição eu não achei o nome de algumas colunas e usei a '
          + 'posição: ' + cpEsc((_rjsMed.posUsadas || []).join(' · ')) + '. Confira se bate.</div>' : '')
+    +   ((_rjsMed.parciais || []).length
+       ? '<div style="color:var(--tx2)">Achei pelo pedaço do nome: '
+         + cpEsc((_rjsMed.parciais || []).join(' · ')) + '.</div>' : '')
     +   ((_rjsMed.chaves || 0) > (_rjsMed.comBruto || 0)
        ? '<div style="color:var(--am)">⚠ Guardei a linha original da medição das primeiras '
          + cpNum(_rjsMed.comBruto) + ' chaves; acima disso a exportação sai só com as colunas montadas.</div>' : '')
@@ -17406,6 +17543,11 @@ function rjSupervisorHTML(){
       + '</div>'
       + rjsFunilHTML();
   } else {
+    h += (_rjsMed && _rjsMed.funil && _rjsMed.funil.lidas
+       ? '<details style="margin-top:.6rem"><summary style="cursor:pointer;font-size:11.5px;'
+         + 'color:var(--tx2)">conferir as colunas que eu li na medição</summary>'
+         + rjsFunilHTML() + '</details>'
+       : '');
     h += '<div style="overflow:auto;max-height:520px;margin-top:.9rem"><table><thead><tr>'
       + RJS_COLS.map(function(c){
           var num = ['slaPedido','slaRc','idas'].indexOf(c[1]) !== -1;
@@ -17989,7 +18131,8 @@ async function gpAbrir(){
       if (dR[0] && dR[0].exists) {
         var RM = dR[0].data() || {};
         _rjsMed = { itens:RM.itens || [], linhas:+RM.linhas || 0, chaves:+RM.chaves || 0,
-                    posUsadas:RM.posUsadas || [], pedidos:RM.pedidos || {},
+                    posUsadas:RM.posUsadas || [], parciais:RM.parciais || [],
+                    pedidos:RM.pedidos || {},
                     funil:RM.funil || {}, cortou:RM.cortou || '', erro:'',
                     cabecalho:RM.cabecalho || [], comBruto:+RM.comBruto || 0,
                     arquivo:RM.arquivo || '', atualizadoEm:RM.atualizadoEm || '',
