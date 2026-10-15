@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 19:30';
+var GTO_BUILD = '15/10 20:15';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -14923,9 +14923,27 @@ function rjsFunilEnxuto(F){
   return g;
 }
 
-// Monta o documento na ordem do que não pode faltar: primeiro os itens
-// sem a linha crua, depois o retrato dos pedidos, e por último a linha
-// crua de cada item, enquanto couber.
+// Quais pedidos o Rodrigo aponta. O retrato da medição só precisa
+// explicar ESTES: são eles que podem cair em "fora do indicador" e
+// pedir um porquê. Guardar o retrato dos outros 98 mil pedidos do
+// arquivo não responde pergunta nenhuma e come o documento inteiro.
+function rjsPedidosDoRodrigo(){
+  var alvo = {};
+  try {
+    Object.keys((_rjsRod && _rjsRod.cockpit) || {}).forEach(function(p){ alvo[_rjsN(p)] = 1; });
+    Object.keys((_rjsRod && _rjsRod.motivos) || {}).forEach(function(k){
+      alvo[_rjsN(String(k).split('|')[0])] = 1;
+    });
+  } catch (e) {}
+  return alvo;
+}
+
+// Monta o documento na ordem do que faz falta, da maior para a menor:
+// 1) os itens; 2) a linha original deles, que é o que a exportação
+// precisa; 3) o retrato dos pedidos que o Rodrigo aponta; 4) o resto do
+// retrato, se ainda couber. A ordem importa: antes o retrato vinha
+// primeiro e, num arquivo com 98 mil pedidos, comia o espaço todo — a
+// exportação saía sem a linha da medição por causa de um diagnóstico.
 function rjsEnxugarMedicao(m){
   var orig = m.itens || [];
   var avisos = [];
@@ -14954,21 +14972,8 @@ function rjsEnxugarMedicao(m){
   }
   sobra -= txtItens.length;
 
-  // 2) o retrato dos pedidos — é o que explica quem ficou de fora
-  var ped = m.pedidos || {}, chaves = Object.keys(ped);
-  if (chaves.length) {
-    var txtPed = JSON.stringify(ped), guardados = chaves.length;
-    if (txtPed.length > sobra) {
-      guardados = Math.max(0, Math.floor(chaves.length * (sobra / txtPed.length)) - 1);
-      var corte = {};
-      for (var i = 0; i < guardados; i++) corte[chaves[i]] = ped[chaves[i]];
-      txtPed = guardados ? JSON.stringify(corte) : '';
-      avisos.push('guardei o retrato de ' + guardados + ' dos ' + chaves.length + ' pedido(s) da medição');
-    }
-    if (txtPed) { d.pedidosJson = rjsPartes(txtPed); sobra -= txtPed.length; }
-  }
-
-  // 3) a linha crua de cada item, enquanto couber
+  // 2) a linha original de cada item — é ela que sai no fim da planilha
+  // exportada, depois das colunas montadas
   var comBruto = 0;
   for (var j = 0; j < magros.length && sobra > 0; j++) {
     var b = (orig[j] || {}).bruto || [];
@@ -14980,15 +14985,43 @@ function rjsEnxugarMedicao(m){
   }
   d.comBruto = comBruto;
   if (comBruto < (m.comBruto || 0)) {
-    avisos.unshift('guardei a linha original só das primeiras ' + comBruto + ' chave(s)');
+    avisos.push(comBruto
+      ? 'a linha original da medição só coube nas primeiras ' + comBruto + ' chave(s)'
+      : 'não coube a linha original da medição — a exportação sai só com as colunas montadas');
   }
   d.itensJson = rjsPartes(JSON.stringify(magros));
+
+  // 3) o retrato: primeiro os pedidos do Rodrigo, depois os outros
+  var ped = m.pedidos || {}, chaves = Object.keys(ped);
+  if (chaves.length) {
+    var alvo = rjsPedidosDoRodrigo();
+    var dentro = [], fora = [];
+    chaves.forEach(function(p){ (alvo[_rjsN(p)] ? dentro : fora).push(p); });
+    var guardar = {}, n = 0, usado = 2;     // {} já custa 2
+    var cabe = function(p){
+      var custo = String(p).length + rjsBytes(ped[p]) + 4;
+      if (usado + custo > sobra) return false;
+      guardar[p] = ped[p]; usado += custo; n++;
+      return true;
+    };
+    for (var a = 0; a < dentro.length; a++) if (!cabe(dentro[a])) break;
+    var completos = (n === dentro.length);
+    for (var o2 = 0; o2 < fora.length; o2++) if (!cabe(fora[o2])) break;
+    if (n) { d.pedidosJson = rjsPartes(JSON.stringify(guardar)); sobra -= usado; }
+    if (n < chaves.length) {
+      avisos.push(completos && dentro.length
+        ? 'do retrato da medição guardei os ' + dentro.length + ' pedido(s) do Rodrigo'
+          + (n > dentro.length ? ' e mais ' + (n - dentro.length) : '')
+          + ' — o resto não cabia e não faz falta'
+        : 'guardei o retrato de ' + n + ' dos ' + chaves.length + ' pedido(s) da medição');
+    }
+  }
 
   // 4) conferência: as contas acima são por estimativa. Se mesmo assim
   // passar, sai o retrato — ele é o pedaço mais dispensável.
   if (rjsTamanhoDoc(d) > RJS_DOC_MAX && d.pedidosJson.length) {
     d.pedidosJson = [];
-    if (avisos.indexOf('retrato') === -1) avisos.push('não coube o retrato dos pedidos');
+    avisos.push('não coube o retrato dos pedidos');
   }
   return { dados:d, cortou: avisos.join(' · ') };
 }
@@ -17677,9 +17710,6 @@ function rjSupervisorHTML(){
     +   ((_rjsMed.parciais || []).length
        ? '<div style="color:var(--tx2)">Achei pelo pedaço do nome: '
          + cpEsc((_rjsMed.parciais || []).join(' · ')) + '.</div>' : '')
-    +   ((_rjsMed.chaves || 0) > (_rjsMed.comBruto || 0)
-       ? '<div style="color:var(--am)">⚠ Guardei a linha original da medição das primeiras '
-         + cpNum(_rjsMed.comBruto) + ' chaves; acima disso a exportação sai só com as colunas montadas.</div>' : '')
     +   (_rjsMed.cortou
        ? '<div style="color:var(--am)">⚠ A medição não cabia inteira no banco, então '
          + cpEsc(_rjsMed.cortou) + '. Na tela de hoje está tudo; amanhã volta sem essa parte.</div>' : '')
