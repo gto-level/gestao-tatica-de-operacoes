@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 13:10';
+var GTO_BUILD = '15/10 15:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -790,7 +790,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
     <div class="page" id="p-apres-rejeite">
       <div class="cd">
         <div class="cd-t">🖥️ Gerador de Slide — Rejeite de Pedidos</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;margin-bottom:1.1rem">
+        <div id="arj-grade" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;margin-bottom:1.1rem">
           <div>
             <div style="font-size:11px;font-weight:700;color:var(--tx2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">🏷️ Identificação</div>
             <div style="font-size:11px;color:var(--tx2);margin-bottom:3px">Título</div>
@@ -800,7 +800,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
             <div style="font-size:11px;color:var(--tx2);margin-bottom:3px">Data de referência</div>
             <input type="date" id="arj-data" style="width:100%;font-size:12px;padding:5px 10px">
           </div>
-          <div>
+          <div id="arj-box-periodo">
             <div style="font-size:11px;font-weight:700;color:var(--tx2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">📅 Evolução</div>
             <div style="font-size:11px;color:var(--tx2);margin-bottom:3px">De</div>
             <input type="date" id="arj-ini" style="width:100%;font-size:12px;padding:5px 10px;margin-bottom:8px">
@@ -813,7 +813,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
           <div>
             <div style="font-size:11px;font-weight:700;color:var(--tx2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">📋 Seções do slide</div>
             <div style="display:flex;flex-direction:column;gap:4px">
-              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-visao" checked> Geral — cards, tempo e evolução</label>
+              <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-visao" checked> <span id="arj-rot-visao">Geral — cards, tempo e evolução</span></label>
               <label style="font-size:12px;display:flex;align-items:center;gap:6px;margin-left:20px"><input type="checkbox" id="arj-inc-sla" checked> incluir o tempo parado</label>
               <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-sup" checked> Rejeite Supervisor</label>
               <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="arj-inc-forn" checked> Rejeite Fornecedor</label>
@@ -822,7 +822,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           <button class="btn btn-p" onclick="arjGerar()" style="flex:1;justify-content:center;font-size:13px;padding:10px">🖨️ Gerar slide</button>
-          <button class="btn btn-s" onclick="arjGravarHoje()">💾 Registrar a base de hoje</button>
+          <button class="btn btn-s" id="arj-btn-gravar" onclick="arjGravarHoje()">💾 Registrar a base de hoje</button>
           <button class="btn btn-s" onclick="arjAbrir()">↻ Atualizar</button>
         </div>
         <div id="arj-aviso" style="font-size:12px;margin-top:.7rem"></div>
@@ -11643,6 +11643,9 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
             convVelhas:0, convDesde:'',
             rejMed:{}, rejMedTotal:0, donoPedido:{},
             rejSup:[], rejSupTotal:0, rejSupCols:{}, rejSupPos:[], rejSupPed:{},
+            rejSupFunil:{ lidas:0, st8:0, elimPedido:0, elimItem:0, semElim:0,
+                          semChave:0, ok:0, status:{}, exElimPedido:[], exElimItem:[],
+                          col:{} },
             cockFunil:{ lidas:0, st3:0, semElim:0, rlrt:0, emLib:0,
                         colGer:'', colPsmv:'', colSt:'', colElim:'',
                         gerentes:{}, psmv:{}, status:{} } };
@@ -11698,7 +11701,14 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
   if (iElIt === -1) iElIt = _colOuLetra(['CODIGO_ELIMINACAO_ITEM_PEDIDO'], 13, 'N · CODIGO_ELIMINACAO_ITEM_PEDIDO');
   var iLnPd  = _colOuLetra(['LINHAPEDIDO','LINHA_PEDIDO','ITEM_PEDIDO','ITEM_DO_PEDIDO'], 4, 'E · LINHAPEDIDO');
   var iPdRej = (iPd !== -1) ? iPd : _colOuLetra(['PEDIDOS'], 3, 'D · PEDIDOS');
-  r.rejSupCols = { chave:iCh, pedido:iPdRej, linhaPedido:iLnPd, rc:iRc, itemRc:iIt,
+  // A RC e o item da RC também têm letra de segurança (G e H, as que o
+  // André passou). Sem isso, um cabeçalho escrito diferente deixava as
+  // duas em branco e todas as linhas viravam a MESMA chave RC+item.
+  var iRcRej = (iRc !== -1) ? iRc
+             : _colOuLetra(['REQUISICAO','REQUISICAO_COMPRA'], 6, 'G · REQUISICAO');
+  var iItRej = (iIt !== -1) ? iIt
+             : _colOuLetra(['LINHAREQUISICAO','LINHA_REQUISICAO'], 7, 'H · LINHAREQUISICAO');
+  r.rejSupCols = { chave:iCh, pedido:iPdRej, linhaPedido:iLnPd, rc:iRcRej, itemRc:iItRej,
                    criacao:iDt, status:iSt, elimPedido:iElPed, elimItem:iElIt,
                    comprador:iQuem };
   r.rejSupPos = _posUsadas;
@@ -11713,6 +11723,19 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
     var cru = r.cabecalhoCompleto, nm = function(j){ return j === -1 ? '— não encontrada' : (cru[j] || ('coluna ' + (j+1))); };
     r.cockFunil.colSt = nm(iSt); r.cockFunil.colElim = nm(iEl);
     r.cockFunil.colGer = nm(iGer); r.cockFunil.colPsmv = nm(iPsmv);
+    // O mesmo para o Rejeite Supervisor: que coluna, e em que letra, cada
+    // parte da regra foi ler. É o que explica um indicador zerado sem
+    // precisar abrir a medição.
+    var letra = function(j){
+      if (j === -1) return '';
+      var s = '', n0 = j;
+      do { s = String.fromCharCode(65 + (n0 % 26)) + s; n0 = Math.floor(n0 / 26) - 1; } while (n0 >= 0);
+      return s;
+    };
+    var dz = function(j){ return { i:j, letra:letra(j), nome:nm(j) }; };
+    r.rejSupFunil.col = { status:dz(iSt), elimPedido:dz(iElPed), elimItem:dz(iElIt),
+                          pedido:dz(iPdRej), linhaPedido:dz(iLnPd),
+                          rc:dz(iRcRej), itemRc:dz(iItRej) };
   })();
   r.nomeColuna = function(j){ return j === -1 ? '—' : (r.cabecalhos[j] || ('coluna ' + (j + 1))); };
 
@@ -11779,11 +11802,34 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
         if (st8 && temEl) o.e++;
       })();
 
+      // ── o funil do Rejeite Supervisor ────────────────────────────
+      // Cada linha cai em exatamente um lugar. Quando o card vem zerado é
+      // aqui que se vê o porquê: status que não é 8, código de eliminação
+      // numa das duas colunas, ou linha sem RC e sem pedido.
+      (function(){
+        var F = r.rejSupFunil;
+        F.lidas++;
+        var stB = String(lb[iSt] == null ? '' : lb[iSt]).trim();
+        F.status[stB || '(vazio)'] = (F.status[stB || '(vazio)'] || 0) + 1;
+        if (iSt === -1 || _cpStatusNum(lb[iSt]) !== 8) return;
+        F.st8++;
+        var vP = iElPed === -1 ? '' : lb[iElPed];
+        var vI = iElIt  === -1 ? '' : lb[iElIt];
+        var eP = _cpTemEliminacao(vP), eI = _cpTemEliminacao(vI);
+        if (eP) { F.elimPedido++; if (F.exElimPedido.length < 3) F.exElimPedido.push(String(vP)); }
+        if (eI) { F.elimItem++;   if (F.exElimItem.length  < 3) F.exElimItem.push(String(vI)); }
+        if (eP || eI) return;
+        F.semElim++;
+        var vz = function(j){ return j === -1 ? '' : String(lb[j] == null ? '' : lb[j]).trim(); };
+        if (!vz(iRcRej) && !vz(iPdRej)) { F.semChave++; return; }
+        F.ok++;
+      })();
+
       if (iSt !== -1 && _cpStatusNum(lb[iSt]) === 8
           && !_cpTemEliminacao(iElPed === -1 ? '' : lb[iElPed])
           && !_cpTemEliminacao(iElIt  === -1 ? '' : lb[iElIt])) {
         var pR = function(j){ return j === -1 ? '' : String(lb[j] == null ? '' : lb[j]).trim().replace(/\.0+$/, ''); };
-        var rcR = pR(iRc), itR = pR(iIt);
+        var rcR = pR(iRcRej), itR = pR(iItRej);
         if (rcR || pR(iPdRej)) {
           r.rejSupTotal++;
           if (r.rejSup.length < 8000) {
@@ -14691,13 +14737,107 @@ async function rjsSalvarMedicao(med, arquivo){
     _rjsMed = { itens: itens.slice(0, 5000), linhas: +med.rejSupTotal || 0,
                 chaves: itens.length, posUsadas: med.rejSupPos || [],
                 pedidos: med.rejSupPed || {},
+                funil: med.rejSupFunil || {},
                 cabecalho: med.cabecalhoCompleto || [], comBruto: comBruto,
                 arquivo: arquivo || '', atualizadoEm:new Date().toISOString(),
-                atualizadoPor:cpQuem() };
-    var db = getDB(); if (!db) return false;
-    await db.collection('config').doc('rejeite_sup_medicao').set(_rjsMed);
+                atualizadoPor:cpQuem(), erro:'', cortou:'' };
+    var db = getDB(); if (!db) { _rjsMed.erro = 'sem conexão com o banco'; return false; }
+    // Um documento do Firestore não passa de 1 MB. Com a linha crua de
+    // milhares de itens e o retrato de todos os pedidos, a medição passa
+    // fácil — e o erro vinha calado: a tela dizia "ainda não lida" no dia
+    // seguinte sem ninguém saber por quê. Agora o que não cabe é cortado
+    // aqui, na ordem do menos importante, e o corte fica escrito na tela.
+    var doc = rjsEnxugarMedicao(_rjsMed);
+    _rjsMed.cortou = doc.cortou;
+    doc.dados.cortou = doc.cortou;
+    try {
+      await db.collection('config').doc('rejeite_sup_medicao').set(doc.dados);
+    } catch (e2) {
+      _rjsMed.erro = (e2 && e2.message) ? String(e2.message) : 'o banco recusou a gravação';
+      console.warn('rjsSalvarMedicao:', e2);
+      return false;
+    }
     return true;
-  } catch (e) { console.warn('rjsSalvarMedicao:', e); return false; }
+  } catch (e) {
+    try { _rjsMed.erro = (e && e.message) ? String(e.message) : 'erro ao ler a medição'; } catch (e3) {}
+    console.warn('rjsSalvarMedicao:', e); return false;
+  }
+}
+
+// Quanto o documento ocupa, em bytes — a mesma conta que o Firestore faz
+// por cima: o JSON inteiro.
+function rjsBytes(o){
+  try { return JSON.stringify(o).length; } catch (e) { return 0; }
+}
+
+var RJS_DOC_MAX = 850000;   // folga confortável para o limite de 1 MB
+
+// Corta na ordem do que menos faz falta: primeiro a linha crua dos itens
+// do fim da fila (só serve para o rabicho da exportação), depois o
+// retrato dos pedidos (só serve para explicar quem ficou de fora).
+// O documento é montado de baixo para cima — primeiro o que não pode
+// faltar, depois o que couber — em vez de montar inteiro e ir tirando.
+// Medir o documento todo a cada item que sai levava um minuto numa
+// medição grande, com a tela travada; assim mede-se cada pedaço uma vez.
+function rjsEnxugarMedicao(m){
+  var orig = m.itens || [];
+  var avisos = [];
+  var itens = orig.map(function(o){
+    return { rc:o.rc, itemRc:o.itemRc, pedido:o.pedido, itemPedido:o.itemPedido,
+             chaveComprador:o.chaveComprador, comprador:o.comprador,
+             dataPedido:o.dataPedido, linhas:o.linhas, bruto:[] };
+  });
+  var d = { itens:itens, linhas:m.linhas, chaves:m.chaves,
+            posUsadas:m.posUsadas || [], pedidos:{}, funil:m.funil || {},
+            cabecalho:m.cabecalho || [], comBruto:0, arquivo:m.arquivo || '',
+            atualizadoEm:m.atualizadoEm || '', atualizadoPor:m.atualizadoPor || '' };
+  var sobra = RJS_DOC_MAX - rjsBytes(d);
+
+  // 1) o retrato dos pedidos — é o que explica quem ficou de fora
+  var ped = m.pedidos || {}, chaves = Object.keys(ped);
+  if (chaves.length) {
+    var tamPed = rjsBytes(ped), cabem = chaves.length;
+    if (tamPed > sobra) {
+      cabem = Math.max(0, Math.floor(chaves.length * (sobra / tamPed)) - 1);
+      avisos.push('guardei o retrato de ' + cabem + ' dos ' + chaves.length + ' pedido(s) da medição');
+    }
+    for (var i = 0; i < cabem; i++) d.pedidos[chaves[i]] = ped[chaves[i]];
+    sobra -= Math.round(tamPed * (cabem / chaves.length));
+  }
+
+  // 2) a linha crua de cada item, enquanto couber
+  for (var j = 0; j < orig.length && sobra > 0; j++) {
+    var b = orig[j].bruto || [];
+    if (!b.length) continue;
+    var custo = rjsBytes(b) + 10;
+    if (custo > sobra) break;
+    itens[j].bruto = b.slice();
+    d.comBruto++; sobra -= custo;
+  }
+  if (d.comBruto < (m.comBruto || 0)) {
+    avisos.unshift('guardei a linha original só das primeiras ' + d.comBruto + ' chave(s)');
+  }
+
+  // 3) conferência: a conta acima é por estimativa, então o documento é
+  // medido de verdade uma última vez e, se ainda passar, sai mais um
+  // naco de linha crua por vez — poucas voltas, não uma por item.
+  var volta = 0;
+  while (rjsBytes(d) > RJS_DOC_MAX && volta++ < 50) {
+    var comB = [];
+    for (var k = 0; k < itens.length; k++) if (itens[k].bruto.length) comB.push(k);
+    if (!comB.length) break;
+    var tirar = Math.max(1, Math.ceil(comB.length * 0.15));
+    for (var t = 0; t < tirar; t++) {
+      itens[comB[comB.length - 1 - t]].bruto = [];
+      d.comBruto = Math.max(0, d.comBruto - 1);
+    }
+  }
+  while (rjsBytes(d) > RJS_DOC_MAX && Object.keys(d.pedidos).length) {
+    var cs = Object.keys(d.pedidos);
+    var fora = Math.max(1, Math.ceil(cs.length * 0.2));
+    for (var u = 0; u < fora; u++) delete d.pedidos[cs[cs.length - 1 - u]];
+  }
+  return { dados:d, cortou: avisos.join(' · ') };
 }
 
 // A planilha de rejeitados: conta só os grupos de compras da nossa lista.
@@ -15228,6 +15368,7 @@ async function rjAbrir(){
         var M = docs[1].data() || {};
         _rjsMed = { itens:M.itens || [], linhas:+M.linhas || 0, chaves:+M.chaves || 0,
                     posUsadas:M.posUsadas || [], pedidos:M.pedidos || {},
+                    funil:M.funil || {}, cortou:M.cortou || '', erro:'',
                     cabecalho:M.cabecalho || [],
                     comBruto:+M.comBruto || 0, arquivo:M.arquivo || '',
                     atualizadoEm:M.atualizadoEm || '', atualizadoPor:M.atualizadoPor || '' };
@@ -15719,10 +15860,15 @@ function arjDados(ini, fim){
   // O SLA vem do registro: o que a planilha trouxe mais os dias
   // corridos desde aquele upload. Num dia sem planilha nova daquele
   // lado, o número sobe mesmo assim — que é o que acontece na vida real.
+  // Sem o registro ligado, o SLA é o que a planilha do dia trouxe — que
+  // é o número que o André já sobe todo dia. Ele não cresce sozinho num
+  // dia sem upload, e a tela não finge que cresce.
   var hojeISO = cpHojeISO();
   var porChaveS = {}, porChaveF = {};
-  rjlLista('s').forEach(function(it){ porChaveS[String(it.k).slice(2)] = it; });
-  rjlLista('f').forEach(function(it){ porChaveF[String(it.k).slice(2)] = it; });
+  if (RJ_EVOLUCAO) {
+    rjlLista('s').forEach(function(it){ porChaveS[String(it.k).slice(2)] = it; });
+    rjlLista('f').forEach(function(it){ porChaveF[String(it.k).slice(2)] = it; });
+  }
 
   sup.forEach(function(l){
     var it = porChaveS[_rjsN(l.rc) + '|' + _rjsN(l.itemRc)];
@@ -15750,7 +15896,7 @@ function arjDados(ini, fim){
     return a.length % 2 ? a[m] : Math.round((a[m - 1] + a[m]) / 2 * 10) / 10;
   };
 
-  var serie = rjlSerie(ini, fim);
+  var serie = RJ_EVOLUCAO ? rjlSerie(ini, fim) : [];
   var perIni = serie.length ? serie[0].dia : (ini || cpHojeISO());
   var perFim = serie.length ? serie[serie.length - 1].dia : (fim || cpHojeISO());
 
@@ -15779,9 +15925,9 @@ function arjDados(ini, fim){
     // A janela da conta é a MESMA do gráfico ao lado: o que a linha
     // mostra e o que o card conta têm de falar do mesmo período, senão
     // um desmente o outro na mesma folha.
-    mov: rjlMovimento(perIni, perFim),
-    movSup: rjlMovimento(perIni, perFim, 's'),
-    movForn: rjlMovimento(perIni, perFim, 'f'),
+    mov:     RJ_EVOLUCAO ? rjlMovimento(perIni, perFim) : null,
+    movSup:  RJ_EVOLUCAO ? rjlMovimento(perIni, perFim, 's') : null,
+    movForn: RJ_EVOLUCAO ? rjlMovimento(perIni, perFim, 'f') : null,
     slaSup:slaSup, slaForn:slaForn, ordemSla:ORDEM,
     mediaSup: comS ? Math.round(somaS / comS * 10) / 10 : null,
     mediaForn: comF ? Math.round(somaF / comF * 10) / 10 : null,
@@ -15892,33 +16038,50 @@ function arjSlideHTML(op){
             _arjN(d.q.level) + ' Level · ' + _arjN(d.q.petro) + ' Petrobras', corS)
       +   arjCard('Rejeite Fornecedor', _arjN(d.forn.length),
             _arjN(d.foraPrazo) + ' fora do prazo', corF)
-      +   arjCard('% resolvidos', _arjPctTexto(d.mov), _arjPctSub(d.mov), corP)
+      // O quarto card só existe quando há histórico para medir. Sem ele,
+      // "% resolvidos" seria sempre um traço ocupando um quarto da linha.
+      +   (RJ_EVOLUCAO
+           ? arjCard('% resolvidos', _arjPctTexto(d.mov), _arjPctSub(d.mov), corP)
+           : arjCard('Fora do indicador', _arjN(d.fora),
+               'apontados pelo Rodrigo sem par na medição', corP))
       + '</div></div>';
 
-    secs += '<div class="two-col" style="grid-template-columns:1.25fr 1fr">'
-      +   '<div><div class="col-tit">Evolução — itens rejeitados por dia</div>'
-      +     arjGrafLinhas(d.serie, [
-              { campo:'total', nome:'Total', cor:corT },
-              { campo:'sup',   nome:'Supervisor', cor:corS },
-              { campo:'forn',  nome:'Fornecedor', cor:corF }
-            ], { largura:660, altura:196 })
-      +   '</div>'
-      +   '<div>'
-      +     (op.incSla
-          // A média e a mediana saíram daqui: num título de slide elas
-          // viravam uma frase longa que ninguém lia inteira. Quem quiser
-          // o número encontra na tela do gerador.
-          ? '<div class="col-tit">Supervisor — dias parados desde o envio do cockpit</div>'
-            + tempoHTML(d.slaSup, corS, d.sup.length)
-            // Respiro entre os dois: são coisas diferentes, e coladas
-            // pareciam uma lista só de nove faixas.
-            + '<div style="height:12px;margin:9px 0 0;border-top:1px solid #e3e8ef"></div>'
-            + '<div class="col-tit">Fornecedor — dias parados desde a rejeição</div>'
-            + tempoHTML(d.slaForn, corF, d.forn.length)
-          : '')
-      +   '</div>'
-      + '</div>'
-      + (d.mov ? arjMovimentoHTML(d.mov) : '');
+    // Com o histórico desligado não há linha do tempo para desenhar: o
+    // tempo parado dos dois lados fica lado a lado e ocupa a faixa toda,
+    // em vez de dividir espaço com um gráfico de um ponto só.
+    if (RJ_EVOLUCAO) {
+      secs += '<div class="two-col" style="grid-template-columns:1.25fr 1fr">'
+        +   '<div><div class="col-tit">Evolução — itens rejeitados por dia</div>'
+        +     arjGrafLinhas(d.serie, [
+                { campo:'total', nome:'Total', cor:corT },
+                { campo:'sup',   nome:'Supervisor', cor:corS },
+                { campo:'forn',  nome:'Fornecedor', cor:corF }
+              ], { largura:660, altura:196 })
+        +   '</div>'
+        +   '<div>'
+        +     (op.incSla
+            // A média e a mediana saíram daqui: num título de slide elas
+            // viravam uma frase longa que ninguém lia inteira. Quem quiser
+            // o número encontra na tela do gerador.
+            ? '<div class="col-tit">Supervisor — dias parados desde o envio do cockpit</div>'
+              + tempoHTML(d.slaSup, corS, d.sup.length)
+              // Respiro entre os dois: são coisas diferentes, e coladas
+              // pareciam uma lista só de nove faixas.
+              + '<div style="height:12px;margin:9px 0 0;border-top:1px solid #e3e8ef"></div>'
+              + '<div class="col-tit">Fornecedor — dias parados desde a rejeição</div>'
+              + tempoHTML(d.slaForn, corF, d.forn.length)
+            : '')
+        +   '</div>'
+        + '</div>'
+        + (d.mov ? arjMovimentoHTML(d.mov) : '');
+    } else if (op.incSla) {
+      secs += '<div class="two-col" style="grid-template-columns:1fr 1fr;gap:20px">'
+        +   '<div><div class="col-tit">Supervisor — dias parados desde o envio do cockpit</div>'
+        +     tempoHTML(d.slaSup, corS, d.sup.length) + '</div>'
+        +   '<div><div class="col-tit">Fornecedor — dias parados desde a rejeição</div>'
+        +     tempoHTML(d.slaForn, corF, d.forn.length) + '</div>'
+        + '</div>';
+    }
   }
 
   // ── 2. Os dois lados, em colunas paralelas ─────────────────────
@@ -16050,8 +16213,10 @@ async function arjAbrir(){
         db.collection('config').doc('rejeite_sup_medicao').get(),
         db.collection('config').doc('rejeite_sup_sla').get(),
         db.collection('config').doc('rejeite_sup_rodrigo').get(),
-        db.collection('config').doc(RJH_DOC).get(),
-        db.collection('config').doc(RJL_DOC).get()
+        // Com RJ_EVOLUCAO desligado estes dois nem são buscados: é
+        // leitura do Firebase que não serviria para nada na tela.
+        RJ_EVOLUCAO ? db.collection('config').doc(RJH_DOC).get() : null,
+        RJ_EVOLUCAO ? db.collection('config').doc(RJL_DOC).get() : null
       ]);
       if (docs[0] && docs[0].exists) {
         var R = docs[0].data() || {};
@@ -16063,6 +16228,7 @@ async function arjAbrir(){
         var M = docs[1].data() || {};
         _rjsMed = { itens:M.itens || [], linhas:+M.linhas || 0, chaves:+M.chaves || 0,
                     posUsadas:M.posUsadas || [], pedidos:M.pedidos || {},
+                    funil:M.funil || {}, cortou:M.cortou || '', erro:'',
                     cabecalho:M.cabecalho || [], comBruto:+M.comBruto || 0,
                     arquivo:M.arquivo || '', atualizadoEm:M.atualizadoEm || '' };
       }
@@ -16097,7 +16263,7 @@ async function arjAbrir(){
   // vazio e já existe base carregada — assim a primeira abertura já
   // mostra alguma coisa em vez de uma tela vazia.
   try {
-    if (!Object.keys(_rjl.itens || {}).length) {
+    if (RJ_EVOLUCAO && !Object.keys(_rjl.itens || {}).length) {
       var semeou = false;
       if (await rjlAplicarFornecedor()) semeou = true;
       if (await rjlAplicarSupervisor()) semeou = true;
@@ -16131,7 +16297,25 @@ async function arjGravarHoje(){
   arjDesenharResumo();
 }
 
+// Tira da tela o que só faz sentido com histórico: o período, o botão
+// de registrar o dia e a palavra "evolução" no nome da seção. Deixar o
+// controle visível sem nada por trás é pior do que não ter o controle.
+function arjAjustarControles(){
+  var mostra = function(id, ver){
+    var el = document.getElementById(id);
+    if (el) el.style.display = ver ? '' : 'none';
+  };
+  mostra('arj-box-periodo', RJ_EVOLUCAO);
+  mostra('arj-btn-gravar', RJ_EVOLUCAO);
+  var g = document.getElementById('arj-grade');
+  if (g) g.style.gridTemplateColumns = RJ_EVOLUCAO ? '1fr 1fr 1fr' : '1fr 1fr';
+  var rot = document.getElementById('arj-rot-visao');
+  if (rot) rot.textContent = RJ_EVOLUCAO ? 'Geral — cards, tempo e evolução'
+                                         : 'Geral — cards e tempo parado';
+}
+
 function arjDesenharResumo(){
+  arjAjustarControles();
   var box = document.getElementById('arj-resumo');
   if (!box) return;
   var d = arjDados('', '');
@@ -16156,14 +16340,16 @@ function arjDesenharResumo(){
     +     '<div style="font-size:10px;color:var(--tx2)">' + cpNum(d.foraPrazo) + ' fora do prazo</div></div>'
     +   '<div style="flex:1;min-width:140px;background:var(--azc);border:1px solid var(--azm);'
     +     'border-radius:10px;padding:.7rem .9rem;text-align:center">'
-    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2)">% RESOLVIDOS</div>'
+    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2)">'
+    +       (RJ_EVOLUCAO ? '% RESOLVIDOS' : 'FORA DO INDICADOR') + '</div>'
     +     '<div style="font-size:24px;font-weight:800;color:var(--azm)">'
-    +       _arjPctTexto(d.mov) + '</div>'
+    +       (RJ_EVOLUCAO ? _arjPctTexto(d.mov) : cpNum(d.fora)) + '</div>'
     +     '<div style="font-size:10px;color:var(--tx2)">'
-    +       (d.mov ? _arjPctSub(d.mov) : 'preciso de 2 dias') + '</div></div>'
+    +       (RJ_EVOLUCAO ? (d.mov ? _arjPctSub(d.mov) : 'preciso de 2 dias')
+                         : 'apontados pelo Rodrigo sem par na medição') + '</div></div>'
     + '</div>';
 
-  if (d.mov) {
+  if (RJ_EVOLUCAO && d.mov) {
     var m = d.mov;
     h += '<div style="border:1px solid var(--brd);border-radius:10px;background:var(--cin);'
       +   'padding:.7rem .9rem;margin-bottom:.9rem;font-size:12px;line-height:1.9">'
@@ -16201,30 +16387,30 @@ function arjDesenharResumo(){
     +     (d.medianaForn == null ? '—' : String(d.medianaForn).replace('.', ','))
     +     (d.dataForn ? ' (base de ' + cpDataBR(d.dataForn) + ')' : '')
     +     '. Os dois relógios são diferentes, então não se comparam entre si.</div>'
-    +   '<div><strong style="color:var(--tx)">Como o item é acompanhado</strong> — cada item '
-    +     'tem uma vida no registro: entra no dia em que aparece pela primeira vez numa '
-    +     'planilha, fica aberto enquanto reaparecer, e é dado por <strong>concluído</strong> '
-    +     'no dia em que chega uma planilha nova <em>daquele lado</em> e ele não está nela. '
-    +     'Isso é por item e é contínuo — não é comparação entre fotos do dia.</div>'
-    +   '<div><strong style="color:var(--tx)">Uploads independentes</strong> — dia de subir só '
-    +     'o fornecedor, dia de subir só o Rodrigo, dia de subir os dois. A planilha de um lado '
-    +     'nunca conclui item do outro: a avaliação só roda no lado que recebeu arquivo.</div>'
-    +   '<div><strong style="color:var(--tx)">SLA</strong> — o número que a planilha trouxe mais '
-    +     'os dias corridos desde aquele upload. Ele cresce sozinho todo dia até o item sair da '
-    +     'base, mesmo nos dias em que nenhuma planilha nova chega.</div>'
-    +   '<div><strong style="color:var(--tx)">Histórico</strong> — '
-    +     (serie.length
-        ? cpNum(serie.length) + ' dia(s) gravado(s), de ' + cpDataBR(serie[0].dia)
-          + ' a ' + cpDataBR(serie[serie.length - 1].dia)
-        : '<span style="color:var(--am)">nenhum dia gravado ainda. Cada upload grava um retrato; '
-          + 'use o botão acima para gravar hoje.</span>')
-    +   '</div>'
-    +   (serie.length === 1
-       ? '<div style="color:var(--am)">Com um dia só, o gráfico sai com um ponto e o % resolvidos '
-         + 'fica em branco. A partir do segundo dia os dois aparecem.</div>' : '')
+    +   (RJ_EVOLUCAO
+       ? '<div><strong style="color:var(--tx)">Como o item é acompanhado</strong> — cada item '
+         + 'tem uma vida no registro: entra no dia em que aparece pela primeira vez numa '
+         + 'planilha, fica aberto enquanto reaparecer, e é dado por <strong>concluído</strong> '
+         + 'no dia em que chega uma planilha nova <em>daquele lado</em> e ele não está nela. '
+         + 'Isso é por item e é contínuo — não é comparação entre fotos do dia.</div>'
+       + '<div><strong style="color:var(--tx)">SLA</strong> — o número que a planilha trouxe mais '
+         + 'os dias corridos desde aquele upload. Ele cresce sozinho todo dia até o item sair da '
+         + 'base, mesmo nos dias em que nenhuma planilha nova chega.</div>'
+       + '<div><strong style="color:var(--tx)">Histórico</strong> — '
+         + (serie.length
+            ? cpNum(serie.length) + ' dia(s) gravado(s), de ' + cpDataBR(serie[0].dia)
+              + ' a ' + cpDataBR(serie[serie.length - 1].dia)
+            : '<span style="color:var(--am)">nenhum dia gravado ainda.</span>')
+       + '</div>'
+       : '<div><strong style="color:var(--tx)">Sem histórico</strong> — o rejeite não é gravado '
+         + 'no banco. O slide mostra a foto de hoje: o que está nas planilhas que você subiu '
+         + 'agora. Por isso não há linha de evolução nem % resolvidos.</div>'
+       + '<div><strong style="color:var(--tx)">Dias parados</strong> — é o número que a própria '
+         + 'planilha trouxe. Ele não cresce sozinho num dia sem upload; anda quando você sobe '
+         + 'a planilha nova.</div>')
     + '</div>';
 
-  if (serie.length) {
+  if (RJ_EVOLUCAO && serie.length) {
     h += '<div style="margin-top:.9rem">' + arjGrafLinhas(serie, [
         { campo:'total', nome:'Total', cor:'#1B5E20' },
         { campo:'sup',   nome:'Supervisor', cor:'#E08A1E' },
@@ -16268,6 +16454,16 @@ function arjDesenharResumo(){
 //
 // É este registro que responde "quantos estavam abertos no dia X" para
 // qualquer dia, sem depender de alguém ter aberto a tela naquele dia.
+// ── a chave que liga o histórico ─────────────────────────────────
+// DESLIGADO a pedido do André (15/10): sem ele, nada do rejeite é
+// gravado no Firebase — nem o registro de itens, nem o retrato diário.
+// O custo é a evolução: sem histórico não há linha do tempo nem
+// "% resolvidos", e o SLA passa a ser o que a planilha traz, em vez de
+// crescer sozinho nos dias sem upload. Tudo que depende disso sai da
+// tela e do slide enquanto esta chave estiver em false — ligar de volta
+// é mudar só esta linha.
+var RJ_EVOLUCAO = false;
+
 var RJL_DOC = 'rejeite_itens';
 var RJL_MAX = 6000;          // itens guardados
 var RJL_GUARDA_RESOLVIDO = 180;   // dias que um resolvido fica no registro
@@ -16375,6 +16571,7 @@ function rjlPodar(){
 }
 
 async function rjlGravar(){
+  if (!RJ_EVOLUCAO) return false;
   try {
     var db = getDB(); if (!db) return false;
     await db.collection('config').doc(RJL_DOC).set(_rjl);
@@ -16383,6 +16580,7 @@ async function rjlGravar(){
 }
 
 async function rjlCarregar(){
+  if (!RJ_EVOLUCAO) return;
   try {
     var db = getDB(); if (!db) return;
     var doc = await db.collection('config').doc(RJL_DOC).get();
@@ -16558,6 +16756,7 @@ function rjlDoSupervisor(){
 }
 
 async function rjlAplicarFornecedor(data){
+  if (!RJ_EVOLUCAO) return false;
   var itens = rjlDoFornecedor();
   if (!itens.length) return false;
   rjlAplicar('f', itens, data);
@@ -16565,6 +16764,7 @@ async function rjlAplicarFornecedor(data){
 }
 
 async function rjlAplicarSupervisor(data){
+  if (!RJ_EVOLUCAO) return false;
   var itens = rjlDoSupervisor();
   if (!itens || !itens.length) return false;
   rjlAplicar('s', itens, data);
@@ -16629,6 +16829,7 @@ function rjHistSnapshot(){
 // Grava o retrato de hoje. Rodar duas vezes no mesmo dia só atualiza —
 // o dia é a chave, então não dá para duplicar ponto no gráfico.
 async function rjHistGravar(dia){
+  if (!RJ_EVOLUCAO) return false;
   try {
     var d = dia || cpHojeISO();
     var snap = rjHistSnapshot();
@@ -16655,6 +16856,7 @@ async function rjHistGravar(dia){
 }
 
 async function rjHistCarregar(){
+  if (!RJ_EVOLUCAO) return;
   try {
     var db = getDB(); if (!db) return;
     var doc = await db.collection('config').doc(RJH_DOC).get();
@@ -17002,6 +17204,59 @@ function rjsBaixarLado(lado){
 // ── Rejeite Supervisor — a tela ───────────────────────────────────
 function rjsNum(v){ return (v == null || v === '') ? '—' : cpNum(v); }
 
+// Por que a medição não trouxe item nenhum. Mostra o caminho que cada
+// linha fez e, principalmente, QUAL coluna cada parte da regra foi ler —
+// é aí que mora o engano quando o cabeçalho vem escrito diferente.
+function rjsFunilHTML(){
+  var F = (_rjsMed && _rjsMed.funil) ? _rjsMed.funil : null;
+  if (!F || !F.lidas) return '';
+  var c = F.col || {};
+  var col = function(x, rot){
+    var o = c[x] || {};
+    return '<div>' + rot + ': <strong>' + cpEsc(o.nome || '— não encontrada') + '</strong>'
+      + (o.letra ? ' <span style="color:var(--tx2)">(coluna ' + cpEsc(o.letra) + ')</span>' : '')
+      + '</div>';
+  };
+  var st = Object.keys(F.status || {}).sort(function(a, b){
+    return (F.status[b] || 0) - (F.status[a] || 0);
+  }).slice(0, 8).map(function(k){
+    return '<code>' + cpEsc(k) + '</code> ' + cpNum(F.status[k]);
+  }).join(' · ');
+
+  var passo = function(rot, v, cor){
+    return '<div style="display:flex;justify-content:space-between;gap:10px">'
+      + '<span>' + rot + '</span><strong' + (cor ? ' style="color:' + cor + '"' : '') + '>'
+      + cpNum(v) + '</strong></div>';
+  };
+
+  return '<div style="margin-top:.9rem;background:var(--amc);border:1px solid var(--am);'
+    +   'border-radius:8px;padding:.7rem .9rem;font-size:11.5px;line-height:1.8">'
+    +   '<div style="font-weight:700;color:var(--tx);margin-bottom:4px">'
+    +     'Por onde as linhas da medição passaram</div>'
+    +   passo('linhas lidas', F.lidas)
+    +   passo('com status 8', F.st8, F.st8 ? '' : 'var(--vm)')
+    +   passo('tiradas pelo código de eliminação do pedido', F.elimPedido)
+    +   passo('tiradas pelo código de eliminação do item', F.elimItem)
+    +   passo('sem RC e sem pedido', F.semChave)
+    +   passo('sobraram para o indicador', F.ok, F.ok ? 'var(--vd)' : 'var(--vm)')
+    +   '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--am)">'
+    +     '<strong>As colunas que eu li:</strong>'
+    +     col('status', 'status do processo')
+    +     col('elimPedido', 'código de eliminação (pedido)')
+    +     col('elimItem', 'código de eliminação (item)')
+    +     col('pedido', 'pedido') + col('linhaPedido', 'item do pedido')
+    +     col('rc', 'RC') + col('itemRc', 'item da RC')
+    +   '</div>'
+    +   (st ? '<div style="margin-top:4px"><strong>Status que apareceram:</strong> ' + st + '</div>' : '')
+    +   ((F.exElimPedido || []).length
+       ? '<div>Exemplos do código de eliminação do pedido: <code>'
+         + F.exElimPedido.map(function(x){ return cpEsc(x); }).join('</code> · <code>') + '</code></div>' : '')
+    +   ((F.exElimItem || []).length
+       ? '<div>Exemplos do código de eliminação do item: <code>'
+         + F.exElimItem.map(function(x){ return cpEsc(x); }).join('</code> · <code>') + '</code></div>' : '')
+    + '</div>';
+}
+
 function rjSupervisorHTML(){
   var r = rjsMontar();
   var n = r.linhas.length;
@@ -17130,14 +17385,26 @@ function rjSupervisorHTML(){
     +   ((_rjsMed.chaves || 0) > (_rjsMed.comBruto || 0)
        ? '<div style="color:var(--am)">⚠ Guardei a linha original da medição das primeiras '
          + cpNum(_rjsMed.comBruto) + ' chaves; acima disso a exportação sai só com as colunas montadas.</div>' : '')
+    +   (_rjsMed.cortou
+       ? '<div style="color:var(--am)">⚠ A medição não cabia inteira no banco, então '
+         + cpEsc(_rjsMed.cortou) + '. Na tela de hoje está tudo; amanhã volta sem essa parte.</div>' : '')
+    +   (_rjsMed.erro
+       ? '<div style="color:var(--vm)">✗ <strong>A medição não ficou salva:</strong> '
+         + cpEsc(_rjsMed.erro) + '. O que está na tela vale só até recarregar a página — '
+         + 'suba a medição de novo e me mande esta mensagem se repetir.</div>' : '')
     + '</div>';
 
   // ── a lista ───────────────────────────────────────────────────
   if (!n) {
+    var leuAlgo = !!(_rjsMed && _rjsMed.funil && _rjsMed.funil.lidas);
     h += '<div style="font-size:12px;color:var(--tx2);margin-top:.9rem">'
-      + (faltaMed ? 'Sem medição lida, não há o que mostrar.'
-                  : 'Nenhum item com STATUS_PROCESSO 8 e as duas colunas de eliminação vazias.')
-      + '</div>';
+      + (faltaMed
+         ? (leuAlgo
+            ? 'Eu li a medição, mas nenhuma linha passou na regra do rejeite — o funil abaixo diz onde elas pararam.'
+            : 'Sem medição lida, não há o que mostrar.')
+         : 'Nenhum item com STATUS_PROCESSO 8 e as duas colunas de eliminação vazias.')
+      + '</div>'
+      + rjsFunilHTML();
   } else {
     h += '<div style="overflow:auto;max-height:520px;margin-top:.9rem"><table><thead><tr>'
       + RJS_COLS.map(function(c){
@@ -17723,6 +17990,7 @@ async function gpAbrir(){
         var RM = dR[0].data() || {};
         _rjsMed = { itens:RM.itens || [], linhas:+RM.linhas || 0, chaves:+RM.chaves || 0,
                     posUsadas:RM.posUsadas || [], pedidos:RM.pedidos || {},
+                    funil:RM.funil || {}, cortou:RM.cortou || '', erro:'',
                     cabecalho:RM.cabecalho || [], comBruto:+RM.comBruto || 0,
                     arquivo:RM.arquivo || '', atualizadoEm:RM.atualizadoEm || '',
                     atualizadoPor:RM.atualizadoPor || '' };
