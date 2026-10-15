@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 20:15';
+var GTO_BUILD = '15/10 21:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -52185,6 +52185,9 @@ var _gnvFiltroFila = null;
 var _gnvFiltroTipoProc = null;
 var _gnvSubFiltro = null;   // nº de cobranças (2º nível, dentro da fila)
 var _gnvFiltroStPatec = null;
+// O aviso "⚠ N vencida(s)" era só um número: dizia que havia problema e
+// não dizia onde. Agora ele é um filtro como os outros cards.
+var _gnvFiltroVenc = false;
 var _gnvAba = 'andamento';     // 'andamento' | 'concluidos'
 var _gnvFiltroConc = null;     // tipo de conclusão, dentro da aba Concluídos
 
@@ -52853,13 +52856,17 @@ function gnvFiltrarStatusPatec(st){
   _gnvFiltroStPatec = (_gnvFiltroStPatec === st) ? null : st;
   _gnvDesenhar();
 }
+function gnvFiltrarVencidas(){
+  _gnvFiltroVenc = !_gnvFiltroVenc;
+  _gnvDesenhar();
+}
 function gnvFiltrarConclusao(c){
   _gnvFiltroConc = (_gnvFiltroConc === c) ? null : c;
   _gnvDesenhar();
 }
 function gnvLimparFiltros(){
   _gnvBusca = ''; _gnvFiltroFila = null; _gnvFiltroTipoProc = null; _gnvSubFiltro = null;
-  _gnvFiltroStPatec = null; _gnvFiltroConc = null;
+  _gnvFiltroStPatec = null; _gnvFiltroConc = null; _gnvFiltroVenc = false;
   var b = document.getElementById('gnv-filtro-texto'); if (b) b.value = '';
   _gnvDesenhar();
 }
@@ -52916,6 +52923,9 @@ function _gnvFiltrar(){
     lista = lista.filter(function(r){
       return String(_gnvLinhaCalc(r).statusPatec || '').toUpperCase() === _gnvFiltroStPatec.toUpperCase();
     });
+  }
+  if (_gnvFiltroVenc) {
+    lista = lista.filter(function(r){ return _gnvLinhaCalc(r).status === 'VENCIDA'; });
   }
   if (_gnvFiltroFila) {
     lista = lista.filter(function(r){ return (_gnvLinhaCalc(r).fila || 'Sem fila') === _gnvFiltroFila; });
@@ -53145,7 +53155,8 @@ function _gnvDesenhar(){
 
   if (cards) {
     var _q = function(x){ return String(x).replace(/'/g, "\\'"); };
-    var semFiltro = (!_gnvFiltroFila && !_gnvFiltroTipoProc && _gnvSubFiltro === null && !_gnvFiltroStPatec);
+    var semFiltro = (!_gnvFiltroFila && !_gnvFiltroTipoProc && _gnvSubFiltro === null
+                     && !_gnvFiltroStPatec && !_gnvFiltroVenc);
 
     // 1ª linha da lateral: TOTAL (mesmo card da Cobrança por Status)
     var cardTotal = '<div style="display:flex;margin-bottom:10px">'
@@ -53159,8 +53170,11 @@ function _gnvDesenhar(){
 
     // o alerta de vencidas continua, logo abaixo do total
     var avisoVenc = nVenc
-      ? '<div style="font-size:10px;font-weight:700;color:var(--vm);background:var(--vmc);border:1px solid var(--vm);'
-        + 'border-radius:6px;padding:3px 10px;text-align:center;margin-bottom:8px">⚠ ' + nVenc + ' vencida(s)</div>'
+      ? '<div onclick="gnvFiltrarVencidas()" title="Ver quais RCs estão vencidas"'
+        + ' style="cursor:pointer;font-size:10px;font-weight:700;border:1px solid var(--vm);'
+        + 'border-radius:6px;padding:3px 10px;text-align:center;margin-bottom:8px;'
+        + (_gnvFiltroVenc ? 'color:#fff;background:var(--vm)' : 'color:var(--vm);background:var(--vmc)')
+        + '">⚠ ' + nVenc + ' vencida(s)' + (_gnvFiltroVenc ? ' · ✕ limpar' : ' · ver quais') + '</div>'
       : '';
 
     // Status do Patec — os dois estados; o Finalizado é o card de concluídos
@@ -53329,6 +53343,7 @@ function _gnvDesenhar(){
   if (_gnvFiltroFila) legenda += ' — fila ' + _cobEsc(_gnvFiltroFila);
   if (_gnvFiltroTipoProc) legenda += ' — ' + _cobEsc(_gnvFiltroTipoProc);
   if (_gnvFiltroStPatec) legenda += ' — ' + _cobEsc(_gnvFiltroStPatec);
+  if (_gnvFiltroVenc) legenda += ' — somente vencidas';
   if (_gnvSubFiltro !== null) legenda += ' — ' + _gnvSubFiltro + ' cobrança' + (_gnvSubFiltro === 1 ? '' : 's');
   if (_gnvBusca) legenda += ' — "' + _cobEsc(_gnvBusca) + '"';
   legenda += '. Prazo de retorno = Envio + dias úteis da fila (pula fim de semana e feriados).';
@@ -54437,7 +54452,8 @@ function _gnvAplicarModulo(){
   if (!fast) {
     if (pane) pane.style.display = 'none';
     _gnvBase = []; _gnvEdit = {}; _gnvResumo = null;
-    _gnvBusca = ''; _gnvFiltroFila = null; _gnvFiltroTipoProc = null; _gnvSubFiltro = null; _gnvFiltroStPatec = null;
+    _gnvBusca = ''; _gnvFiltroFila = null; _gnvFiltroTipoProc = null; _gnvSubFiltro = null;
+    _gnvFiltroStPatec = null; _gnvFiltroVenc = false;
   }
 }
 
