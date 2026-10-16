@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/10 22:40';
+var GTO_BUILD = '16/10 23:25';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -921,6 +921,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
   #pf-root .nav-btn.pf-on .dot{ background:#fff; }
   #pf-root .content{ flex:1; min-width:0; padding:22px 24px 60px; }
   #pf-root .pf-pg{ display:none; }
+  #pf-root .pf-upload-ir{ display:flex; align-items:center; gap:12px; margin-top:14px; flex-wrap:wrap; }
+  #pf-root .pf-ir-carteira{ cursor:pointer; }
   #pf-root .pf-pg.pf-on{ display:block; }
 
   #pf-root .kpi-grid{
@@ -1218,10 +1220,11 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         <p>Level · Petrobrás — BU FAST + Governança FASTP + Requisições EP_BENS</p>
       </div>
     </div>
-    <div class="controls">
-      <button class="btn" id="btnDownloadPdf" type="button">⬇ Baixar PDF</button>
-      <button class="btn" id="btnToggleUpload" type="button">↑ Ir para o upload</button>
-    </div>
+    <!-- os dois botões do cabeçalho saíram em 16/10: o "Ir para o
+         upload" virou o tópico UPLOAD no menu do GTO, e o "Baixar PDF"
+         era do painel solto. O código dos dois continua abaixo, só que
+         sem botão para chamar — por isso tudo que mexe neles checa se
+         existem antes. -->
   </div>
   <div class="meta-row">
     <span>Linhas carregadas: <b id="metaLinhas">—</b></span>
@@ -1235,34 +1238,13 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
     <button class="nav-btn pf-on" data-page="carteira" type="button"><span class="dot"></span>Status Carteira</button>
     <button class="nav-btn" data-page="geral" type="button"><span class="dot"></span>Itens Geral FAST</button>
     <button class="nav-btn" data-page="bruta" type="button"><span class="dot"></span>Base bruta</button>
+    <button class="nav-btn" data-page="upload" type="button"><span class="dot"></span>Upload</button>
   </aside>
 
   <div class="content">
 
     <section id="page-carteira" class="pf-pg pf-on">
 
-      <div class="pf-upload-topo">
-        <div class="pf-upload-tit">Subir as planilhas</div>
-        <div class="pf-upload-sub">As três são independentes: suba só a que mudou. O painel recalcula a cada arquivo.</div>
-        <div class="pf-upload-campos">
-          <label class="pf-campo">
-            <span class="pf-campo-nome">1 · Governança FAST</span>
-            <span class="pf-campo-aba">aba GOVERNANÇA FASTP</span>
-            <input type="file" id="fileP1" accept=".xlsx,.xlsb,.xls" />
-          </label>
-          <label class="pf-campo">
-            <span class="pf-campo-nome">2 · BU FAST</span>
-            <span class="pf-campo-aba">aba BU</span>
-            <input type="file" id="fileBU" accept=".xlsx,.xlsb,.xls" />
-          </label>
-          <label class="pf-campo">
-            <span class="pf-campo-nome">3 · Liberados E&amp;P</span>
-            <span class="pf-campo-aba">Requisições EP_BENS, aba Export</span>
-            <input type="file" id="fileEP" accept=".xlsx,.xlsb,.xls" />
-          </label>
-        </div>
-        <div class="status-msg" id="uploadStatus"></div>
-      </div>
 
 
       <div class="extra-head">Status do processo</div>
@@ -1389,6 +1371,37 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         </div>
       </div>
     </section>
+
+      <section id="page-upload" class="pf-pg">
+      <div class="pf-upload-topo">
+          <div class="pf-upload-tit">Subir as planilhas</div>
+          <div class="pf-upload-sub">As três são independentes: suba só a que mudou. O painel recalcula a cada arquivo.</div>
+          <div class="pf-upload-campos">
+            <label class="pf-campo">
+              <span class="pf-campo-nome">1 · Governança FAST</span>
+              <span class="pf-campo-aba">aba GOVERNANÇA FASTP</span>
+              <input type="file" id="fileP1" accept=".xlsx,.xlsb,.xls" />
+            </label>
+            <label class="pf-campo">
+              <span class="pf-campo-nome">2 · BU FAST</span>
+              <span class="pf-campo-aba">aba BU</span>
+              <input type="file" id="fileBU" accept=".xlsx,.xlsb,.xls" />
+            </label>
+            <label class="pf-campo">
+              <span class="pf-campo-nome">3 · Liberados E&amp;P</span>
+              <span class="pf-campo-aba">Requisições EP_BENS, aba Export</span>
+              <input type="file" id="fileEP" accept=".xlsx,.xlsb,.xls" />
+            </label>
+          </div>
+          <div class="status-msg" id="uploadStatus"></div>
+        </div>
+
+        <div class="pf-upload-ir">
+          <button class="btn pf-ir-carteira" type="button"
+                  onclick="go('reuniao-fast')">→ Ver o Status Carteira</button>
+          <span class="pf-upload-sub">Cada planilha que entra já recalcula os cards do Status Carteira.</span>
+        </div>
+      </section>
 
 
 
@@ -8715,7 +8728,8 @@ function go(id, el) {
   document.querySelectorAll('.sb-it').forEach(i => i.classList.remove('active'));
   // Tópicos que dividem uma página só: o Painel FAST tem três entradas
   // no menu e uma página, trocando a aba interna.
-  const PAGINA_ALIAS = { 'reuniao-fast-itens':'reuniao-fast', 'reuniao-fast-bruta':'reuniao-fast' };
+  const PAGINA_ALIAS = { 'reuniao-fast-itens':'reuniao-fast', 'reuniao-fast-bruta':'reuniao-fast',
+                         'reuniao-fast-upload':'reuniao-fast' };
   const page = document.getElementById('p-' + (PAGINA_ALIAS[id] || id));
   console.log('[go] id='+id+' | page encontrada='+!!page+' | page.id='+(page?.id||'null'));
   if (page) {
@@ -8763,8 +8777,9 @@ function go(id, el) {
   if(id==='reuniao'){ if(typeof reuniaoAbrir==='function') reuniaoAbrir(); }
   if(id.indexOf('reuniao-fast')===0 && typeof pfAbrir==='function'){
     pfAbrir();
-    pfAba(id === 'reuniao-fast-itens' ? 'geral'
-        : id === 'reuniao-fast-bruta' ? 'bruta' : 'carteira');
+    pfAba(id === 'reuniao-fast-itens'  ? 'geral'
+        : id === 'reuniao-fast-bruta'  ? 'bruta'
+        : id === 'reuniao-fast-upload' ? 'upload' : 'carteira');
   }
   if(id==='direcionamento'){ if(typeof dirPagina==='function') setTimeout(dirPagina, 60); }
   if(typeof _fcAgendarVarredura==='function') _fcAgendarVarredura();
@@ -44064,6 +44079,7 @@ const PERMS_SIDEBAR = {
   'reuniao-fast':       { icon:'📊', label:'Status Carteira',   mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
   'reuniao-fast-itens': { icon:'📄', label:'Itens Geral FAST',  mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
   'reuniao-fast-bruta': { icon:'🗃️', label:'Base bruta',        mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
+  'reuniao-fast-upload':{ icon:'⬆️', label:'Upload',            mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
   // Só existem dentro da frente ADLV · PCP, que tem Firebase próprio
   'pcp':            { icon:'📋', label:'PCP',                     mod:'EXECUÇÃO', soPcp:true },
   'pcp-hist':       { icon:'📚', label:'Histórico de Medição',    mod:'EXECUÇÃO', soPcp:true },
@@ -57492,7 +57508,8 @@ function downloadRowsAsXlsx(rows, columns, filenamePrefix){
   XLSX.writeFile(wb, filenamePrefix + '_' + new Date().toISOString().slice(0,10) + '.xlsx');
 }
 async function downloadStatusCarteiraPdf(){
-  const btn = document.getElementById('btnDownloadPdf');
+  const btn = document.getElementById('btnDownloadPdf')
+           || { textContent:'', disabled:false };
   const label = btn.textContent;
   btn.disabled = true; btn.textContent = 'Gerando PDF...';
   try{
@@ -57936,11 +57953,9 @@ function aoaToObjects(aoa, mustHave){
 }
 function wireUpload(){
   const statusMsg = document.getElementById('uploadStatus');
-  document.getElementById('btnToggleUpload').addEventListener('click', () => {
-    const p = document.getElementById('uploadPanel');
-    p.open = true;
-    document.querySelector('#pf-root .nav-btn[data-page="carteira"]').click();
-    p.scrollIntoView({ behavior:'smooth' });
+  var _btu = document.getElementById('btnToggleUpload');
+  if (_btu) _btu.addEventListener('click', () => {
+    document.querySelector('#pf-root .nav-btn[data-page="upload"]').click();
   });
   const fileP1 = document.getElementById('fileP1');
   fileP1.addEventListener('change', async () => {
@@ -58003,7 +58018,8 @@ function init(){
   wireModal();
   wireKpiExpand();
   wireKpiInfo();
-  document.getElementById('btnDownloadPdf').addEventListener('click', downloadStatusCarteiraPdf);
+  var _bpdf = document.getElementById('btnDownloadPdf');
+  if (_bpdf) _bpdf.addEventListener('click', downloadStatusCarteiraPdf);
   wireNav();
   wireTableSearch();
   renderAll();
@@ -58279,7 +58295,7 @@ async function pfAbrir(){
     await pfEntCarregar();
     var veio = await pfCarregar();
     if (!veio) {
-      if (el2) el2.textContent = 'Nenhuma planilha subida ainda — suba as três aqui em cima.';
+      if (el2) el2.textContent = 'Nenhuma planilha subida ainda — suba as três no tópico Upload.';
       // sem planilha, ainda assim o card das entradas tem de aparecer
       if (window.__pfDados) window.__pfDados.redesenhar();
     }
