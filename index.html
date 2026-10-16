@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/10 18:20';
+var GTO_BUILD = '16/10 19:15';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -917,11 +917,11 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
   }
   #pf-root .nav-btn .dot{ width:7px; height:7px; border-radius:50%; background:#C7D4D1; flex:0 0 auto; transition:background .12s ease; }
   #pf-root .nav-btn:hover{ background:#E6F1EF; transform:translateX(2px); }
-  #pf-root .nav-btn.active{ background:linear-gradient(120deg,var(--c-principal),var(--c-secundaria)); color:#fff; font-weight:650; box-shadow:0 6px 16px rgba(0,125,119,.28); }
-  #pf-root .nav-btn.active .dot{ background:#fff; }
+  #pf-root .nav-btn.pf-on{ background:linear-gradient(120deg,var(--c-principal),var(--c-secundaria)); color:#fff; font-weight:650; box-shadow:0 6px 16px rgba(0,125,119,.28); }
+  #pf-root .nav-btn.pf-on .dot{ background:#fff; }
   #pf-root .content{ flex:1; min-width:0; padding:22px 24px 60px; }
-  #pf-root .page{ display:none; }
-  #pf-root .page.active{ display:block; }
+  #pf-root .pf-pg{ display:none; }
+  #pf-root .pf-pg.pf-on{ display:block; }
 
   #pf-root .kpi-grid{
     display:grid; grid-template-columns:repeat(6,1fr); gap:12px; margin-bottom:18px;
@@ -1013,9 +1013,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
   }
   #pf-root .chip b{color:var(--c-principal);}
 
-  #pf-root .page-head{ margin-bottom:14px; }
-  #pf-root .page-head h2{ margin:0 0 3px; font-size:17px; font-weight:650; }
-  #pf-root .page-head p{ margin:0; font-size:12.5px; color:var(--muted); }
+  #pf-root .pf-pg-head{ margin-bottom:14px; }
+  #pf-root .pf-pg-head h2{ margin:0 0 3px; font-size:17px; font-weight:650; }
+  #pf-root .pf-pg-head p{ margin:0; font-size:12.5px; color:var(--muted); }
 
   #pf-root .search-bar{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px; }
   #pf-root .search-field label{ display:block; font-size:11px; color:var(--muted); margin-bottom:4px; font-weight:600; }
@@ -1177,14 +1177,14 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
 
 <div class="shell">
   <aside class="sidebar">
-    <button class="nav-btn active" data-page="carteira" type="button"><span class="dot"></span>Status Carteira</button>
+    <button class="nav-btn pf-on" data-page="carteira" type="button"><span class="dot"></span>Status Carteira</button>
     <button class="nav-btn" data-page="geral" type="button"><span class="dot"></span>Itens Geral FAST</button>
     <button class="nav-btn" data-page="bruta" type="button"><span class="dot"></span>Base bruta</button>
   </aside>
 
   <div class="content">
 
-    <section id="page-carteira" class="page active">
+    <section id="page-carteira" class="pf-pg pf-on">
 
       <div class="pf-upload-topo">
         <div class="pf-upload-tit">Subir as planilhas</div>
@@ -1260,7 +1260,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
       
     </section>
 
-    <section id="page-geral" class="page">
+    <section id="page-geral" class="pf-pg">
       <div class="page-head">
         <h2>Itens Geral FAST</h2>
         <p>Todas as RCs da BU FAST, com os detalhes da Governança FASTP — clique em ⏷ no cabeçalho para filtrar</p>
@@ -1288,7 +1288,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
       </div>
     </section>
 
-    <section id="page-bruta" class="page">
+    <section id="page-bruta" class="pf-pg">
       <div class="page-head">
         <h2>Base bruta</h2>
         <p>Como vieram do Excel, sem tratamento (inclui centro 1350 e as linhas repetidas da gov). BU com todas as colunas; Governança com as 5 colunas que o painel usa (RC+linha, Liberado E&amp;P, Status, ORP, NÚMERO E-FORM).</p>
@@ -57432,12 +57432,16 @@ async function downloadStatusCarteiraPdf(){
 
 /* ---------- navegação e busca ---------- */
 function wireNav(){
-  document.querySelectorAll('.nav-btn').forEach(btn => {
+  // As abas do painel usam pf-pg/pf-on, não page/active: o roteador do
+  // GTO varre TODOS os .page do documento e tira o active deles — era
+  // isso que deixava a tela montada e invisível. E o contrário também:
+  // com .page aqui, trocar de aba aqui dentro apagaria a página do GTO.
+  document.querySelectorAll('#pf-root .nav-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('page-' + btn.dataset.page).classList.add('active');
+      document.querySelectorAll('#pf-root .nav-btn').forEach(b => b.classList.remove('pf-on'));
+      document.querySelectorAll('#pf-root .pf-pg').forEach(p => p.classList.remove('pf-on'));
+      btn.classList.add('pf-on');
+      document.getElementById('page-' + btn.dataset.page).classList.add('pf-on');
       closeAllFilterPanels();
     });
   });
@@ -57854,7 +57858,7 @@ function wireUpload(){
   document.getElementById('btnToggleUpload').addEventListener('click', () => {
     const p = document.getElementById('uploadPanel');
     p.open = true;
-    document.querySelector('.nav-btn[data-page="carteira"]').click();
+    document.querySelector('#pf-root .nav-btn[data-page="carteira"]').click();
     p.scrollIntoView({ behavior:'smooth' });
   });
   const fileP1 = document.getElementById('fileP1');
@@ -57925,6 +57929,37 @@ function init(){
   refreshTablePages();
 }
 window.__pfInit = init;
+// ── porta de entrada e saída dos dados, para o Firebase ───────────
+// Ler e aplicar passam pelas MESMAS variáveis que o upload mexe, e
+// aplicar termina chamando exatamente o que o upload chama. Assim não
+// existe um caminho "do banco" que calcule diferente do caminho "do
+// arquivo".
+window.__pfDados = {
+  ler(){
+    var B = window.BRUTA_API || {};
+    return {
+      dataRef: dataRef,
+      p1: P1RAW, bu: BURAW, ep: EPRAW,
+      brutaBu:  B.BU  ? B.BU.get()  : null,
+      brutaGov: B.GOV ? B.GOV.get() : null,
+      subBu:  B.BU  ? B.BU.sub()  : '',
+      subGov: B.GOV ? B.GOV.sub() : ''
+    };
+  },
+  aplicar(d){
+    if (!d) return;
+    if (d.p1) P1RAW = d.p1;
+    if (d.bu) BURAW = d.bu;
+    if (d.ep) EPRAW = d.ep;
+    if (d.dataRef) dataRef = d.dataRef;
+    var B = window.BRUTA_API || {};
+    if (d.brutaBu  && B.BU)  B.BU.set(d.brutaBu,  d.subBu  || '');
+    if (d.brutaGov && B.GOV) B.GOV.set(d.brutaGov, d.subGov || '');
+    rebuildData();
+    renderAll(); refreshTablePages(); updateMeta();
+  },
+  temDados(){ return (BURAW && BURAW.length > 0); }
+};
 
 
 })();
@@ -58033,7 +58068,10 @@ let BRUTA_GOV = {cols:[],rows:[]};
       st.q = ''; st.filtros = {}; st.pag = 0; $('Busca').value = '';
       if (subtitulo && $('Sub')) $('Sub').textContent = subtitulo;
       montarCab(); aplicar();
-    } };
+    },
+    // para a gravação no Firebase: o que está carregado agora
+    get(){ return base; },
+    sub(){ return ($('Sub') && $('Sub').textContent) || ''; } };
   }
   function iniciar(){
     window.BRUTA_API = { BU: montar('BU', BRUTA_BU, 'base_bruta_BU'), GOV: montar('GOV', BRUTA_GOV, 'base_bruta_GOV') };
@@ -58044,10 +58082,103 @@ let BRUTA_GOV = {cols:[],rows:[]};
 
 })();
 
+// ══════════════════ O PAINEL NO FIREBASE ══════════════════════════
+// O painel antigo não salvava: ao fechar o navegador, os números
+// voltavam aos do arquivo. Aqui quem sobe a planilha grava para todo
+// mundo — quem abrir depois vê os mesmos números sem subir nada.
+//
+// Cada pedaço vai como TEXTO repartido, não como lista de objetos: o
+// Firestore indexa cada item de lista e cada chave de mapa, e a BU tem
+// 1.770 linhas de 28 campos. Em texto são três ou quatro campos por
+// documento, e o limite de 1 MB vira uma questão de quantos documentos.
+var PF_COL   = 'painel';      // o prefixo da frente entra sozinho
+var PF_PARTE = 700000;        // caracteres por documento
+
+function pfPartes(txt){
+  var out = [];
+  for (var i = 0; i < txt.length; i += PF_PARTE) out.push(txt.slice(i, i + PF_PARTE));
+  return out;
+}
+
+async function pfGravar(){
+  var el = document.getElementById('uploadStatus');
+  try {
+    if (!window.__pfDados) return false;
+    var db = getDB();
+    if (!db) { if (el) el.textContent += '  ⚠ sem conexão — os números valem só nesta aba.'; return false; }
+    var d = window.__pfDados.ler();
+    var col = db.collection(PF_COL);
+    var blocos = {
+      p1:       d.p1  || [],
+      bu:       d.bu  || [],
+      ep:       d.ep  || [],
+      brutaBu:  d.brutaBu  || { cols:[], rows:[] },
+      brutaGov: d.brutaGov || { cols:[], rows:[] }
+    };
+    var partes = {}, escritas = [];
+    Object.keys(blocos).forEach(function(k){
+      var ps = pfPartes(JSON.stringify(blocos[k]));
+      partes[k] = ps.length;
+      ps.forEach(function(t, i){ escritas.push(col.doc(k + '_' + i).set({ t: t })); });
+    });
+    await Promise.all(escritas);
+    await col.doc('meta').set({
+      v: 1, partes: partes, dataRef: d.dataRef || '',
+      subBu: d.subBu || '', subGov: d.subGov || '',
+      linhas: (d.bu || []).length,
+      atualizadoEm: new Date().toISOString(),
+      atualizadoPor: (typeof cpQuem === 'function') ? cpQuem() : ''
+    });
+    if (el) el.textContent += '  ✓ gravado — quem abrir a tela vê estes números.';
+    return true;
+  } catch (e) {
+    console.warn('pfGravar:', e);
+    if (el) el.textContent += '  ⚠ não consegui gravar (' + e.message + ') — vale só nesta aba.';
+    return false;
+  }
+}
+
+async function pfCarregar(){
+  try {
+    var db = getDB(); if (!db) return false;
+    var col = db.collection(PF_COL);
+    var meta = await col.doc('meta').get();
+    if (!meta || !meta.exists) return false;
+    var m = meta.data() || {};
+    var nomes = Object.keys(m.partes || {});
+    if (!nomes.length) return false;
+    var leituras = [];
+    nomes.forEach(function(k){
+      for (var i = 0; i < m.partes[k]; i++) leituras.push({ k: k, i: i, p: col.doc(k + '_' + i).get() });
+    });
+    var docs = await Promise.all(leituras.map(function(x){ return x.p; }));
+    var txt = {};
+    leituras.forEach(function(x, n){
+      var dd = docs[n];
+      txt[x.k] = (txt[x.k] || '') + ((dd && dd.exists && dd.data().t) || '');
+    });
+    var val = function(k, vazio){
+      try { return txt[k] ? JSON.parse(txt[k]) : vazio; } catch (e) { return vazio; }
+    };
+    window.__pfDados.aplicar({
+      dataRef: m.dataRef || '', p1: val('p1', []), bu: val('bu', []), ep: val('ep', []),
+      brutaBu: val('brutaBu', null), brutaGov: val('brutaGov', null),
+      subBu: m.subBu || '', subGov: m.subGov || ''
+    });
+    var el = document.getElementById('uploadStatus');
+    if (el && m.atualizadoEm) {
+      el.textContent = 'Números de ' + cpDataBR(String(m.atualizadoEm).slice(0, 10))
+        + (m.atualizadoPor ? ', subidos por ' + m.atualizadoPor : '')
+        + ' — ' + cpNum(m.linhas || 0) + ' linhas da BU.';
+    }
+    return true;
+  } catch (e) { console.warn('pfCarregar:', e); return false; }
+}
+
 // Abre a tela. O painel só se monta uma vez; nas próximas visitas ele
-// já está lá, com os dados que o upload trouxe.
+// já está lá, com os dados que o upload trouxe ou que vieram do banco.
 var _pfPronto = false;
-function pfAbrir(){
+async function pfAbrir(){
   if (_pfPronto) return;
   try {
     if (typeof window.__pfBrutaInit === 'function') window.__pfBrutaInit();
@@ -58057,7 +58188,43 @@ function pfAbrir(){
     console.error('Painel FAST:', e);
     var el = document.getElementById('uploadStatus');
     if (el) el.textContent = 'Erro ao montar o painel: ' + e.message;
+    return;
   }
+  // os números que já estão no banco, antes de qualquer upload
+  try {
+    var el2 = document.getElementById('uploadStatus');
+    if (el2) el2.textContent = '⏳ Buscando os números gravados...';
+    var veio = await pfCarregar();
+    if (!veio && el2) el2.textContent = 'Nenhuma planilha subida ainda — suba as três aqui em cima.';
+  } catch (e) { console.warn('pfAbrir/carregar:', e); }
+  // a partir daqui, todo upload grava para todo mundo
+  pfLigarGravacao();
+}
+
+// Quando gravar: não dá para gravar logo depois do clique, porque a
+// leitura de uma planilha de 1 MB leva segundos e os dados ainda não
+// chegaram. O sinal confiável é o próprio painel escrevendo "atualizada"
+// na linha de status — é a última coisa que ele faz em cada upload.
+var _pfGravando = false;
+function pfLigarGravacao(){
+  var alvo = document.getElementById('uploadStatus');
+  if (!alvo || alvo.__pfObs) return;
+  alvo.__pfObs = true;
+  var pendente = null;
+  var obs = new MutationObserver(function(){
+    if (_pfGravando) return;                       // o aviso é meu, não do painel
+    var t = alvo.textContent || '';
+    if (!/atualizad[ao]s?\b/i.test(t)) return;      // erro, "lendo...", ou já gravado
+    if (/gravado|não consegui gravar/.test(t)) return;
+    clearTimeout(pendente);
+    pendente = setTimeout(function(){
+      _pfGravando = true;
+      Promise.resolve(pfGravar()).then(function(){
+        setTimeout(function(){ _pfGravando = false; }, 100);
+      });
+    }, 400);
+  });
+  obs.observe(alvo, { childList:true, characterData:true, subtree:true });
 }
 
 </script>
