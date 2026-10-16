@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/10 21:00';
+var GTO_BUILD = '16/10 08:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -16140,6 +16140,9 @@ function arjDados(ini, fim){
 
   return {
     forn:forn, sup:sup, q:q, fora:r.fora.length,
+    // a conta do Rodrigo: apontados, os que ainda faltam tratar e os
+    // que saíram da medição porque o comprador já resolveu
+    conta: r.conta || { apontados:0, casados:0, fora:0 },
     total: forn.length + sup.length,
     // A evolução e o movimento saem do REGISTRO DE ITENS, não de
     // retratos diários: assim um dia sem ninguém abrir a tela continua
@@ -16227,6 +16230,17 @@ function _arjPctSub(m){
   return _arjN(m.saiu) + ' concluídos de ' + _arjN(m.base) + ' · ' + per;
 }
 
+// O que o card do Rodrigo conta. Os 43 que não casam com a medição não
+// são itens perdidos: são itens que o comprador JÁ RESOLVEU — eles
+// saíram da medição justamente por isso. O card mostra o resolvido e a
+// frase abre a conta inteira, para ninguém ler 43 como pendência.
+function _arjSubRodrigo(d){
+  var c = d.conta || {};
+  if (!c.apontados) return 'sem a planilha do Rodrigo carregada';
+  return _arjN(c.apontados) + ' apontados · ' + _arjN(c.casados) + ' falta tratamento · '
+       + _arjN(d.fora) + ' resolvidos';
+}
+
 function arjCard(rot, val, sub, cor){
   return '<div class="mcard" style="background:#fff !important;border:1.5px solid '
     +   cor + ' !important">'
@@ -16266,8 +16280,7 @@ function arjSlideHTML(op){
       // "% resolvidos" seria sempre um traço ocupando um quarto da linha.
       +   (RJ_EVOLUCAO
            ? arjCard('% resolvidos', _arjPctTexto(d.mov), _arjPctSub(d.mov), corP)
-           : arjCard('Fora do indicador', _arjN(d.fora),
-               'apontados pelo Rodrigo sem par na medição', corP))
+           : arjCard('Resolvidos', _arjN(d.fora), _arjSubRodrigo(d), corP))
       + '</div></div>';
 
     // Com o histórico desligado não há linha do tempo para desenhar: o
@@ -16560,12 +16573,12 @@ function arjDesenharResumo(){
     +   '<div style="flex:1;min-width:140px;background:var(--azc);border:1px solid var(--azm);'
     +     'border-radius:10px;padding:.7rem .9rem;text-align:center">'
     +     '<div style="font-size:9px;font-weight:700;color:var(--tx2)">'
-    +       (RJ_EVOLUCAO ? '% RESOLVIDOS' : 'FORA DO INDICADOR') + '</div>'
+    +       (RJ_EVOLUCAO ? '% RESOLVIDOS' : 'RESOLVIDOS') + '</div>'
     +     '<div style="font-size:24px;font-weight:800;color:var(--azm)">'
     +       (RJ_EVOLUCAO ? _arjPctTexto(d.mov) : cpNum(d.fora)) + '</div>'
     +     '<div style="font-size:10px;color:var(--tx2)">'
     +       (RJ_EVOLUCAO ? (d.mov ? _arjPctSub(d.mov) : 'preciso de 2 dias')
-                         : 'apontados pelo Rodrigo sem par na medição') + '</div></div>'
+                         : _arjSubRodrigo(d)) + '</div></div>'
     + '</div>';
 
   if (RJ_EVOLUCAO && d.mov) {
@@ -17592,10 +17605,10 @@ function rjSupervisorHTML(){
         })()
     +   '<div style="flex:1;min-width:150px;background:' + (r.fora.length ? 'var(--amc)' : 'var(--vdc)')
     +     ';border:1px solid ' + (r.fora.length ? 'var(--am)' : 'var(--vd)') + ';border-radius:10px;padding:.7rem .9rem">'
-    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2);letter-spacing:.4px">FORA DO INDICADOR</div>'
+    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2);letter-spacing:.4px">RESOLVIDOS</div>'
     +     '<div style="font-size:24px;font-weight:800;color:' + (r.fora.length ? 'var(--am)' : 'var(--vd)')
     +       ';line-height:1.1">' + cpNum(r.fora.length) + '</div>'
-    +     '<div style="font-size:10px;color:var(--tx2)">apontados pelo Rodrigo e sem par na medição</div></div>'
+    +     '<div style="font-size:10px;color:var(--tx2)">saíram da medição — o comprador já tratou</div></div>'
     + '</div>';
 
   // ── a conta, em voz alta ──────────────────────────────────────
@@ -17611,9 +17624,10 @@ function rjSupervisorHTML(){
       +   cpNum(r.conta.linhasCockpit) + ' linha(s) no último cockpit → '
       +   cpNum(r.conta.pedidosCockpit) + ' pedido(s) distinto(s) → '
       +   '<strong>' + cpNum(r.conta.apontados) + '</strong> item(ns) apontado(s) (pedido + item) · '
-      +   '<strong style="color:var(--vd)">' + cpNum(r.conta.casados) + ' casaram</strong> com a medição · '
-      +   '<strong style="color:' + (r.conta.fora ? 'var(--am)' : 'var(--vd)') + '">'
-      +   cpNum(r.conta.fora) + ' não</strong>.'
+      +   '<strong style="color:var(--am)">' + cpNum(r.conta.casados) + '</strong> ainda na medição '
+      +   '(falta tratamento) · '
+      +   '<strong style="color:var(--vd)">' + cpNum(r.conta.fora) + ' já resolvidos</strong> '
+      +   '(saíram dela).'
       +   (r.conta.linhasCockpit !== r.conta.apontados
          ? '<div style="font-size:10.5px">Linha não é item: o mesmo pedido aparece mais de uma vez '
            + 'no cockpit, e é a aba <strong>Dados</strong> que diz quais itens dele foram rejeitados. '
@@ -17760,17 +17774,21 @@ function rjSupervisorHTML(){
     h += '</tbody></table></div>';
   }
 
-  // ── a cobrança ao contrário ───────────────────────────────────
+  // ── os que saíram da medição ──────────────────────────────────
+  // Antes isto era lido como falha ("não estão na medição"). O André
+  // conferiu item a item: eles saíram porque o comprador tratou. A
+  // lista continua, com o motivo de cada um, mas o tom é de resolvido.
   if (r.fora.length) {
-    h += '<div style="margin-top:1rem;border:1.5px solid var(--am);border-radius:10px;'
-      +   'background:var(--amc);padding:.7rem .85rem">'
+    h += '<div style="margin-top:1rem;border:1.5px solid var(--vd);border-radius:10px;'
+      +   'background:var(--vdc);padding:.7rem .85rem">'
       +   '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">'
-      +     '<strong style="font-size:12px">⚠ ' + cpNum(r.fora.length)
-      +       ' item(ns) apontado(s) pelo Rodrigo que não estão na medição</strong>'
+      +     '<strong style="font-size:12px">✓ ' + cpNum(r.fora.length)
+      +       ' item(ns) já resolvidos — apontados pelo Rodrigo e fora da medição</strong>'
       +     '<button class="btn btn-s" style="font-size:11px;margin-left:auto"'
       +       ' onclick="rjsBaixarFora()">⬇ Baixar a lista</button></div>'
       +   '<div style="font-size:11px;color:var(--tx2);margin-bottom:.5rem">'
-      +     'Cada um destes é um rejeite que ninguém vai tratar pelo indicador enquanto ficar fora.'
+      +     'Saíram da medição porque o rejeite foi tratado. O motivo de cada um está abaixo — '
+      +     'é por ele que se confere se foi tratamento mesmo ou dado faltando.'
       +     (r.temRetrato ? '' : ' <span style="color:var(--am)">Suba a medição de novo para eu '
                                  + 'conseguir dizer o motivo de cada um.</span>')
       +   '</div>'
