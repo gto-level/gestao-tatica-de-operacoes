@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/10 19:15';
+var GTO_BUILD = '16/10 20:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1138,6 +1138,42 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
   #pf-root .kpi-grid.status3{ grid-template-columns:repeat(3,minmax(0,220px)); }
   @media (max-width:640px){#pf-root .kpi-grid.status3{grid-template-columns:1fr 1fr;} }
 
+
+/* ── Entradas nesta semana: lápis só no hover, e o formulário ── */
+#pf-root .pf-kpi-edit-wrap{position:relative;}
+#pf-root .pf-kpi-edit{
+  position:absolute;top:8px;right:10px;z-index:2;
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:11px;font-weight:600;font-family:inherit;color:#fff;
+  background:#1A6FD4;border:0;border-radius:6px;padding:4px 10px;cursor:pointer;
+  opacity:0;pointer-events:none;transition:opacity .12s;
+  box-shadow:0 1px 3px rgba(14,43,40,.2);
+}
+#pf-root .pf-kpi-edit-wrap:hover .pf-kpi-edit,
+#pf-root .pf-kpi-edit:focus-visible{opacity:1;pointer-events:auto;}
+#pf-root .pf-kpi-edit:hover{background:#155CB0;}
+
+#pf-root .pf-ent-form{display:flex;flex-direction:column;gap:8px;align-items:stretch;text-align:left;}
+#pf-root .pf-ent-linha{display:flex;gap:10px;}
+#pf-root .pf-ent-form label{
+  display:flex;flex-direction:column;gap:2px;flex:1;
+  font-size:10.5px;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0;
+}
+#pf-root .pf-ent-form input{
+  font-family:inherit;font-size:13px;color:var(--ink);
+  border:1px solid var(--border);border-radius:6px;padding:5px 8px;background:#fff;width:100%;
+}
+#pf-root .pf-ent-form input:focus{outline:2px solid var(--c-secundaria);outline-offset:-1px;}
+#pf-root .pf-ent-botoes{display:flex;gap:8px;justify-content:flex-end;margin-top:2px;}
+#pf-root .pf-ent-botoes button{
+  font-family:inherit;font-size:12px;font-weight:600;border-radius:6px;padding:5px 14px;cursor:pointer;
+}
+#pf-root .pf-ent-cancel{background:#fff;border:1px solid var(--border);color:var(--muted);}
+#pf-root .pf-ent-cancel:hover{background:var(--bg);}
+#pf-root .pf-ent-salvar{background:#1A6FD4;border:1px solid #1A6FD4;color:#fff;}
+#pf-root .pf-ent-salvar:hover{background:#155CB0;}
+#pf-root .pf-ent-aviso{font-size:10px;color:var(--muted);}
+#pf-root .pf-ent-aviso.ruim{color:var(--warn);font-weight:600;}
 #pf-root .pf-upload-topo{background:var(--card);border:1px solid var(--border);border-radius:14px;
   padding:16px 18px;margin:0 0 18px;box-shadow:var(--shadow-sm);}
 #pf-root .pf-upload-tit{font-size:14px;font-weight:700;color:var(--ink);}
@@ -56958,6 +56994,16 @@ function kpiCardHtml(it){
   const cls = [it.darkGreen&&'dark-green', it.lightGreen&&'light-green', it.lightBlue&&'light-blue', it.purple&&'purple', it.small&&'small'].filter(Boolean).join(' ');
   const expandBtn = it.expandKey ? `<div class="kpi-actions"><button class="kpi-expand-btn" type="button" data-expand="${it.expandKey}" title="Ver detalhes">+</button></div>` : '';
   const infoBtn = it.infoKey ? `<button class="kpi-info-btn" type="button" data-info="${it.infoKey}" title="Ver regra">i</button>` : '';
+  // número digitado à mão: ganha um lápis que só aparece no hover
+  if (it.editavel) {
+    return `<div class="kpi ${cls} pf-kpi-edit-wrap">
+      ${infoBtn}
+      <button class="pf-kpi-edit" type="button" onclick="pfEntradasEditar()">✏ Editar</button>
+      <div class="lbl">${escapeHtml(it.l)}</div>
+      <div class="val">${it.v}</div>
+      ${it.cap ? `<div class="cap">${escapeHtml(it.cap)}</div>` : ''}
+    </div>`;
+  }
   return `<div class="kpi ${cls}">
       ${expandBtn}
       ${infoBtn}
@@ -56990,8 +57036,13 @@ function renderKpis(res){
   const umaCasa = v => (v === null ? '—' : v.toFixed(1).replace('.', ','));
   const extras = [
     // 24/09: valor fixo informado pelo usuário (sem cálculo) e sem o "+" de detalhes
-    { v: '40', l:'Entradas nesta semana', cap: '14/10/2026 · só A0R',
-      small:true, lightBlue:true, infoKey:'entradas' },
+    // o número é digitado, não calculado — vem do que alguém gravou
+    (function(){
+      var e = (typeof window.__pfEntradas === 'function') ? window.__pfEntradas() : null;
+      return { v: e ? fmtInt(e.qtd) : '—', l:'Entradas nesta semana',
+               cap: e ? e.cap : 'clique em Editar para informar',
+               small:true, lightBlue:true, infoKey:'entradas', editavel:true };
+    })(),
     /* 24/09: Backlog, Idade da carteira e Índice de atendimento retirados a pedido. */
   ];
   document.getElementById('kpiGridExtra').innerHTML = extras.map(kpiCardHtml).join('');
@@ -57958,7 +58009,8 @@ window.__pfDados = {
     rebuildData();
     renderAll(); refreshTablePages(); updateMeta();
   },
-  temDados(){ return (BURAW && BURAW.length > 0); }
+  temDados(){ return (BURAW && BURAW.length > 0); },
+  redesenhar(){ renderAll(); }
 };
 
 
@@ -58194,11 +58246,114 @@ async function pfAbrir(){
   try {
     var el2 = document.getElementById('uploadStatus');
     if (el2) el2.textContent = '⏳ Buscando os números gravados...';
+    await pfEntCarregar();
     var veio = await pfCarregar();
-    if (!veio && el2) el2.textContent = 'Nenhuma planilha subida ainda — suba as três aqui em cima.';
+    if (!veio) {
+      if (el2) el2.textContent = 'Nenhuma planilha subida ainda — suba as três aqui em cima.';
+      // sem planilha, ainda assim o card das entradas tem de aparecer
+      if (window.__pfDados) window.__pfDados.redesenhar();
+    }
   } catch (e) { console.warn('pfAbrir/carregar:', e); }
   // a partir daqui, todo upload grava para todo mundo
   pfLigarGravacao();
+}
+
+// ══════════════ ENTRADAS NESTA SEMANA — número digitado ═══════════
+// É o único número do painel que não sai de planilha: alguém conta e
+// informa. No arquivo antigo ele era uma linha de código, e trocar o
+// valor exigia pedir a alguém que mexesse no HTML. Aqui é um campo, e
+// o que for digitado vale para todo mundo que abrir a tela.
+var _pfEnt = null;          // { qtd, data, obs, atualizadoEm, atualizadoPor }
+
+function pfEntCap(e){
+  if (!e) return '';
+  var p = [];
+  if (e.data) p.push(cpDataBR(String(e.data).slice(0, 10)));
+  if (e.obs)  p.push(e.obs);
+  return p.join(' · ');
+}
+// o painel chama isto ao desenhar o card
+window.__pfEntradas = function(){
+  if (!_pfEnt) return null;
+  return { qtd: _pfEnt.qtd, cap: pfEntCap(_pfEnt) };
+};
+
+async function pfEntCarregar(){
+  try {
+    var db = getDB(); if (!db) return;
+    var d = await db.collection(PF_COL).doc('entradas').get();
+    if (d && d.exists) {
+      var v = d.data() || {};
+      _pfEnt = { qtd: +v.qtd || 0, data: v.data || '', obs: v.obs || '',
+                 atualizadoEm: v.atualizadoEm || '', atualizadoPor: v.atualizadoPor || '' };
+    }
+  } catch (e) { console.warn('pfEntCarregar:', e); }
+}
+
+function pfEntradasEditar(){
+  var caixa = document.getElementById('kpiGridExtra');
+  if (!caixa) return;
+  var e = _pfEnt || { qtd: '', data: cpHojeISO(), obs: '' };
+  caixa.innerHTML =
+      '<div class="kpi small light-blue pf-ent-form">'
+    +   '<div class="lbl">Entradas nesta semana</div>'
+    +   '<div class="pf-ent-linha">'
+    +     '<label>Quantidade'
+    +       '<input type="number" id="pf-ent-qtd" min="0" step="1" value="'
+    +         cpEsc(String(e.qtd === '' ? '' : e.qtd)) + '"></label>'
+    +     '<label>Data'
+    +       '<input type="date" id="pf-ent-data" value="' + cpEsc(String(e.data || '')) + '"></label>'
+    +   '</div>'
+    +   '<label class="pf-ent-obs">Observação'
+    +     '<input type="text" id="pf-ent-obs" placeholder="ex.: só A0R" value="'
+    +       cpEsc(String(e.obs || '')) + '"></label>'
+    +   '<div class="pf-ent-botoes">'
+    +     '<button type="button" class="pf-ent-cancel" onclick="pfEntradasCancelar()">Cancelar</button>'
+    +     '<button type="button" class="pf-ent-salvar" onclick="pfEntradasSalvar()">Salvar</button>'
+    +   '</div>'
+    +   '<div class="pf-ent-aviso" id="pf-ent-aviso">'
+    +     (_pfEnt && _pfEnt.atualizadoEm
+        ? 'Último: ' + cpDataBR(String(_pfEnt.atualizadoEm).slice(0,10))
+          + (_pfEnt.atualizadoPor ? ' por ' + cpEsc(_pfEnt.atualizadoPor) : '')
+        : 'Vale para todo mundo que abrir a tela.')
+    +   '</div>'
+    + '</div>';
+  var q = document.getElementById('pf-ent-qtd');
+  if (q) { q.focus(); q.select(); }
+}
+
+function pfEntradasCancelar(){
+  if (window.__pfDados) window.__pfDados.redesenhar();
+}
+
+async function pfEntradasSalvar(){
+  var q = document.getElementById('pf-ent-qtd');
+  var d = document.getElementById('pf-ent-data');
+  var o = document.getElementById('pf-ent-obs');
+  var av = document.getElementById('pf-ent-aviso');
+  var qtd = parseInt((q && q.value) || '', 10);
+  if (!isFinite(qtd) || qtd < 0) {
+    if (av) { av.textContent = 'Informe a quantidade — um número de 0 para cima.'; av.className = 'pf-ent-aviso ruim'; }
+    if (q) q.focus();
+    return;
+  }
+  var novo = { qtd: qtd, data: (d && d.value) || '', obs: ((o && o.value) || '').trim(),
+               atualizadoEm: new Date().toISOString(),
+               atualizadoPor: (typeof cpQuem === 'function') ? cpQuem() : '' };
+  var antes = _pfEnt;
+  _pfEnt = novo;                                   // a tela não espera o banco
+  if (window.__pfDados) window.__pfDados.redesenhar();
+  try {
+    var db = getDB();
+    if (!db) throw new Error('sem conexão com o banco');
+    await db.collection(PF_COL).doc('entradas').set(novo);
+  } catch (e) {
+    console.warn('pfEntradasSalvar:', e);
+    _pfEnt = antes;                                // não ficou salvo: desfaz
+    if (window.__pfDados) window.__pfDados.redesenhar();
+    alert('Não consegui gravar o número: ' + e.message
+        + '\n\nEle não foi salvo — tente de novo.');
+  }
 }
 
 // Quando gravar: não dá para gravar logo depois do clique, porque a
