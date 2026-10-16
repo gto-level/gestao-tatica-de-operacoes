@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/10 23:25';
+var GTO_BUILD = '16/10 23:55';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -693,7 +693,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
        Automático e a Consulta Q18). As telas são as mesmas, só deixaram de
        ficar no menu que todo mundo enxerga. -->
   <div class="sb-mod" id="sb-mod-estrategico">◈ ESTRATÉGICO</div>
-  <div class="sb-it" id="sb-reuniao-it" onclick="go('reuniao',this)" style="display:none">🗣️ Reunião</div>
+  <div class="sb-it" id="sb-reuniao-it" onclick="go('reuniao',this)" style="display:none">📡 Radar FAST</div>
   <div class="sb-mod">◈ EXECUÇÃO</div>
   <div class="sb-it active" onclick="go('direcionamento',this)">📣 Direcionamento da Equipe</div>
   <div class="sb-it" onclick="go('governanca',this)">⚖️ Governança</div>
@@ -44059,7 +44059,10 @@ function q18Consultar(valor){
 // hiddenFast  = some do menu só no FAST; no ADLV continua no menu.
 const PERMS_SIDEBAR = {
   'vg-mercado':     { icon:'🌐', label:'Indicadores de Mercado',  mod:'ESTRATÉGICO', hidden:true },
-  'reuniao':        { icon:'🗣️', label:'Reunião',                   mod:'ESTRATÉGICO' },
+  // Renomeado para Radar FAST em 16/10. A chave continua 'reuniao': é
+  // ela que está gravada na permissão de cada usuário, no id da página
+  // (p-reuniao) e no localStorage — trocar a chave perderia os três.
+  'reuniao':        { icon:'📡', label:'Radar FAST',               mod:'ESTRATÉGICO' },
   'radar':          { icon:'📡', label:'Radar Estratégico',        mod:'ESTRATÉGICO', hidden:true },
   'plano-acao':     { icon:'🎯', label:'Plano de Ação',            mod:'ESTRATÉGICO', hidden:true },
   'direcionamento': { icon:'📣', label:'Direcionamento da Equipe', mod:'EXECUÇÃO' },
@@ -55307,7 +55310,7 @@ function reuniaoExportar(){
     if (linhasPedidos.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(linhasPedidos), 'Pedidos');
 
     var d = new Date();
-    var nome = 'Reuniao_PATEC_Pedidos_'
+    var nome = 'Radar_FAST_PATEC_Pedidos_'
       + d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2) + '.xlsx';
     XLSX.writeFile(wb, nome);
 
