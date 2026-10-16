@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/10 23:55';
+var GTO_BUILD = '17/10 00:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -692,8 +692,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
        foram para ADM › Dados de Consulta (e, no FAST, também o Analista
        Automático e a Consulta Q18). As telas são as mesmas, só deixaram de
        ficar no menu que todo mundo enxerga. -->
-  <div class="sb-mod" id="sb-mod-estrategico">◈ ESTRATÉGICO</div>
-  <div class="sb-it" id="sb-reuniao-it" onclick="go('reuniao',this)" style="display:none">📡 Radar FAST</div>
+  <!-- O Radar FAST saiu daqui em 16/10: é tópico da frente FAST · Reunião,
+       montado por authMontarSidebar a partir de PERMS_SIDEBAR. -->
+  <div class="sb-mod" id="sb-mod-estrategico" style="display:none">◈ ESTRATÉGICO</div>
   <div class="sb-mod">◈ EXECUÇÃO</div>
   <div class="sb-it active" onclick="go('direcionamento',this)">📣 Direcionamento da Equipe</div>
   <div class="sb-it" onclick="go('governanca',this)">⚖️ Governança</div>
@@ -44059,10 +44060,6 @@ function q18Consultar(valor){
 // hiddenFast  = some do menu só no FAST; no ADLV continua no menu.
 const PERMS_SIDEBAR = {
   'vg-mercado':     { icon:'🌐', label:'Indicadores de Mercado',  mod:'ESTRATÉGICO', hidden:true },
-  // Renomeado para Radar FAST em 16/10. A chave continua 'reuniao': é
-  // ela que está gravada na permissão de cada usuário, no id da página
-  // (p-reuniao) e no localStorage — trocar a chave perderia os três.
-  'reuniao':        { icon:'📡', label:'Radar FAST',               mod:'ESTRATÉGICO' },
   'radar':          { icon:'📡', label:'Radar Estratégico',        mod:'ESTRATÉGICO', hidden:true },
   'plano-acao':     { icon:'🎯', label:'Plano de Ação',            mod:'ESTRATÉGICO', hidden:true },
   'direcionamento': { icon:'📣', label:'Direcionamento da Equipe', mod:'EXECUÇÃO' },
@@ -44080,6 +44077,12 @@ const PERMS_SIDEBAR = {
   // As três abas do Painel FAST viraram tópicos do menu — elas saíram
   // da coluna que ficava dentro da página.
   'reuniao-fast':       { icon:'📊', label:'Status Carteira',   mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
+  // Renomeado para Radar FAST e trazido para cá em 16/10. A chave continua
+  // 'reuniao': é ela que está gravada na permissão de cada usuário, no id da
+  // página (p-reuniao) e no localStorage — trocar a chave perderia os três.
+  // A ordem das linhas aqui é a ordem do menu: esta fica logo abaixo do
+  // Status Carteira porque foi onde ele pediu.
+  'reuniao':            { icon:'📡', label:'Radar FAST',        mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
   'reuniao-fast-itens': { icon:'📄', label:'Itens Geral FAST',  mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
   'reuniao-fast-bruta': { icon:'🗃️', label:'Base bruta',        mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
   'reuniao-fast-upload':{ icon:'⬆️', label:'Upload',            mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
@@ -45021,10 +45024,9 @@ function authMontarSidebar(emailParam){
   const ordemMods = ['ESTRATÉGICO','EXECUÇÃO'];
   // Plano de Ação: liberado para ADLV e FAST (cada módulo usa sua própria base)
   const PAGINAS_ADLV_ONLY = [];
-  // Reunião é exclusiva do FAST. Como é só um espelho da Governança ›
-  // Cobrança por Status, quem já tem acesso à Governança enxerga o tópico
-  // (perfis antigos não têm 'reuniao' na lista de permissões salva).
-  const PAGINAS_FAST_ONLY = ['reuniao'];
+  // O Radar FAST (chave 'reuniao') saiu daqui em 16/10: foi para a frente
+  // FAST · Reunião, e quem manda nele agora é o soFrente.
+  const PAGINAS_FAST_ONLY = [];
   // Frente que só tem PCP: o menu mostra o PCP e mais nada. As telas do
   // PATEC leriam e gravariam na base da frente, que é outro projeto do
   // Firebase — misturar base é justamente o que não pode acontecer.
@@ -45047,7 +45049,6 @@ function authMontarSidebar(emailParam){
     // no FAST estas telas vivem em ADM › Dados de Consulta
     if(cfg.hiddenFast && _moduloAtivo === 'fast') return;
     if(podeVerTudo || perms.includes(key) || (_soReu && cfg.soFrente === _moduloAtivo)
-       || (key === 'reuniao' && perms.includes('governanca'))
        || (key === 'direcionamento' && (perms.includes('pr-estrategico') || perms.includes('governanca')))){
       if(!mods[cfg.mod]) mods[cfg.mod] = [];
       mods[cfg.mod].push({key, ...cfg});
@@ -52324,6 +52325,7 @@ function _pedLibTipo(r){
 }
 
 function _pedEhFast(){
+  if (typeof _radarEhDaqui === 'function') return _radarEhDaqui();
   return (typeof _moduloAtivo !== 'undefined') && _moduloAtivo === 'fast';
 }
 
@@ -52349,7 +52351,7 @@ function _pedSet(nome, html){
 function govPedidosRender(){
   if (!_pedEhFast()) return;
   if (!_pedAlvos('tabela').length) return;
-  var db = (typeof getDB === 'function') ? getDB() : null;
+  var db = (typeof _radarDB === 'function') ? _radarDB() : getDB();
   if (!db) {
     _pedSet('tabela', '<div style="padding:2.5rem;text-align:center;color:var(--tx2);font-size:13px">⚠ Firebase indisponível.</div>');
     return;
@@ -52975,6 +52977,8 @@ var _GNV_TIPOPROC = [
 ];
 
 function _gnvEhFast(){
+  // o Radar FAST mostra esta mesma base de dentro da frente Reunião
+  if (typeof _radarEhDaqui === 'function') return _radarEhDaqui();
   return (typeof _moduloAtivo !== 'undefined') && _moduloAtivo === 'fast';
 }
 
@@ -53378,7 +53382,8 @@ async function govNovaRender(){
   var wrap = document.getElementById('gnv-tabela');
   if (!wrap) return;
 
-  var db = (typeof getDB === 'function') ? getDB() : null;
+  if (typeof _radarAutenticar === 'function') await _radarAutenticar();
+  var db = (typeof _radarDB === 'function') ? _radarDB() : getDB();
   if (!db) {
     _gnvPor('gnv-tabela', '<div style="padding:2.5rem;text-align:center;color:var(--tx2);font-size:13px">⚠ Firebase indisponível.</div>');
     return;
@@ -53403,8 +53408,10 @@ async function govNovaRender(){
              String(a.itemRc || '').localeCompare(String(b.itemRc || ''));
     });
 
-    var migrados = await _gnvMigrarFilaPatec();
-    var ajuste   = await _gnvBackfillFilas();
+    // o Radar é só leitura: migração e correção ficam para a Governança
+    var soLeitura = (typeof _radarNaReuniao === 'function') && _radarNaReuniao();
+    var migrados = soLeitura ? 0    : await _gnvMigrarFilaPatec();
+    var ajuste   = soLeitura ? null : await _gnvBackfillFilas();
     var msg = [];
     if (migrados) msg.push(migrados + ' item(ns) tinham Patec em Andamento/Finalizado na Fila — movidos para Status do Patec');
     if (ajuste) Object.keys(ajuste).forEach(function(rotulo){
@@ -53421,10 +53428,11 @@ async function govNovaRender(){
     }
     _gnvDesenhar();
 
-    // histórico e foto do dia — não podem derrubar a tela se falharem
+    // histórico e foto do dia — não podem derrubar a tela se falharem.
+    // A foto é escrita; de dentro do Radar ela não é tirada.
     try {
       await _gnvCarregarHistorico();
-      await _gnvGravarFoto();
+      if (!soLeitura) await _gnvGravarFoto();
     } catch (e) { console.warn('evolução diária:', e); }
   } catch (err) {
     _gnvPor('gnv-tabela', '<div style="padding:2rem;color:var(--vm);font-size:13px">❌ ' + _cobEsc(err.message) + '</div>');
@@ -55184,8 +55192,52 @@ function _gnvAplicarModulo(){
   }
 }
 
-// ── Tópico Reunião: só espelha o que já está carregado ──
+// ── Radar FAST: só espelha o que já está carregado ──
+//
+// Em 16/10 o tópico saiu da frente FAST · PATEC e passou a morar na
+// frente FAST · Reunião, embaixo do Status Carteira. Isso cria a única
+// situação do arquivo em que uma tela lê a base de OUTRA frente: os
+// dados continuam sendo os do PATEC do FAST (projeto patec-fast), mas
+// quem está na tela entrou pela Reunião (projeto patec-gto-frentes).
+//
+// Por isso o Radar nunca usa getDB() — aquilo devolveria a base da
+// Reunião, que não tem nenhuma dessas coleções, e a tela apareceria
+// vazia sem dizer por quê. Ele usa _radarDB(), que aponta sempre para o
+// app nomeado do FAST. E não escreve nada: o Radar é só leitura, as
+// migrações e a foto do dia ficam para quem abre a Governança no FAST.
 var _reuAba = 'patec';
+
+function _radarNaReuniao(){
+  return (typeof _moduloAtivo !== 'undefined') && _moduloAtivo === 'fast_reuniao';
+}
+function _radarEhDaqui(){
+  return (typeof _moduloAtivo !== 'undefined')
+      && (_moduloAtivo === 'fast' || _radarNaReuniao());
+}
+function _radarDB(){
+  if (_radarNaReuniao()) {
+    try { if (typeof getDBModulo === 'function') return getDBModulo('fast'); }
+    catch (e) { console.warn('_radarDB:', e); }
+    return null;
+  }
+  try { return (typeof getDB === 'function') ? getDB() : null; } catch (e) { return null; }
+}
+// Cada projeto do Firebase tem a sua própria sessão. Quem entra direto na
+// Reunião pode nunca ter aberto o projeto do FAST nesta máquina: aqui a
+// sessão dele é restaurada (ou aberta com a senha que ficou em memória)
+// antes da primeira leitura. Sem isso a regra do Firestore devolveria
+// "permission-denied" e pareceria base vazia.
+var _radarAutOk = false;
+async function _radarAutenticar(){
+  if (!_radarNaReuniao() || _radarAutOk) return true;
+  try {
+    var r = (typeof _autenticarModulo === 'function')
+          ? await _autenticarModulo('fast') : { ok:true };
+    _radarAutOk = !!(r && r.ok);
+    if (!_radarAutOk) console.warn('Radar FAST sem sessão no FAST:', r && r.motivo);
+  } catch (e) { _radarAutOk = false; console.warn('_radarAutenticar:', e); }
+  return _radarAutOk;
+}
 
 function reuTab(aba, btn){
   _reuAba = (aba === 'pedidos') ? 'pedidos' : 'patec';
@@ -55214,7 +55266,7 @@ function _reuExpMsg(txt, cor){
 
 // lê a coleção direto do Firebase, para não depender da aba que está aberta
 function _reuLerColecao(nome, idResumo){
-  var db = (typeof getDB === 'function') ? getDB() : null;
+  var db = (typeof _radarDB === 'function') ? _radarDB() : getDB();
   if (!db) return Promise.resolve(null);
   return db.collection(nome).get().then(function(snap){
     var out = [];
@@ -55227,7 +55279,7 @@ function _reuLerColecao(nome, idResumo){
 }
 
 function reuniaoExportar(){
-  if (!_cobEhFast()) return;
+  if (!_radarEhDaqui()) return;
   if (typeof XLSX === 'undefined') {
     _reuExpMsg('❌ Biblioteca XLSX não carregada — atualize a página (F5).', 'var(--vm)');
     return;
@@ -55321,8 +55373,14 @@ function reuniaoExportar(){
   });
 }
 
-function reuniaoAbrir(){
-  if (!_cobEhFast()) return;
+async function reuniaoAbrir(){
+  if (!_radarEhDaqui()) return;
+  if (!(await _radarAutenticar())) {
+    _gnvPor('gnv-tabela', '<div style="padding:2.5rem;text-align:center;color:var(--tx2);font-size:13px">'
+      + '⚠ Não consegui abrir a base do FAST a partir daqui.<br>'
+      + 'Entre uma vez na frente FAST · PATEC e volte.</div>');
+    return;
+  }
   // não existe botão de atualizar aqui: entrar no tópico já busca a base
   // mais recente do Firebase. Se algo der errado, o que está em memória
   // continua na tela.
@@ -55350,13 +55408,10 @@ function _cobAplicarModulo(){
     return c && c.style.display !== 'none' && b && b.style.display === 'none';
   });
   if (abertaEscondida) govMainTab(abaPadrao, document.getElementById('gov-main-tab-' + abaPadrao));
-  // o tópico Reunião também é exclusivo do FAST
-  var itReu = document.getElementById('sb-reuniao-it');
-  if (itReu) itReu.style.display = fast ? '' : 'none';
-  // ESTRATÉGICO só tem a Reunião desde que as telas de consulta foram para
-  // o ADM — no ADLV o cabeçalho ficaria sozinho
+  // ESTRATÉGICO ficou sem nenhum tópico quando o Radar FAST foi para a
+  // frente Reunião — o cabeçalho sozinho não aparece em lugar nenhum
   var secEst = document.getElementById('sb-mod-estrategico');
-  if (secEst) secEst.style.display = fast ? '' : 'none';
+  if (secEst) secEst.style.display = 'none';
   // no FAST, Analista Automático e Consulta Q18 também ficam só no ADM
   ['sb-aa-it', 'sb-q18-it'].forEach(function(id){
     var it = document.getElementById(id);
