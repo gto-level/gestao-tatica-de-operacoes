@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/10 17:30';
+var GTO_BUILD = '16/10 18:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1138,17 +1138,21 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
   #pf-root .kpi-grid.status3{ grid-template-columns:repeat(3,minmax(0,220px)); }
   @media (max-width:640px){#pf-root .kpi-grid.status3{grid-template-columns:1fr 1fr;} }
 
+#pf-root .pf-upload-topo{background:var(--card);border:1px solid var(--border);border-radius:14px;
+  padding:16px 18px;margin:0 0 18px;box-shadow:var(--shadow-sm);}
+#pf-root .pf-upload-tit{font-size:14px;font-weight:700;color:var(--ink);}
+#pf-root .pf-upload-sub{font-size:11.5px;color:var(--muted);margin:2px 0 12px;}
+#pf-root .pf-upload-campos{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+#pf-root .pf-campo{display:flex;flex-direction:column;gap:3px;border:1px dashed var(--border);
+  border-radius:10px;padding:10px 12px;background:var(--bg);cursor:pointer;transition:border-color .15s;}
+#pf-root .pf-campo:hover{border-color:var(--c-secundaria);}
+#pf-root .pf-campo-nome{font-size:12px;font-weight:700;color:var(--c-principal);}
+#pf-root .pf-campo-aba{font-size:10.5px;color:var(--muted);margin-bottom:5px;}
+#pf-root .pf-campo input[type=file]{font-size:11px;color:var(--ink);max-width:100%;}
+@media (max-width:900px){ #pf-root .pf-upload-campos{grid-template-columns:1fr;} }
+
       </style>
       <div id="pf-root">
-';var Wm="</body></html>";function Hm(e,r){var t=e.match(/<table[\s\S]*?>[\s\S]*?<\/table>/gi);if(!t||t.length==0)throw new Error("Invalid HTML: could not find <table>");if(t.length==1)return La(Mm(t[0],r),r);var a=Nw();t.forEach(function(e,t){Dw(a,Mm(e,r),"Sheet"+(t+1))});return a}function zm(e,r,t){var a=[];return a.join("")+"<table"+(t&&t.id?' id="'+t.id+'"':"")+">"}function Vm(e,r){var t=r||{};var a=t.header!=null?t.header:Bm;var n=t.footer!=null?t.footer:Wm;var i=[a];var s=Ia(e["!ref"]);t.dense=Array.isArray(e);i.push(zm(e,s,t));for(var f=s.s.r;f<=s.e.r;++f)i.push(Um(e,s,f,t));i.push("</table>"+n);return i.join("")}function Gm(e,r,t){var a=t||{};if(g!=null)a.dense=g;var n=0,i=0;if(a.origin!=null){if(typeof a.origin=="number")n=a.origin;else{var s=typeof a.origin=="string"?Oa(a.origin):a.origin;n=s.r;i=s.c}}var f=r.getElementsByTagName("tr");
-var o=Math.min(a.sheetRows||1e7,f.length);var l={s:{r:0,c:0},e:{r:n,c:i}};if(e["!ref"]){var c=Ia(e["!ref"]);l.s.r=Math.min(l.s.r,c.s.r);l.s.c=Math.min(l.s.c,c.s.c);l.e.r=Math.max(l.e.r,c.e.r);l.e.c=Math.max(l.e.c,c.e.c);if(n==-1)l.e.r=n=c.e.r+1}var h=[],u=0;var d=e["!rows"]||(e["!rows"]=[]);var v=0,p=0,m=0,b=0,w=0,k=0;if(!e["!cols"])e["!cols"]=[];for(;v<f.length&&p<o;++v){var T=f[v];if($m(T)){if(a.display)continue;d[p]={hidden:true}}var A=T.children;for(m=b=0;m<A.length;++m){var E=A[m];if(a.display&&$m(E))continue;var C=E.hasAttribute("data-v")?E.getAttribute("data-v"):E.hasAttribute("v")?E.getAttribute("v"):ut(E.innerHTML);var y=E.getAttribute("data-z")||E.getAttribute("z");for(u=0;u<h.length;++u){var S=h[u];if(S.s.c==b+i&&S.s.r<p+n&&p+n<=S.e.r){b=S.e.c+1-i;u=-1}}k=+E.getAttribute("colspan")||1;if((w=+E.getAttribute("rowspan")||1)>1||k>1)h.push({s:{r:p+n,c:b+i},e:{r:p+n+(w||1)-1,c:b+i+(k||1)-1}});var _={t:"s",v:C};var x=E.getAttribute("data-t")||E.getAttribute("t")||"";if(C!=null){if(C.length==0)_.t=x||"z";else if(a.raw||C.trim().length==0||x=="s"){}else if(C==="TRUE")_={t:"b",v:true};else if(C==="FALSE")_={t:"b",v:false};else if(!isNaN(kr(C)))_={t:"n",v:kr(C)};else if(!isNaN(Ar(C).getDate())){_={t:"d",v:gr(C)};if(!a.cellDates)_={t:"n",v:fr(_.v)};_.z=a.dateNF||X[14]}}if(_.z===undefined&&y!=null)_.z=y;var O="",R=E.getElementsByTagName("A");if(R&&R.length)for(var I=0;I<R.length;++I)if(R[I].hasAttribute("href")){O=R[I].getAttribute("href");if(O.charAt(0)!="#")break}if(O&&O.charAt(0)!="#")_.l={Target:O};if(a.dense){if(!e[p+n])e[p+n]=[];e[p+n][b+i]=_}else e[Ra({c:b+i,r:p+n})]=_;if(l.e.c<b+i)l.e.c=b+i;b+=k}++p}if(h.length)e["!merges"]=(e["!merges"]||[]).concat(h);l.e.r=Math.max(l.e.r,p-1+n);e["!ref"]=Na(l);if(p>=o)e["!fullref"]=Na((l.e.r=f.length-v+p-1+n,l));return e}function jm(e,r){var t=r||{};var a=t.dense?[]:{};return Gm(a,e,r)}function Xm(e,r){return La(jm(e,r),r)}function $m(e){var r="";var t=Ym(e);if(t)r=t(e).getPropertyValue("display");if(!r)r=e.style&&e.style.display;return r==="none"}function Ym(e){if(e.ownerDocument.defaultView&&typeof e.ownerDocument.defaultView.getComputedStyle==="function")return e.ownerDocument.defaultView.getComputedStyle;if(typeof getComputedStyle==="function")return getComputedStyle;return null}function Km(e){var r=e.replace(/[\t\r\n]/g," ").trim().replace(/ +/g," ").replace(/<text:s\/>/g," ").replace(/<text:s text:c="(\d+)"\/>/g,function(e,r){return Array(parseInt(r,10)+1).join(" ")}).replace(/<text:tab[^>]*\/>/g,"\t").replace(/<text:line-break\/>/g,"\n");var t=Yr(r.replace(/<[^>]*>/g,""));return[t]}var Jm={day:["d","dd"],month:["m","mm"],year:["y","yy"],hours:["h","hh"],minutes:["m","mm"],seconds:["s","ss"],"am-pm":["A/P","AM/PM"],"day-of-week":["ddd","dddd"],era:["e","ee"],quarter:["\\Qm",'m\\"th quarter"']};function qm(e,r){var t=r||{};if(g!=null&&t.dense==null)t.dense=g;var a=Et(e);var n=[],i;var s;var f={name:""},o="",l=0;var c;var h;var u={},d=[];var v=t.dense?[]:{};var p,m;var b={value:""};var w="",k=0,T;var A=[];var E=-1,C=-1,y={s:{r:1e6,c:1e7},e:{r:0,c:0}};var S=0;var _={};var x=[],O={},R=0,I=0;var N=[],D=1,F=1;var P=[];var L={Names:[]};var M={};var U=["",""];var B=[],W={};var H="",z=0;var V=false,G=false;var j=0;Ct.lastIndex=0;a=a.replace(/<!--([\s\S]*?)-->/gm,"").replace(/<!DOCTYPE[^\[]*\[[^\]]*\]>/gm,"");while(p=Ct.exec(a))switch(p[3]=p[3].replace(/_.*$/,"")){case"table":;case"工作表":if(p[1]==="/"){if(y.e.c>=y.s.c&&y.e.r>=y.s.r)v["!ref"]=Na(y);else v["!ref"]="A1:A1";if(t.sheetRows>0&&t.sheetRows<=y.e.r){v["!fullref"]=v["!ref"];y.e.r=t.sheetRows-1;v["!ref"]=Na(y)}if(x.length)v["!merges"]=x;if(N.length)v["!rows"]=N;c.name=c["名称"]||c.name;if(typeof JSON!=="undefined")JSON.stringify(c);d.push(c.name);u[c.name]=v;G=false}else if(p[0].charAt(p[0].length-2)!=="/"){c=Gr(p[0],false);E=C=-1;y.s.r=y.s.c=1e7;y.e.r=y.e.c=0;v=t.dense?[]:{};x=[];N=[];G=true}break;case"table-row-group":if(p[1]==="/")--S;else++S;break;case"table-row":;case"行":if(p[1]==="/"){E+=D;D=1;break}h=Gr(p[0],false);if(h["行号"])E=h["行号"]-1;else if(E==-1)E=0;D=+h["number-rows-repeated"]||1;if(D<10)for(j=0;j<D;++j)if(S>0)N[E+j]={level:S};C=-1;break;case"covered-table-cell":if(p[1]!=="/")++C;if(t.sheetStubs){if(t.dense){if(!v[E])v[E]=[];v[E][C]={t:"z"}}else v[Ra({r:E,c:C})]={t:"z"}}w="";A=[];break;case"table-cell":;case"数据":if(p[0].charAt(p[0].length-2)==="/"){++C;b=Gr(p[0],false);F=parseInt(b["number-columns-repeated"]||"1",10);m={t:"z",v:null};if(b.formula&&t.cellFormula!=false)m.f=Cd(Yr(b.formula));if((b["数据类型"]||b["value-type"])=="string"){m.t="s";m.v=Yr(b["string-value"]||"");if(t.dense){if(!v[E])v[E]=[];v[E][C]=m}else{v[Ra({r:E,c:C})]=m}}C+=F-1}else if(p[1]!=="/"){++C;w="";k=0;A=[];F=1;var X=D?E+D-1:E;if(C>y.e.c)y.e.c=C;if(C<y.s.c)y.s.c=C;if(E<y.s.r)y.s.r=E;if(X>y.e.r)y.e.r=X;b=Gr(p[0],false);B=[];W={};m={t:b["数据类型"]||b["value-type"],v:null};if(t.cellFormula){if(b.formula)b.formula=Yr(b.formula);if(b["number-matrix-columns-spanned"]&&b["number-matrix-rows-spanned"]){R=parseInt(b["number-matrix-rows-spanned"],10)||0;I=parseInt(b["number-matrix-columns-spanned"],10)||0;O={s:{r:E,c:C},e:{r:E+R-1,c:C+I-1}};m.F=Na(O);P.push([O,m.F])}if(b.formula)m.f=Cd(b.formula);else for(j=0;j<P.length;++j)if(E>=P[j][0].s.r&&E<=P[j][0].e.r)if(C>=P[j][0].s.c&&C<=P[j][0].e.c)m.F=P[j][1]}if(b["number-columns-spanned"]||b["number-rows-spanned"]){R=parseInt(b["number-rows-spanned"],10)||0;I=parseInt(b["number-columns-spanned"],10)||0;O={s:{r:E,c:C},e:{r:E+R-1,c:C+I-1}};x.push(O)}if(b["number-columns-repeated"])F=parseInt(b["number-columns-repeated"],10);switch(m.t){case"boolean":m.t="b";m.v=nt(b["boolean-value"]);break;case"float":m.t="n";m.v=parseFloat(b.value);break;case"percentage":m.t="n";m.v=parseFloat(b.value);break;case"currency":m.t="n";m.v=parseFloat(b.value);break;case"date":m.t="d";m.v=gr(b["date-value"]);if(!t.cellDates){m.t="n";m.v=fr(m.v)}m.z="m/d/yy";break;case"time":m.t="n";m.v=ur(b["time-value"])/86400;if(t.cellDates){m.t="d";m.v=hr(m.v)}m.z="HH:MM:SS";break;case"number":m.t="n";m.v=parseFloat(b["数据数值"]);break;default:if(m.t==="string"||m.t==="text"||!m.t){m.t="s";if(b["string-value"]!=null){w=Yr(b["string-value"]);A=[]}}else throw new Error("Unsupported value type "+m.t);}}else{V=false;if(m.t==="s"){m.v=w||"";if(A.length)m.R=A;V=k==0}if(M.Target)m.l=M;if(B.length>0){m.c=B;B=[]}if(w&&t.cellText!==false)m.w=w;if(V){m.t="z";delete m.v}if(!V||t.sheetStubs){if(!(t.sheetRows&&t.sheetRows<=E)){for(var $=0;$<D;++$){F=parseInt(b["number-columns-repeated"]||"1",10);if(t.dense){if(!v[E+$])v[E+$]=[];v[E+$][C]=$==0?m:br(m);while(--F>0)v[E+$][C+F]=br(m)}else{v[Ra({r:E+$,c:C})]=m;while(--F>0)v[Ra({r:E+$,c:C+F})]=br(m)}if(y.e.c<=C)y.e.c=C}}}F=parseInt(b["number-columns-repeated"]||"1",10);C+=F-1;F=0;m={};w="";A=[]}M={};break;case"document":;case"document-content":;case"电子表格文档":;case"spreadsheet":;case"主体":;case"scripts":;case"styles":;case"font-face-decls":;case"master-styles":if(p[1]==="/"){if((i=n.pop())[0]!==p[3])throw"Bad state: "+i}else if(p[0].charAt(p[0].length-2)!=="/")n.push([p[3],true]);break;case"annotation":if(p[1]==="/"){if((i=n.pop())[0]!==p[3])throw"Bad state: "+i;W.t=w;if(A.length)W.R=A;W.a=H;B.push(W)}else if(p[0].charAt(p[0].length-2)!=="/"){n.push([p[3],false])}H="";z=0;w="";k=0;A=[];break;case"creator":if(p[1]==="/"){H=a.slice(z,p.index)}else z=p.index+p[0].length;break;case"meta":;case"元数据":;case"settings":;case"config-item-set":;case"config-item-map-indexed":;case"config-item-map-entry":;case"config-item-map-named":;case"shapes":;case"frame":;case"text-box":;case"image":;case"data-pilot-tables":;case"list-style":;case"form":;case"dde-links":;case"event-listeners":;case"chart":if(p[1]==="/"){if((i=n.pop())[0]!==p[3])throw"Bad state: "+i}else if(p[0].charAt(p[0].length-2)!=="/")n.push([p[3],false]);w="";k=0;A=[];break;case"scientific-number":break;case"currency-symbol":break;case"currency-style":break;case"number-style":;case"percentage-style":;case"date-style":;case"time-style":if(p[1]==="/"){_[f.name]=o;if((i=n.pop())[0]!==p[3])throw"Bad state: "+i}else if(p[0].charAt(p[0].length-2)!=="/"){o="";f=Gr(p[0],false);n.push([p[3],true])}break;case"script":break;case"libraries":break;case"automatic-styles":break;case"default-style":;case"page-layout":break;case"style":break;case"map":break;case"font-face":break;case"paragraph-properties":break;case"table-properties":break;case"table-column-properties":break;case"table-row-properties":break;case"table-cell-properties":break;case"number":switch(n[n.length-1][0]){case"time-style":;case"date-style":s=Gr(p[0],false);o+=Jm[p[3]][s.style==="long"?1:0];break;}break;case"fraction":break;case"day":;case"month":;case"year":;case"era":;case"day-of-week":;case"week-of-year":;case"quarter":;case"hours":;case"minutes":;case"seconds":;case"am-pm":switch(n[n.length-1][0]){case"time-style":;case"date-style":s=Gr(p[0],false);o+=Jm[p[3]][s.style==="long"?1:0];break;}break;case"boolean-style":break;case"boolean":break;case"text-style":break;case"text":if(p[0].slice(-2)==="/>")break;else if(p[1]==="/")switch(n[n.length-1][0]){case"number-style":;case"date-style":;case"time-style":o+=a.slice(l,p.index);break;}else l=p.index+p[0].length;break;case"named-range":s=Gr(p[0],false);U=Sd(s["cell-range-address"]);var Y={Name:s.name,Ref:U[0]+"!"+U[1]};if(G)Y.Sheet=d.length;L.Names.push(Y);break;case"text-content":break;case"text-properties":break;case"embedded-text":break;case"body":;case"电子表格":break;case"forms":break;case"table-column":break;case"table-header-rows":break;case"table-rows":break;case"table-column-group":break;case"table-header-columns":break;case"table-columns":break;case"null-date":break;case"graphic-properties":break;case"calculation-settings":break;case"named-expressions":break;case"label-range":break;case"label-ranges":break;case"named-expression":break;case"sort":break;case"sort-by":break;case"sort-groups":break;case"tab":break;case"line-break":break;case"span":break;case"p":;case"文本串":if(["master-styles"].indexOf(n[n.length-1][0])>-1)break;if(p[1]==="/"&&(!b||!b["string-value"])){var K=Km(a.slice(k,p.index),T);w=(w.length>0?w+"\n":"")+K[0]}else{T=Gr(p[0],false);k=p.index+p[0].length}break;case"s":break;case"database-range":if(p[1]==="/")break;try{U=Sd(Gr(p[0])["target-range-address"]);u[U[0]]["!autofilter"]={ref:U[1]}}catch(J){}break;case"date":break;case"object":break;case"title":;case"标题":break;case"desc":break;case"binary-data":break;case"table-source":break;case"scenario":break;case"iteration":break;case"content-validations":break;case"content-validation":break;case"help-message":break;case"error-message":break;case"database-ranges":break;case"filter":break;case"filter-and":break;case"filter-or":break;case"filter-condition":break;case"list-level-style-bullet":break;case"list-level-style-number":break;case"list-level-properties":break;case"sender-firstname":;case"sender-lastname":;case"sender-initials":;case"sender-title":;case"sender-position":;case"sender-email":;case"sender-phone-private":;case"sender-fax":;case"sender-company":;case"sender-phone-work":;case"sender-street":;case"sender-city":;case"sender-postal-code":;case"sender-country":;case"sender-state-or-province":;case"author-name":;case"author-initials":;case"chapter":;case"file-name":;case"template-name":;case"sheet-name":break;case"event-listener":break;case"initial-creator":;case"creation-date":;case"print-date":;case"generator":;case"document-statistic":;case"user-defined":;case"editing-duration":;case"editing-cycles":break;case"config-item":break;case"page-number":break;case"page-count":break;case"time":break;case"cell-range-source":break;case"detective":break;case"operation":break;case"highlighted-range":break;case"data-pilot-table":;case"source-cell-range":;case"source-service":;case"data-pilot-field":;case"data-pilot-level":;case"data-pilot-subtotals":;case"data-pilot-subtotal":;case"data-pilot-members":;case"data-pilot-member":;case"data-pilot-display-info":;case"data-pilot-sort-info":;case"data-pilot-layout-info":;case"data-pilot-field-reference":;case"data-pilot-groups":;case"data-pilot-group":;case"data-pilot-group-member":break;case"rect":break;case"dde-connection-decls":;case"dde-connection-decl":;case"dde-link":;case"dde-source":break;case"properties":break;case"property":break;case"a":if(p[1]!=="/"){M=Gr(p[0],false);if(!M.href)break;M.Target=Yr(M.href);delete M.href;if(M.Target.charAt(0)=="#"&&M.Target.indexOf(".")>-1){U=Sd(M.Target.slice(1));M.Target="#"+U[0]+"!"+U[1]}else if(M.Target.match(/^\.\.[\\\/]/))M.Target=M.Target.slice(3)}break;case"table-protection":break;case"data-pilot-grand-total":break;case"office-document-common-attrs":break;default:switch(p[2]){case"dc:":;case"calcext:":;case"loext:":;case"ooo:":;case"chartooo:":;case"draw:":;case"style:":;case"chart:":;case"form:":;case"uof:":;case"表:":;case"字:":break;default:if(t.WTF)throw new Error(p);};}var q={Sheets:u,SheetNames:d,Workbook:L};if(t.bookSheets)delete q.Sheets;return q}function Zm(e,r){r=r||{};if(_r(e,"META-INF/manifest.xml"))ai(Or(e,"META-INF/manifest.xml"),r);var t=Rr(e,"content.xml");if(!t)throw new Error("Missing content.xml in ODS / UOF file");var a=qm(lt(t),r);if(_r(e,"meta.xml"))a.Props=hi(Or(e,"meta.xml"));return a}function Qm(e,r){return qm(e,r)}var eb=function(){var e=["<office:master-styles>",'
-
-
-
-
-</head>
-<body>
-
 <header>
   <div class="wave"></div><div class="wave2"></div>
   <div class="header-row">
@@ -1161,7 +1165,7 @@ var o=Math.min(a.sheetRows||1e7,f.length);var l={s:{r:0,c:0},e:{r:n,c:i}};if(e["
     </div>
     <div class="controls">
       <button class="btn" id="btnDownloadPdf" type="button">⬇ Baixar PDF</button>
-      <button class="btn" id="btnToggleUpload" type="button">Carregar novas planilhas</button>
+      <button class="btn" id="btnToggleUpload" type="button">↑ Ir para o upload</button>
     </div>
   </div>
   <div class="meta-row">
@@ -1181,6 +1185,30 @@ var o=Math.min(a.sheetRows||1e7,f.length);var l={s:{r:0,c:0},e:{r:n,c:i}};if(e["
   <div class="content">
 
     <section id="page-carteira" class="page active">
+
+      <div class="pf-upload-topo">
+        <div class="pf-upload-tit">Subir as planilhas</div>
+        <div class="pf-upload-sub">As três são independentes: suba só a que mudou. O painel recalcula a cada arquivo.</div>
+        <div class="pf-upload-campos">
+          <label class="pf-campo">
+            <span class="pf-campo-nome">1 · Governança FAST</span>
+            <span class="pf-campo-aba">aba GOVERNANÇA FASTP</span>
+            <input type="file" id="fileP1" accept=".xlsx,.xlsb,.xls" />
+          </label>
+          <label class="pf-campo">
+            <span class="pf-campo-nome">2 · BU FAST</span>
+            <span class="pf-campo-aba">aba BU</span>
+            <input type="file" id="fileBU" accept=".xlsx,.xlsb,.xls" />
+          </label>
+          <label class="pf-campo">
+            <span class="pf-campo-nome">3 · Liberados E&amp;P</span>
+            <span class="pf-campo-aba">Requisições EP_BENS, aba Export</span>
+            <input type="file" id="fileEP" accept=".xlsx,.xlsb,.xls" />
+          </label>
+        </div>
+        <div class="status-msg" id="uploadStatus"></div>
+      </div>
+
 
       <div class="extra-head">Status do processo</div>
       <div class="kpi-grid status3" id="kpiGridStatus" style="margin-bottom:18px;"></div>
@@ -1229,24 +1257,7 @@ var o=Math.min(a.sheetRows||1e7,f.length);var l={s:{r:0,c:0},e:{r:n,c:i}};if(e["
         <div class="chart-wrap tall"><canvas id="gFila"></canvas></div>
       </div>
 
-      <details class="upload-panel" id="uploadPanel">
-        <summary>Atualizar dados (subir novas planilhas)</summary>
-        <div class="upload-grid">
-          <div class="upload-item">
-            <label>Governança FAST .xlsx (aba "GOVERNANÇA FASTP")</label>
-            <input type="file" id="fileP1" accept=".xlsx" />
-          </div>
-          <div class="upload-item">
-            <label>BU_fast .xlsx (aba "BU")</label>
-            <input type="file" id="fileBU" accept=".xlsx" />
-          </div>
-          <div class="upload-item">
-            <label>Requisições EP_BENS .xlsx (aba "Export") — Liberados E&amp;P</label>
-            <input type="file" id="fileEP" accept=".xlsx" />
-          </div>
-        </div>
-        <div class="status-msg" id="uploadStatus"></div>
-      </details>
+      
     </section>
 
     <section id="page-geral" class="page">
