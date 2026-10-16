@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/10 20:05';
+var GTO_BUILD = '16/10 22:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1138,6 +1138,25 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
   #pf-root .kpi-grid.status3{ grid-template-columns:repeat(3,minmax(0,220px)); }
   @media (max-width:640px){#pf-root .kpi-grid.status3{grid-template-columns:1fr 1fr;} }
 
+
+/* ── a coluna de abas saiu: virou tópico no menu do GTO ── */
+#pf-root .sidebar{ display:none !important; }
+#pf-root .shell{ max-width:none; gap:0; }
+#pf-root .content{ padding:18px 20px 40px; }
+
+/* ── as janelas de detalhe se centram na área útil, não na tela ── */
+#pf-root{ --pf-esq:0px; --pf-dir:0px; }
+#pf-root .detail-overlay,
+#pf-root .obs-overlay{
+  left:var(--pf-esq); right:var(--pf-dir); width:auto;
+  padding:18px;
+}
+#pf-root .detail-panel{ width:100%; max-width:1180px; }
+#pf-root .obs-panel{ width:100%; max-width:560px; }
+
+/* ── nada mais largo que a área: tabela rola dentro da caixa dela ── */
+#pf-root .items-table-wrap, #pf-root .detail-table-wrap{ max-width:100%; }
+#pf-root .kpi-grid.status3{ grid-template-columns:repeat(3,minmax(0,1fr)); }
 
 /* ── Entradas nesta semana: lápis só no hover, e o formulário ── */
 #pf-root .pf-kpi-edit-wrap{position:relative;}
@@ -8694,7 +8713,10 @@ function go(id, el) {
   // base do Firebase — getDB()/_lsMod() já isolam os dados automaticamente).
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.sb-it').forEach(i => i.classList.remove('active'));
-  const page = document.getElementById('p-' + id);
+  // Tópicos que dividem uma página só: o Painel FAST tem três entradas
+  // no menu e uma página, trocando a aba interna.
+  const PAGINA_ALIAS = { 'reuniao-fast-itens':'reuniao-fast', 'reuniao-fast-bruta':'reuniao-fast' };
+  const page = document.getElementById('p-' + (PAGINA_ALIAS[id] || id));
   console.log('[go] id='+id+' | page encontrada='+!!page+' | page.id='+(page?.id||'null'));
   if (page) {
     page.classList.add('active');
@@ -8739,7 +8761,11 @@ function go(id, el) {
   const labelSidebar = (typeof PERMS_SIDEBAR !== 'undefined' && PERMS_SIDEBAR[id]) ? PERMS_SIDEBAR[id].label : null;
   document.getElementById('ttl').textContent = titles[id] || labelSidebar || id;
   if(id==='reuniao'){ if(typeof reuniaoAbrir==='function') reuniaoAbrir(); }
-  if(id==='reuniao-fast'){ if(typeof pfAbrir==='function') pfAbrir(); }
+  if(id.indexOf('reuniao-fast')===0 && typeof pfAbrir==='function'){
+    pfAbrir();
+    pfAba(id === 'reuniao-fast-itens' ? 'geral'
+        : id === 'reuniao-fast-bruta' ? 'bruta' : 'carteira');
+  }
   if(id==='direcionamento'){ if(typeof dirPagina==='function') setTimeout(dirPagina, 60); }
   if(typeof _fcAgendarVarredura==='function') _fcAgendarVarredura();
   if(id==='pr-bancoferias'){ renderFerias(); renderBanco(); setTimeout(()=>{ fbCarregarBHE().then(()=>{ bheArquivarVencidos(); renderBHECards(); }); }, 100); }
@@ -44033,7 +44059,11 @@ const PERMS_SIDEBAR = {
   'pedidos':        { icon:'📦', label:'Controle de Pedidos',      mod:'EXECUÇÃO', soPedidos:true },
   'apres-rejeite':  { icon:'🖥️', label:'Apresentação',             mod:'EXECUÇÃO', soPedidos:true },
   // Só existe dentro da frente FAST · Reunião — o Painel FAST portado
-  'reuniao-fast':   { icon:'📊', label:'Painel FAST',              mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
+  // As três abas do Painel FAST viraram tópicos do menu — elas saíram
+  // da coluna que ficava dentro da página.
+  'reuniao-fast':       { icon:'📊', label:'Status Carteira',   mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
+  'reuniao-fast-itens': { icon:'📄', label:'Itens Geral FAST',  mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
+  'reuniao-fast-bruta': { icon:'🗃️', label:'Base bruta',        mod:'EXECUÇÃO', soFrente:'fast_reuniao' },
   // Só existem dentro da frente ADLV · PCP, que tem Firebase próprio
   'pcp':            { icon:'📋', label:'PCP',                     mod:'EXECUÇÃO', soPcp:true },
   'pcp-hist':       { icon:'📚', label:'Histórico de Medição',    mod:'EXECUÇÃO', soPcp:true },
@@ -58256,6 +58286,16 @@ async function pfAbrir(){
   } catch (e) { console.warn('pfAbrir/carregar:', e); }
   // a partir daqui, todo upload grava para todo mundo
   pfLigarGravacao();
+  pfAlinhar();
+  // as janelas de detalhe nascem fora de tela até alguém abrir: realinha
+  // no momento em que abrem, que é quando a largura importa
+  ['detailOverlay','infoOverlay'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (!el || el.__pfAlinha) return;
+    el.__pfAlinha = true;
+    new MutationObserver(function(){ pfAlinhar(); })
+      .observe(el, { attributes:true, attributeFilter:['class'] });
+  });
 }
 
 // ══════════════ ENTRADAS NESTA SEMANA — número digitado ═══════════
@@ -58355,6 +58395,29 @@ async function pfEntradasSalvar(){
         + '\n\nEle não foi salvo — tente de novo.');
   }
 }
+
+// Troca a aba de dentro do painel. Os botões antigos continuam no
+// documento, escondidos: clicar neles é o mesmo caminho de sempre, e
+// assim não existe uma segunda maneira de trocar de aba que possa
+// divergir da primeira.
+function pfAba(qual){
+  var b = document.querySelector('#pf-root .nav-btn[data-page="' + qual + '"]');
+  if (b) b.click();
+  pfAlinhar();
+}
+
+// As janelas de detalhe são position:fixed, então se centram na TELA —
+// e metade sumia atrás do menu do GTO. Aqui elas passam a se centrar na
+// área útil, que muda de largura quando o menu recolhe.
+function pfAlinhar(){
+  var pg = document.getElementById('p-reuniao-fast');
+  var raiz = document.getElementById('pf-root');
+  if (!pg || !raiz) return;
+  var r = pg.getBoundingClientRect();
+  raiz.style.setProperty('--pf-esq', Math.max(0, Math.round(r.left)) + 'px');
+  raiz.style.setProperty('--pf-dir', Math.max(0, Math.round(window.innerWidth - r.right)) + 'px');
+}
+window.addEventListener('resize', function(){ pfAlinhar(); });
 
 // Quando gravar: não dá para gravar logo depois do clique, porque a
 // leitura de uma planilha de 1 MB leva segundos e os dados ainda não
