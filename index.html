@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/10 13:30';
+var GTO_BUILD = '17/10 14:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -36887,6 +36887,18 @@ var PCP_CARDS = [
     conta:'recebidos', cor:'var(--azm)',
     calcReal:function(){ return pcpRealTotal('entrada') + pcpRealTotal('satre'); },
     deOnde:'Entrada Itens Novos + Itens SATRE' },
+  // Contra a programação de recebimento que ele distribuiu dia a dia na
+  // grade, e só até hoje. Vira GORDURA quando está à frente do plano.
+  { chave:'gap_receb', nome:'GAP DE RECEBIMENTO', sub:'', cor:'var(--vm)',
+    sinal:true,
+    calc:function(){ return pcpGapRecebimento(); },
+    rotCalc:function(){
+      return pcpGapRecebimento() < 0 ? 'GAP DE RECEBIMENTO' : 'GORDURA NO RECEBIMENTO'; },
+    subCalc:function(){
+      var dias = pcpDiasDecorridos();
+      var ate = dias.length ? cpDataBR(dias[dias.length - 1]) : '—';
+      return 'recebido ' + cpNum(pcpRecebRealAteHoje()) + ' − programado '
+        + cpNum(pcpRecebPlanAteHoje()) + ' até ' + ate; } },
   { chave:'prod_ped', nome:'PRODUTIVIDADE EM PEDIDOS', sub:'mínimo liberados',
     conta:'liberados', cor:'var(--az)',
     calcReal:function(){ return pcpRealTotal('emissao'); },
@@ -37280,6 +37292,27 @@ function pcpRealDia(linha, dia){
   if (l && l[dia] !== undefined && l[dia] !== '') return aagNum(l[dia]);
   return 0;
 }
+// Só os dias da medição que já passaram. Comparar o plano INTEIRO com o
+// que foi recebido até agora acusaria um atraso que ainda não existe: os
+// dias que faltam ainda vão acontecer.
+function pcpDiasDecorridos(){
+  var h = cpHojeISO();
+  return (_pcp && _pcp.dias || []).filter(function(d){ return d <= h; });
+}
+function pcpPlanAteHoje(bloco){
+  return pcpDiasDecorridos().reduce(function(n, d){ return n + pcpPlanDia(bloco, d); }, 0);
+}
+function pcpRealAteHoje(linha){
+  return pcpDiasDecorridos().reduce(function(n, d){ return n + pcpRealDia(linha, d); }, 0);
+}
+// O recebimento é a soma das duas linhas do bloco — as mesmas que
+// alimentam o contador do card Recebimento de RC.
+function pcpRecebPlanAteHoje(){ return pcpPlanAteHoje('receb'); }
+function pcpRecebRealAteHoje(){
+  return pcpRealAteHoje('entrada') + pcpRealAteHoje('satre');
+}
+function pcpGapRecebimento(){ return pcpRecebRealAteHoje() - pcpRecebPlanAteHoje(); }
+
 function pcpPlanTotal(bloco){
   return (_pcp.dias || []).reduce(function(n, d){ return n + pcpPlanDia(bloco, d); }, 0);
 }
@@ -37293,6 +37326,8 @@ function pcpSetPlan(bloco, dia, v){
   if (aagTxt(v) === '') delete _pcp.plan[bloco][dia];
   else _pcp.plan[bloco][dia] = aagNum(v);
   pcpPintarTotais();
+  // o GAP de recebimento compara com esta linha: tem de repintar junto
+  pcpRenderCards();
   pcpSalvar();
 }
 function pcpSetReal(linha, dia, v){
@@ -37658,16 +37693,22 @@ function pcpRenderCards(){
 
   // 2. os cards do meio: os que ele preenche e os que saem de conta
   PCP_CARDS.forEach(function(c){
-    var dentro;
+    var dentro, cor = c.cor;
     if (c.calc) {
-      dentro = '<div style="font-size:24px;font-weight:800;color:' + c.cor
-        + ';line-height:1.1">' + cpNum(Math.round(c.calc())) + '</div>';
+      var v = Math.round(c.calc());
+      // card de saldo: o sinal e a cor contam a história antes do número
+      if (c.sinal) cor = v < 0 ? 'var(--vm)' : 'var(--vd)';
+      dentro = '<div style="font-size:24px;font-weight:800;color:' + cor
+        + ';line-height:1.1">'
+        + (c.sinal ? ((v < 0 ? '−' : '+') + cpNum(Math.abs(v))) : cpNum(v))
+        + '</div>';
     } else {
-      dentro = campo(c.chave, 'meta', c.cor);
+      dentro = campo(c.chave, 'meta', cor);
     }
-    dentro += rotulo(c.nome) + legenda(c.sub);
+    dentro += rotulo(c.rotCalc ? c.rotCalc() : c.nome)
+            + legenda(c.subCalc ? c.subCalc() : c.sub);
     if (c.conta) dentro += contador(c.chave, c.conta);
-    h += moldura(dentro, c.cor);
+    h += moldura(dentro, cor);
   });
 
   // 3. o gap de pedidos: programado até hoje menos o emitido
