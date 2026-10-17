@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/10 14:45';
+var GTO_BUILD = '17/10 16:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -36899,18 +36899,34 @@ var PCP_CARDS = [
       var ate = dias.length ? cpDataBR(dias[dias.length - 1]) : '—';
       return 'recebido ' + cpNum(pcpRecebRealAteHoje()) + ' − programado '
         + cpNum(pcpRecebPlanAteHoje()) + ' até ' + ate; } },
-  { chave:'prod_ped', nome:'PRODUTIVIDADE EM PEDIDOS', sub:'mínimo liberados',
-    conta:'liberados', cor:'var(--az)',
-    calcReal:function(){ return pcpRealTotal('emissao'); },
-    deOnde:'soma da Emissão de Pedido' },
+  // Devolução vem antes de Pedidos: é a ordem em que ele lê a linha na
+  // reunião — recebeu, está atrasado ou não, devolveu, emitiu, e o saldo.
   { chave:'prod_dev', nome:'PRODUTIVIDADE EM DEVOLUÇÃO', sub:'RCs devolvidas SIM e resgate',
     conta:'devolvidas', cor:'var(--az)',
     calcReal:function(){ return pcpRealTotal('devolucoes'); },
     deOnde:'soma da linha Devoluções' },
+  // 17/10: era a soma da Emissão de Pedido, o mesmo número do card ao
+  // lado — e o Aproveitamento dava 100% sempre, porque dividia um número
+  // por ele mesmo. Agora é o convertido da curva.
+  { chave:'prod_ped', nome:'PRODUTIVIDADE EM PEDIDOS', sub:'mínimo convertidos',
+    conta:'convertidos', cor:'var(--az)',
+    calcReal:function(){ return pcpConvertido(); },
+    deOnde:'liberado por tipo × peso, na curva (Petronect, Reap, Procureon e Catálogo)' },
   // Não se digita: é a soma da linha Emissão de Pedido da grade, que por
   // sua vez vem da coluna Feitos do Controle de Pedidos.
   { chave:'emitidos', nome:'PEDIDOS EMITIDOS', sub:'soma da Emissão de Pedido',
     cor:'var(--vd)', calc:function(){ return pcpRealTotal('emissao'); } },
+  // Este card era desenhado solto, depois da lista, e por isso ficava
+  // sempre no fim. Virou item da lista para andar junto com os outros.
+  { chave:'gap_ped', nome:'GAP DE PEDIDOS EMITIDOS', sub:'', cor:'var(--vm)',
+    sinal:true,
+    calc:function(){ return pcpGapPedidos(); },
+    rotCalc:function(){
+      return pcpGapPedidos() < 0 ? 'GAP DE PEDIDOS EMITIDOS' : 'GORDURA EM PEDIDOS'; },
+    subCalc:function(){
+      return 'emitido ' + cpNum(Math.round(pcpRealTotal('emissao'))) + ' − programado '
+        + cpNum(Math.round(pcpPlanAteHoje('emissao'))) + ' em '
+        + pcpDiasDecorridos().length + ' dia(s)'; } },
   { chave:'cockpit',  nome:'AG. ENVIO DO COCKPIT', sub:'na fila para enviar',
     cor:'var(--am)' }
 ];
@@ -36945,12 +36961,13 @@ function pcpSetCard(chave, campo, v){
   pcpSalvar();
 }
 
-// Aproveitamento: do que foi liberado no período, quanto virou pedido.
-// A regra fina ele ainda vai passar; por ora é emitidos ÷ liberados.
+// Aproveitamento: o emitido sobre o convertido do período.
+// Antes dividia o emitido pela soma da Emissão de Pedido — o mesmo
+// número em cima e embaixo, e por isso a faixa dizia 100% todo dia.
 function pcpAproveitamento(){
-  var lib = pcpCardReal('prod_ped');
+  var conv = pcpConvertido();
   var emi = pcpEmitidos();
-  return lib ? emi / lib : null;
+  return conv ? emi / conv : null;
 }
 // Os pedidos emitidos da medição: a soma da linha Emissão de Pedido.
 function pcpEmitidos(){ return pcpRealTotal('emissao'); }
@@ -36971,7 +36988,9 @@ function pcpEmitidos(){ return pcpRealTotal('emissao'); }
 var PCP_PESOS_PADRAO = [
   { chave:'petronect', nome:'Pedido Petronect', peso:1 },
   { chave:'reap',      nome:'Pedido Reap',      peso:0.5 },
-  { chave:'procureon', nome:'Pedido Procureon', peso:0.5 },
+  // 0,8 confirmado por ele em 17/10 (era 0,5 no padrão antigo; quem já
+  // tem medição guardada mantém o peso que está lá)
+  { chave:'procureon', nome:'Pedido Procureon', peso:0.8 },
   { chave:'catalogo',  nome:'Pedido por Catálogo', peso:0.8 },
   { chave:'devolucao', nome:'Devolução',        peso:0.5 }
 ];
@@ -37009,7 +37028,9 @@ function pcpSetPeso(i, campo, v){
     if (!nome) { pcpRenderGrafico(); return; }
     ps[i].nome = nome;
   }
-  pcpRenderGrafico(); pcpSalvar();
+  // o peso entra na conta do convertido, que é o contador do card de
+  // Produtividade em Pedidos e o divisor do Aproveitamento
+  pcpRenderGrafico(); pcpRenderCards(); pcpRenderPremissas(); pcpSalvar();
 }
 function pcpAddPeso(){
   if (!_pcp || _pcp.fechada) return;
@@ -37030,7 +37051,7 @@ function pcpDelPeso(i){
   var ch = ps[i].chave;
   ps.splice(i, 1);
   if (_pcp.curva && _pcp.curva.conv) delete _pcp.curva.conv[ch];
-  pcpRenderGrafico(); pcpSalvar();
+  pcpRenderGrafico(); pcpRenderCards(); pcpRenderPremissas(); pcpSalvar();
 }
 
 // ── o que foi lançado em cada dia ─────────────────────────────────
@@ -37059,10 +37080,34 @@ function pcpSetCurva(tipo, dia, v){
   if (aagTxt(v) === '') delete o[dia]; else o[dia] = aagNum(v);
   pcpRenderGrafico();
   pcpRenderFinanceiro();   // as receitas ligadas à curva acompanham
+  // o convertido alimenta o card de Produtividade em Pedidos e o
+  // Aproveitamento da faixa: os dois têm de acompanhar o lançamento
+  pcpRenderCards();
+  pcpRenderPremissas();
   pcpSalvar();
 }
 
 // ── as três séries, acumuladas ────────────────────────────────────
+// ── o CONVERTIDO: os quatro tipos de PEDIDO da curva ─────────────
+// Devolução fica de fora: ela é o outro lado da operação, não pedido
+// liberado. Cada tipo entra pelo peso que está na tabela da curva —
+// Petronect 1, Reap 0,5, Procureon 0,8, Catálogo 0,8 — e o peso é
+// editável por ele, então aqui se lê a tabela, nunca um número fixo.
+var PCP_TIPOS_CONVERTIDO = ['petronect', 'reap', 'procureon', 'catalogo'];
+
+function pcpConvertido(){
+  if (!_pcp) return 0;
+  var pesos = pcpPesos();
+  var tot = 0;
+  (_pcp.dias || []).forEach(function(d){
+    pesos.forEach(function(t){
+      if (PCP_TIPOS_CONVERTIDO.indexOf(t.chave) === -1) return;
+      tot += pcpCurvaDia(t.chave, d) * (+t.peso || 0);
+    });
+  });
+  return Math.round(tot * 100) / 100;
+}
+
 function pcpSerieCurva(){
   var dias = (_pcp && _pcp.dias) || [];
   var hoje = cpHojeISO();
@@ -37197,7 +37242,8 @@ function pcpRenderPremissas(){
         + '</strong>/dia</span>' : '')
     + '</div>'
     // Aproveitamento: quanto do que foi liberado virou pedido no período
-    + '<div title="pedidos emitidos ÷ liberados, dentro do período da medição"'
+    + '<div title="pedidos emitidos ÷ convertidos (liberado por tipo × peso), '
+    +   'dentro do período da medição"'
     +   ' style="display:inline-flex;align-items:center;gap:7px;margin-left:8px;'
     +   'background:var(--cin);border:1.5px solid var(--brd);border-radius:10px;'
     +   'padding:6px 12px">'
@@ -37211,7 +37257,7 @@ function pcpRenderPremissas(){
     + '<span style="font-size:10px;color:var(--tx2);white-space:nowrap;'
     +   'border-left:1px solid var(--brd);padding-left:7px">'
     +   cpNum(Math.round(pcpEmitidos())) + ' emitidos ÷ '
-    +   cpNum(pcpCardReal('prod_ped')) + ' liberados</span>'
+    +   cpNum(Math.round(pcpConvertido())) + ' convertidos</span>'
     + '</div>'
     // Dias úteis: saiu da grade de cards (17/10) e veio para cá, que é
     // a faixa de cima — ela fica fora das abas e por isso acompanha as
@@ -37327,6 +37373,12 @@ function pcpRecebRealAteHoje(){
   return pcpRealAteHoje('entrada') + pcpRealAteHoje('satre');
 }
 function pcpGapRecebimento(){ return pcpRecebRealAteHoje() - pcpRecebPlanAteHoje(); }
+// O GAP de pedidos compara o emitido com o programado da Emissão de
+// Pedido nos dias já decorridos. A conta é a mesma de antes; só o lugar
+// do card na tela mudou.
+function pcpGapPedidos(){
+  return pcpRealTotal('emissao') - pcpPlanAteHoje('emissao');
+}
 
 function pcpPlanTotal(bloco){
   return (_pcp.dias || []).reduce(function(n, d){ return n + pcpPlanDia(bloco, d); }, 0);
@@ -37724,15 +37776,9 @@ function pcpRenderCards(){
     h += moldura(dentro, cor);
   });
 
-  // 3. o gap de pedidos: programado até hoje menos o emitido
-  var gap = realTotal - planAteHoje;
-  var corGap = gap < 0 ? 'var(--vm)' : 'var(--vd)';
-  h += moldura('<div style="font-size:24px;font-weight:800;line-height:1.1;color:' + corGap + '">'
-       + (gap < 0 ? '−' : '+') + cpNum(Math.abs(Math.round(gap))) + '</div>'
-       + rotulo(gap < 0 ? 'GAP' : 'GORDURA')
-       + legenda('emitido ' + cpNum(Math.round(realTotal)) + ' − programado '
-         + cpNum(Math.round(planAteHoje)) + ' em ' + decorridos + ' dia(s)'),
-       corGap);
+  // 3. o GAP de pedidos virou item de PCP_CARDS (17/10) e é desenhado
+  // no laço acima, na posição que ele pediu — entre Pedidos Emitidos e
+  // o Ag. Envio do Cockpit.
 
   box.innerHTML = h + '</div>';
 }
