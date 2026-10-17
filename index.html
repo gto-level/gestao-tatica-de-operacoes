@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/10 16:30';
+var GTO_BUILD = '17/10 17:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -19921,7 +19921,11 @@ function monCard(rot, val, sub, cor, fundo){
 // projetada numa reunião, e Meta Operacional, PATEC Finalizado, Meta e
 // GAP do Projeto são número da operação — não é dado de apresentação.
 // (E, estando em outro projeto do Firebase, nem seriam o número certo.)
-var CARDS_CICLO_OCULTOS = ['fast', 'adlv_reuniao', 'fast_reuniao', 'adlv_republicacao'];
+// A frente do PCP entrou em 17/10: Meta Operacional e PATEC Finalizado
+// são números do ciclo do PATEC do ADLV, e Meta e GAP do Projeto já
+// aparecem dentro da própria tela do PCP (Premissas e o card de GAP).
+var CARDS_CICLO_OCULTOS = ['fast', 'adlv_reuniao', 'fast_reuniao',
+                           'adlv_republicacao', 'adlv_pcp'];
 
 function cardsCicloVisibilidade(){
   var esconder = (typeof _moduloAtivo !== 'undefined') && !!_moduloAtivo
@@ -45449,6 +45453,8 @@ function authMontarSidebar(emailParam){
   const _elCiclo = document.getElementById('sb-cards-ciclo');
   // 'grid' e não '': o display vem do atributo style do HTML, e devolver
   // string vazia deixaria os dois cards empilhados um embaixo do outro.
+  // O _soPcp continua aqui por garantia: o registro já cobre 'adlv_pcp',
+  // mas uma frente de PCP nova entraria sem passar por ele.
   if(_elCiclo) _elCiclo.style.display = (_soPcp || _ocultoPorFrente) ? 'none' : 'grid';
   ['top-meta-proj-box','top-gap-proj-box'].forEach(function(id){
     const el = document.getElementById(id);
