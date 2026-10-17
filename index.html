@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/10 09:40';
+var GTO_BUILD = '17/10 11:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -833,6 +833,51 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
 
 
     <!-- ══ REUNIÃO FAST — Painel FAST portado ══ -->
+
+    <!-- ══════════════════════════════════════════
+         PUBLICAÇÃO · NOVAS ENTRADAS
+         A BU entra por upload todo dia. O GTO lê a aba Entradas (data e
+         contagem de RC_ITEM) e SOMA os dias novos ao histórico — a
+         planilha traz uma janela curta, e o que saiu dela continua aqui.
+    ══════════════════════════════════════════ -->
+    <div id="p-pub-entradas" class="page">
+
+      <div class="cd" style="margin-bottom:1rem;border-top:3px solid var(--azm)">
+        <div class="cd-t" style="margin:0">📥 Novas Entradas — Publicação</div>
+        <div style="font-size:11px;color:var(--tx2);margin-top:4px;line-height:1.5">
+          Suba a BU todo dia. São lidas a <b>Data de Entrada</b> e a <b>Contagem de RC_ITEM</b> da aba
+          <b>Entradas</b>. Os dias novos entram no histórico e os que já estavam continuam —
+          a planilha traz só uma janela de poucas semanas.
+        </div>
+        <div style="margin-top:12px;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <label style="display:flex;flex-direction:column;gap:4px;background:var(--cin);border:1px solid var(--brd);border-radius:9px;padding:9px 12px">
+            <span style="font-size:10.5px;font-weight:700;color:var(--az);letter-spacing:.2px">BU DO DIA</span>
+            <input type="file" id="pubFile" accept=".xlsb,.xlsx,.xls" style="font-size:11px" />
+          </label>
+          <span id="pubStatus" style="font-size:11.5px;color:var(--tx2);flex:1 1 240px"></span>
+        </div>
+      </div>
+
+      <div id="pub-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin-bottom:1rem"></div>
+
+      <div class="cd">
+        <div class="cd-t">📈 Entradas por dia</div>
+        <div style="height:280px;position:relative"><canvas id="pubGrafico"></canvas></div>
+      </div>
+
+      <div class="cd">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div class="cd-t" style="margin:0">🗓 Histórico dia a dia</div>
+          <button class="btn btn-s" style="font-size:11px" onclick="pubExportar()">⬇ Exportar XLSX</button>
+        </div>
+        <div class="tw" style="margin-top:.75rem"><table>
+          <thead><tr><th>Data</th><th style="text-align:right">RC_ITEM que entraram</th><th>Dia da semana</th></tr></thead>
+          <tbody id="pub-tbody"></tbody>
+          <tfoot><tr><td>Total</td><td style="text-align:right" id="pub-total">—</td><td id="pub-dias">—</td></tr></tfoot>
+        </table></div>
+      </div>
+    </div>
+
     <div class="page" id="p-reuniao-fast">
       <style>
 
@@ -7995,10 +8040,21 @@ function _dbComPrefixo(db, pre){
 // nesta lista, o card dela não deixa entrar no app, mesmo com o Firebase
 // já criado: entrar sem tela própria mostraria as telas do PATEC gravando
 // na base errada.
-var FRENTES_COM_TELA = ['adlv', 'fast', 'pedidos', 'adlv_pcp', 'fast_reuniao'];
-// Frentes de Reunião: o menu mostra só as telas marcadas com soFrente
-// daquela frente. As telas do PATEC leriam e gravariam na base da
-// Reunião, que é outro projeto — misturar base é o que não pode.
+var FRENTES_COM_TELA = ['adlv', 'fast', 'pedidos', 'adlv_pcp', 'fast_reuniao',
+                        'adlv_republicacao'];
+// Frentes que mostram SÓ as telas marcadas com soFrente para elas. A base
+// de cada uma é outro projeto do Firebase: deixar passar uma tela do PATEC
+// aqui seria ela lendo e gravando na base errada — foi o que aconteceu em
+// outubro, quando o PCP do ADLV gravou dentro da base do PATEC.
+var FRENTES_SO_PROPRIAS = ['adlv_reuniao', 'fast_reuniao', 'adlv_republicacao'];
+function modSoProprias(m){ return FRENTES_SO_PROPRIAS.indexOf(m) !== -1; }
+// Por onde cada uma dessas frentes abre. Sem isto o app abria no
+// Direcionamento da Equipe, que é do PATEC e lê a base do ADLV.
+var FRENTE_TELA_INICIAL = {
+  'fast_reuniao':      'reuniao-fast',
+  'adlv_republicacao': 'pub-entradas'
+};
+// As duas Reuniões, especificamente (o Radar FAST usa isto)
 var FRENTES_SO_REUNIAO = ['adlv_reuniao', 'fast_reuniao'];
 function modSoReuniao(m){ return FRENTES_SO_REUNIAO.indexOf(m) !== -1; }
 // Frentes que só têm a tela de PCP: o menu mostra só ela.
@@ -8776,6 +8832,7 @@ function go(id, el) {
   const labelSidebar = (typeof PERMS_SIDEBAR !== 'undefined' && PERMS_SIDEBAR[id]) ? PERMS_SIDEBAR[id].label : null;
   document.getElementById('ttl').textContent = titles[id] || labelSidebar || id;
   if(id==='reuniao'){ if(typeof reuniaoAbrir==='function') reuniaoAbrir(); }
+  if(id==='pub-entradas' && typeof pubAbrir==='function'){ pubAbrir(); }
   if(id.indexOf('reuniao-fast')===0 && typeof pfAbrir==='function'){
     pfAbrir();
     pfAba(id === 'reuniao-fast-itens'  ? 'geral'
@@ -19864,7 +19921,7 @@ function monCard(rot, val, sub, cor, fundo){
 // projetada numa reunião, e Meta Operacional, PATEC Finalizado, Meta e
 // GAP do Projeto são número da operação — não é dado de apresentação.
 // (E, estando em outro projeto do Firebase, nem seriam o número certo.)
-var CARDS_CICLO_OCULTOS = ['fast', 'adlv_reuniao', 'fast_reuniao'];
+var CARDS_CICLO_OCULTOS = ['fast', 'adlv_reuniao', 'fast_reuniao', 'adlv_republicacao'];
 
 function cardsCicloVisibilidade(){
   var esconder = (typeof _moduloAtivo !== 'undefined') && !!_moduloAtivo
@@ -44077,6 +44134,8 @@ const PERMS_SIDEBAR = {
   'governanca-pedidos': { icon:'🏛️', label:'Governança',           mod:'EXECUÇÃO', soPedidos:true },
   'pedidos':        { icon:'📦', label:'Controle de Pedidos',      mod:'EXECUÇÃO', soPedidos:true },
   'apres-rejeite':  { icon:'🖥️', label:'Apresentação',             mod:'EXECUÇÃO', soPedidos:true },
+  // Frente ADLV · Publicação — a BU entra por upload todo dia
+  'pub-entradas':   { icon:'📥', label:'Novas Entradas',        mod:'EXECUÇÃO', soFrente:'adlv_republicacao' },
   // Só existe dentro da frente FAST · Reunião — o Painel FAST portado
   // As três abas do Painel FAST viraram tópicos do menu — elas saíram
   // da coluna que ficava dentro da página.
@@ -44743,8 +44802,8 @@ function _entrarNoApp(){
       if(document.getElementById('p-adm') && document.getElementById('p-adm').classList.contains('active')) return;
       var alvo = (_moduloAtivo === 'pedidos') ? 'pedidos'
                : (((typeof modSoPcp === 'function') && modSoPcp(_moduloAtivo)) ? 'pcp'
-               : (((typeof modSoReuniao === 'function') && modSoReuniao(_moduloAtivo)) ? 'reuniao-fast'
-               : 'direcionamento'));
+               : ((typeof FRENTE_TELA_INICIAL !== 'undefined' && FRENTE_TELA_INICIAL[_moduloAtivo])
+                  || 'direcionamento'));
       var it = [].slice.call(document.querySelectorAll('#sb .sb-it')).filter(function(x){
         return new RegExp("go\\('" + alvo + "'").test(x.getAttribute('onclick') || '');
       })[0];
@@ -45039,7 +45098,7 @@ function authMontarSidebar(emailParam){
   // PATEC leriam e gravariam na base da frente, que é outro projeto do
   // Firebase — misturar base é justamente o que não pode acontecer.
   const _soPcp = (typeof modSoPcp === 'function') && modSoPcp(_moduloAtivo);
-  const _soReu = (typeof modSoReuniao === 'function') && modSoReuniao(_moduloAtivo);
+  const _soReu = (typeof modSoProprias === 'function') && modSoProprias(_moduloAtivo);
   Object.entries(PERMS_SIDEBAR).forEach(([key, cfg]) => {
     // Cada frente com base própria mostra só as telas dela.
     if(_soPcp !== !!cfg.soPcp) return;
@@ -58526,6 +58585,321 @@ function pfLigarGravacao(){
     }, 400);
   });
   obs.observe(alvo, { childList:true, characterData:true, subtree:true });
+}
+
+
+// ══════════════════════════════════════════════════════════════════
+//  PUBLICAÇÃO · NOVAS ENTRADAS
+//  A BU entra por upload todo dia. Da aba "Entradas" saem duas colunas:
+//  Data de Entrada e Contagem de RC_ITEM.
+//
+//  A planilha traz uma janela de poucas semanas. Guardar só a última
+//  foto apagaria tudo que saísse dessa janela, então o histórico é
+//  ACUMULADO: dia novo entra, dia que já existia é atualizado pelo
+//  número mais recente, dia que a planilha não trouxe continua onde
+//  está. É também por isso que a gravação é um mapa data → quantidade:
+//  são algumas centenas de chaves por ano, longe do limite de entradas
+//  de índice por documento que derrubou a gravação da medição.
+// ══════════════════════════════════════════════════════════════════
+var PUB_COL      = 'entradas';
+var PUB_DOC_HIST = 'historico';
+var PUB_DOC_META = 'meta';
+var _pubDias  = {};       // 'AAAA-MM-DD' -> quantidade
+var _pubMeta  = {};
+var _pubChart = null;
+
+function pubMsg(txt, cor){
+  var el = document.getElementById('pubStatus');
+  if (!el) return;
+  el.textContent = txt || '';
+  el.style.color = cor || 'var(--tx2)';
+}
+
+// A data pode chegar de três jeitos: Date (SheetJS com cellDates),
+// número (serial do Excel) ou texto dd/mm/aaaa. Qualquer outra coisa
+// não é data e a linha é descartada — é assim que o "Total Geral" do
+// fim da tabela dinâmica fica de fora sem precisar procurá-lo.
+function pubDataISO(v){
+  if (v === null || v === undefined || v === '') return null;
+  if (v instanceof Date && !isNaN(v)) {
+    return v.getFullYear() + '-' + ('0' + (v.getMonth()+1)).slice(-2)
+         + '-' + ('0' + v.getDate()).slice(-2);
+  }
+  if (typeof v === 'number' && isFinite(v) && v > 20000 && v < 80000) {
+    var d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000);
+    return d.toISOString().slice(0, 10);
+  }
+  var t = String(v).trim();
+  var m = t.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (m) return m[3] + '-' + ('0'+m[2]).slice(-2) + '-' + ('0'+m[1]).slice(-2);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+  return null;
+}
+
+function pubQtd(v){
+  if (typeof v === 'number' && isFinite(v)) return Math.round(v);
+  var t = String(v == null ? '' : v).replace(/\./g, '').replace(',', '.').trim();
+  var n = parseFloat(t);
+  return isFinite(n) ? Math.round(n) : null;
+}
+
+// Lê a aba Entradas. Ela é uma tabela dinâmica: o cabeçalho não está na
+// primeira linha, então o que vale é achar a linha que diz "Data de
+// Entrada" e ler as duas colunas a partir dali. Se um dia o layout
+// mudar de coluna, isto acompanha; se o cabeçalho sumir, avisa.
+function pubLerEntradas(wb){
+  var nome = (wb.SheetNames || []).filter(function(n){
+    return String(n).toLowerCase().trim() === 'entradas'; })[0];
+  if (!nome) throw new Error('não achei a aba "Entradas" nesta planilha');
+  var aoa = XLSX.utils.sheet_to_json(wb.Sheets[nome], { header:1, raw:true, defval:null });
+
+  var cabLin = -1, colData = -1, colQtd = -1;
+  for (var i = 0; i < aoa.length && i < 40; i++) {
+    var lin = aoa[i] || [];
+    for (var j = 0; j < lin.length; j++) {
+      var txt = String(lin[j] == null ? '' : lin[j]).toLowerCase();
+      if (txt.indexOf('data de entrada') !== -1) { cabLin = i; colData = j; }
+      if (cabLin === i && /contagem/.test(txt) && j !== colData && colQtd === -1) colQtd = j;
+    }
+    if (cabLin === i && colQtd === -1) colQtd = colData + 1;   // a coluna seguinte
+    if (cabLin >= 0) break;
+  }
+  if (cabLin < 0) throw new Error('não achei a linha "Data de Entrada" na aba Entradas');
+
+  var dias = {}, lidas = 0, puladas = 0;
+  for (var k = cabLin + 1; k < aoa.length; k++) {
+    var r = aoa[k] || [];
+    var iso = pubDataISO(r[colData]);
+    var q   = pubQtd(r[colQtd]);
+    if (iso === null || q === null) { puladas++; continue; }
+    dias[iso] = q;
+    lidas++;
+  }
+  if (!lidas) throw new Error('a aba Entradas não tinha nenhuma linha com data e quantidade');
+  return { dias: dias, lidas: lidas, puladas: puladas };
+}
+
+// Quantas linhas a aba BU tem — só para registrar de que planilha
+// vieram os números. As colunas da BU o André ainda vai definir.
+function pubLinhasBU(wb){
+  var nome = (wb.SheetNames || []).filter(function(n){
+    return String(n).toUpperCase().trim() === 'BU'; })[0];
+  if (!nome) return 0;
+  var ref = (wb.Sheets[nome] || {})['!ref'];
+  if (!ref) return 0;
+  try {
+    var r = XLSX.utils.decode_range(ref);
+    return Math.max(0, r.e.r - r.s.r);        // sem o cabeçalho
+  } catch (e) { return 0; }
+}
+
+// ── o que a tela mostra ───────────────────────────────────────────
+function pubOrdenado(){
+  return Object.keys(_pubDias).sort().map(function(d){
+    return { data: d, qtd: _pubDias[d] };
+  });
+}
+var PUB_SEMANA = ['domingo','segunda','terça','quarta','quinta','sexta','sábado'];
+function pubDiaSemana(iso){
+  var p = String(iso).split('-');
+  return PUB_SEMANA[new Date(Date.UTC(+p[0], +p[1]-1, +p[2])).getUTCDay()];
+}
+function pubHojeISO(){
+  return (typeof cpHojeISO === 'function') ? cpHojeISO()
+       : new Date().toISOString().slice(0, 10);
+}
+function pubNum(n){
+  return (typeof cpNum === 'function') ? cpNum(n)
+       : String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+function pubCard(rot, val, sub, cor){
+  return '<div style="background:#fff;border:1px solid var(--brd);border-left:3px solid '
+    + (cor || 'var(--azm)') + ';border-radius:10px;padding:.7rem .9rem">'
+    + '<div style="font-size:9.5px;font-weight:700;color:var(--tx2);letter-spacing:.5px;'
+    +   'text-transform:uppercase">' + rot + '</div>'
+    + '<div style="font-size:21px;font-weight:800;color:var(--az);line-height:1.25">' + val + '</div>'
+    + '<div style="font-size:10px;color:var(--tx2)">' + (sub || '') + '</div></div>';
+}
+
+function pubDesenhar(){
+  var lista = pubOrdenado();
+  var total = lista.reduce(function(a, x){ return a + x.qtd; }, 0);
+  var hoje  = pubHojeISO();
+
+  // últimos 7 dias corridos, contando hoje
+  var limite = new Date(Date.UTC(+hoje.slice(0,4), +hoje.slice(5,7)-1, +hoje.slice(8,10)) - 6*86400000)
+                 .toISOString().slice(0, 10);
+  var ult7 = lista.filter(function(x){ return x.data >= limite && x.data <= hoje; })
+                  .reduce(function(a, x){ return a + x.qtd; }, 0);
+  var doDia = _pubDias[hoje];
+  var media = lista.length ? Math.round(total / lista.length) : 0;
+
+  var cards = document.getElementById('pub-cards');
+  if (cards) cards.innerHTML =
+      pubCard('Entradas de hoje', (doDia == null ? '—' : pubNum(doDia)),
+              (doDia == null ? 'nada entrou com a data de hoje' : cpDataBR(hoje)), 'var(--vd)')
+    + pubCard('Últimos 7 dias', pubNum(ult7), 'de ' + cpDataBR(limite) + ' a ' + cpDataBR(hoje))
+    + pubCard('Média por dia com entrada', pubNum(media),
+              lista.length + ' dia(s) no histórico', 'var(--am)')
+    + pubCard('Total acumulado', pubNum(total),
+              lista.length ? (cpDataBR(lista[0].data) + ' → ' + cpDataBR(lista[lista.length-1].data)) : '—');
+
+  var tb = document.getElementById('pub-tbody');
+  if (tb) {
+    if (!lista.length) {
+      tb.innerHTML = '<tr><td colspan="3" style="padding:2rem;text-align:center;color:var(--tx2)">'
+        + 'Nenhuma planilha subida ainda — suba a BU aqui em cima.</td></tr>';
+    } else {
+      tb.innerHTML = lista.slice().reverse().map(function(x){
+        var eHoje = x.data === hoje;
+        return '<tr><td style="font-weight:' + (eHoje ? '800' : '600') + '">'
+          + cpDataBR(x.data) + (eHoje ? ' <span class="pl" style="background:var(--vdc);color:var(--vd)">hoje</span>' : '')
+          + '</td><td style="text-align:right;font-weight:700">' + pubNum(x.qtd) + '</td>'
+          + '<td style="color:var(--tx2)">' + pubDiaSemana(x.data) + '</td></tr>';
+      }).join('');
+    }
+  }
+  var elT = document.getElementById('pub-total'); if (elT) elT.textContent = pubNum(total);
+  var elD = document.getElementById('pub-dias');  if (elD) elD.textContent = lista.length + ' dia(s)';
+
+  pubGrafico(lista);
+}
+
+function pubGrafico(lista){
+  var el = document.getElementById('pubGrafico');
+  if (!el || typeof Chart === 'undefined') return;
+  var ult = lista.slice(-30);
+  if (_pubChart) { try { _pubChart.destroy(); } catch (e) {} _pubChart = null; }
+  if (!ult.length) return;
+  _pubChart = new Chart(el, {
+    type: 'bar',
+    data: {
+      labels: ult.map(function(x){ return cpDataBR(x.data).slice(0, 5); }),
+      datasets: [{ label: 'RC_ITEM', data: ult.map(function(x){ return x.qtd; }),
+                   backgroundColor: '#1A4A8A', borderRadius: 4, maxBarThickness: 34 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, datalabels: { display: false },
+                 tooltip: { callbacks: { title: function(it){
+                   var x = ult[it[0].dataIndex];
+                   return cpDataBR(x.data) + ' · ' + pubDiaSemana(x.data); } } } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } },
+                x: { grid: { display: false } } }
+    }
+  });
+}
+
+// ── Firebase: a base é a da própria frente (ADLV · Publicação) ────
+async function pubCarregar(){
+  var db = (typeof getDB === 'function') ? getDB() : null;
+  if (!db) { pubMsg('⚠ Firebase indisponível — o que você subir vale só nesta aba.', 'var(--am)'); return false; }
+  try {
+    var col = db.collection(PUB_COL);
+    var res = await Promise.all([col.doc(PUB_DOC_HIST).get(), col.doc(PUB_DOC_META).get()]);
+    _pubDias = (res[0] && res[0].exists && (res[0].data() || {}).dias) || {};
+    _pubMeta = (res[1] && res[1].exists && res[1].data()) || {};
+    return true;
+  } catch (e) {
+    console.warn('pubCarregar:', e);
+    pubMsg('⚠ não consegui ler o histórico: ' + e.message, 'var(--vm)');
+    return false;
+  }
+}
+
+async function pubGravar(novos){
+  var db = (typeof getDB === 'function') ? getDB() : null;
+  if (!db) return false;
+  var col = db.collection(PUB_COL);
+  await col.doc(PUB_DOC_HIST).set({ dias: _pubDias, v: 1 });
+  await col.doc(PUB_DOC_META).set({
+    atualizadoEm: new Date().toISOString(),
+    atualizadoPor: (typeof cpQuem === 'function') ? cpQuem() : '',
+    diasNoHistorico: Object.keys(_pubDias).length,
+    diasDaPlanilha: novos ? Object.keys(novos.dias).length : 0,
+    linhasBU: novos ? novos.linhasBU : 0,
+    arquivo: novos ? novos.arquivo : ''
+  });
+  return true;
+}
+
+// ── o upload ──────────────────────────────────────────────────────
+function pubLigarUpload(){
+  var inp = document.getElementById('pubFile');
+  if (!inp || inp.__ligado) return;
+  inp.__ligado = true;
+  inp.addEventListener('change', async function(){
+    var f = inp.files && inp.files[0];
+    if (!f) return;
+    if (typeof XLSX === 'undefined') {
+      pubMsg('❌ Biblioteca XLSX não carregada — atualize a página (F5).', 'var(--vm)');
+      inp.value = ''; return;
+    }
+    pubMsg('⏳ Lendo ' + f.name + '...');
+    try {
+      var buf = await f.arrayBuffer();
+      var wb  = XLSX.read(new Uint8Array(buf), { type:'array', cellDates:true });
+      var lid = pubLerEntradas(wb);
+      var linhasBU = pubLinhasBU(wb);
+
+      // o acumulado: dia novo entra, dia repetido é atualizado, dia que a
+      // planilha não trouxe fica como estava
+      var antes = Object.keys(_pubDias).length, novosDias = 0, mudados = 0;
+      Object.keys(lid.dias).forEach(function(d){
+        if (!(d in _pubDias)) novosDias++;
+        else if (_pubDias[d] !== lid.dias[d]) mudados++;
+        _pubDias[d] = lid.dias[d];
+      });
+
+      pubDesenhar();
+      var resumo = lid.lidas + ' dia(s) na planilha · ' + novosDias + ' novo(s)'
+                 + (mudados ? ' · ' + mudados + ' atualizado(s)' : '')
+                 + ' · histórico com ' + Object.keys(_pubDias).length + ' dia(s)';
+      var ok = await pubGravar({ dias: lid.dias, linhasBU: linhasBU, arquivo: f.name });
+      pubMsg('✅ ' + resumo + (ok ? ' · gravado para todo mundo.'
+                                  : ' · ⚠ não gravado — vale só nesta aba.'),
+             ok ? 'var(--vd)' : 'var(--am)');
+      if (antes && !novosDias && !mudados) {
+        pubMsg('✅ ' + resumo + ' — nenhum dia novo: esta planilha é a mesma de antes.', 'var(--tx2)');
+      }
+    } catch (e) {
+      console.warn('pubUpload:', e);
+      pubMsg('❌ ' + e.message, 'var(--vm)');
+    }
+    inp.value = '';
+  });
+}
+
+function pubExportar(){
+  if (typeof XLSX === 'undefined') { pubMsg('❌ Biblioteca XLSX não carregada.', 'var(--vm)'); return; }
+  var lista = pubOrdenado();
+  if (!lista.length) { pubMsg('Nada para exportar ainda.', 'var(--am)'); return; }
+  var ws = XLSX.utils.json_to_sheet(lista.map(function(x){
+    return { 'Data de Entrada': cpDataBR(x.data), 'Contagem de RC_ITEM': x.qtd,
+             'Dia da semana': pubDiaSemana(x.data) };
+  }));
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Novas Entradas');
+  XLSX.writeFile(wb, 'Novas_Entradas_' + pubHojeISO().replace(/-/g, '') + '.xlsx');
+}
+
+var _pubPronto = false;
+async function pubAbrir(){
+  pubLigarUpload();
+  if (!_pubPronto) {
+    pubMsg('⏳ Buscando o histórico gravado...');
+    await pubCarregar();
+    _pubPronto = true;
+    if (_pubMeta && _pubMeta.atualizadoEm) {
+      pubMsg('Histórico de ' + cpDataBR(String(_pubMeta.atualizadoEm).slice(0,10))
+        + (_pubMeta.atualizadoPor ? ', atualizado por ' + _pubMeta.atualizadoPor : '')
+        + ' · ' + (_pubMeta.diasNoHistorico || 0) + ' dia(s).');
+    } else {
+      pubMsg('Nenhuma planilha subida ainda — suba a BU aqui em cima.');
+    }
+  }
+  pubDesenhar();
 }
 
 </script>
