@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/10 00:40';
+var GTO_BUILD = '17/10 09:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -19860,7 +19860,11 @@ function monCard(rot, val, sub, cor, fundo){
 // GAP do Projeto (topo) são números do ciclo do ADLV: mostrar ali só
 // confunde quem abre a tela. É um registro — para esconder em outra
 // frente, basta acrescentar a chave dela aqui.
-var CARDS_CICLO_OCULTOS = ['fast'];
+// 17/10: as frentes de Reunião entraram na lista. A tela delas é
+// projetada numa reunião, e Meta Operacional, PATEC Finalizado, Meta e
+// GAP do Projeto são número da operação — não é dado de apresentação.
+// (E, estando em outro projeto do Firebase, nem seriam o número certo.)
+var CARDS_CICLO_OCULTOS = ['fast', 'adlv_reuniao', 'fast_reuniao'];
 
 function cardsCicloVisibilidade(){
   var esconder = (typeof _moduloAtivo !== 'undefined') && !!_moduloAtivo
@@ -44731,12 +44735,16 @@ function _entrarNoApp(){
   // A tela inicial era Indicadores de Mercado, que foi para o ADM. Agora o
   // app abre no Direcionamento da Equipe, o primeiro item do menu — e no
   // módulo Pedidos, na única tela que ele tem.
+  // Na frente de Reunião o Direcionamento nem está no menu: ele é do PATEC
+  // e lê a base do ADLV. Abrir nele mostrava a tela de outra frente logo de
+  // cara. A porta de entrada de lá é o Status Carteira.
   setTimeout(function(){
     try {
       if(document.getElementById('p-adm') && document.getElementById('p-adm').classList.contains('active')) return;
       var alvo = (_moduloAtivo === 'pedidos') ? 'pedidos'
                : (((typeof modSoPcp === 'function') && modSoPcp(_moduloAtivo)) ? 'pcp'
-               : 'direcionamento');
+               : (((typeof modSoReuniao === 'function') && modSoReuniao(_moduloAtivo)) ? 'reuniao-fast'
+               : 'direcionamento'));
       var it = [].slice.call(document.querySelectorAll('#sb .sb-it')).filter(function(x){
         return new RegExp("go\\('" + alvo + "'").test(x.getAttribute('onclick') || '');
       })[0];
@@ -45077,19 +45085,20 @@ function authMontarSidebar(emailParam){
   const _ia = document.getElementById('sb-adm-it');
   if(_sa) _sa.style.display = (podeVerTudo && !_soPcp) ? '' : 'none';
   if(_ia) _ia.style.display = (podeVerTudo && !_soPcp) ? '' : 'none';
-  // Os cards de ciclo (Meta Operacional, PATEC Finalizado, Meta e Gap do
-  // Projeto) são números do PATEC. Numa frente de base própria eles ficariam
-  // mostrando dado de outro projeto, então somem.
-  // Meta e Gap do Projeto passaram a ser o mesmo número em toda frente
-  // (meta da medição + gap real do PCP), então continuam visíveis em todas.
-  // Só os cards de ciclo do menu, que são números do PATEC, somem.
-  ['sb-cards-ciclo'].forEach(function(id){
-    const el = document.getElementById(id);
-    if(el) el.style.display = _soPcp ? 'none' : '';
-  });
+  // Quem decide em que frente os cards de ciclo somem é um registro só:
+  // CARDS_CICLO_OCULTOS. Antes esta função mandava os dois cards do topo
+  // aparecerem SEMPRE, e desfazia o que o registro tinha acabado de
+  // esconder — dependia de quem rodasse por último.
+  // A regra do PCP continua à parte: lá somem só os do menu.
+  const _ocultoPorFrente = (typeof CARDS_CICLO_OCULTOS !== 'undefined')
+    && CARDS_CICLO_OCULTOS.indexOf(_moduloAtivo) >= 0;
+  const _elCiclo = document.getElementById('sb-cards-ciclo');
+  // 'grid' e não '': o display vem do atributo style do HTML, e devolver
+  // string vazia deixaria os dois cards empilhados um embaixo do outro.
+  if(_elCiclo) _elCiclo.style.display = (_soPcp || _ocultoPorFrente) ? 'none' : 'grid';
   ['top-meta-proj-box','top-gap-proj-box'].forEach(function(id){
     const el = document.getElementById(id);
-    if(el) el.style.display = '';
+    if(el) el.style.display = _ocultoPorFrente ? 'none' : '';
   });
   // Aba "Usuários" dentro do ADM só aparece pro ADM geral (André) — Admin do
   // FAST vê todas as outras abas do ADM, mas precisa pedir pra André
