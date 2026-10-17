@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/10 12:40';
+var GTO_BUILD = '17/10 13:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -36877,14 +36877,24 @@ function pcpNovaMedicao(ini, fim){
 // Cada card guarda o que ele digita. Os que um dia vão vir do próprio
 // dash estão marcados com fonte:'' — quando a origem for definida, o
 // número passa a ser preenchido sozinho e o campo vira só leitura.
+// O número GRANDE de cada card é a meta — ele digita. O contador de
+// baixo é o realizado, e desde 17/10 ele não se digita mais: é a soma
+// das linhas da grade, que é onde o dado realmente entra. Digitar nos
+// dois lugares era ter duas verdades para o mesmo número.
 var PCP_CARDS = [
   { chave:'receb_rc', nome:'RECEBIMENTO DE RC',
     sub:'itens novo até 14/10 e Reap até 19/10',
-    conta:'recebidos', cor:'var(--azm)' },
+    conta:'recebidos', cor:'var(--azm)',
+    calcReal:function(){ return pcpRealTotal('entrada') + pcpRealTotal('satre'); },
+    deOnde:'Entrada Itens Novos + Itens SATRE' },
   { chave:'prod_ped', nome:'PRODUTIVIDADE EM PEDIDOS', sub:'mínimo liberados',
-    conta:'liberados', cor:'var(--az)' },
+    conta:'liberados', cor:'var(--az)',
+    calcReal:function(){ return pcpRealTotal('emissao'); },
+    deOnde:'soma da Emissão de Pedido' },
   { chave:'prod_dev', nome:'PRODUTIVIDADE EM DEVOLUÇÃO', sub:'RCs devolvidas SIM e resgate',
-    conta:'devolvidas', cor:'var(--az)' },
+    conta:'devolvidas', cor:'var(--az)',
+    calcReal:function(){ return pcpRealTotal('devolucoes'); },
+    deOnde:'soma da linha Devoluções' },
   // Não se digita: é a soma da linha Emissão de Pedido da grade, que por
   // sua vez vem da coluna Feitos do Controle de Pedidos.
   { chave:'emitidos', nome:'PEDIDOS EMITIDOS', sub:'soma da Emissão de Pedido',
@@ -36897,6 +36907,14 @@ function pcpCardsVazios(){
   PCP_CARDS.forEach(function(c){ o[c.chave] = { meta:0, real:0 }; });
   return o;
 }
+// O realizado do card: calculado quando a origem está na grade, senão o
+// que está guardado (cards antigos, e os que ainda se digitam).
+function pcpCardReal(chave){
+  var reg = PCP_CARDS.filter(function(x){ return x.chave === chave; })[0];
+  if (reg && reg.calcReal) { try { return Math.round(reg.calcReal()); } catch (e) {} }
+  return pcpCard(chave).real;
+}
+
 function pcpCard(chave){
   if (!_pcp) return { meta:0, real:0 };
   _pcp.cards = _pcp.cards || pcpCardsVazios();
@@ -36906,7 +36924,8 @@ function pcpCard(chave){
 function pcpSetCard(chave, campo, v){
   if (!_pcp || _pcp.fechada) return;
   var reg = PCP_CARDS.filter(function(x){ return x.chave === chave; })[0];
-  if (reg && reg.calc && campo === 'meta') return;   // esse card é calculado
+  if (reg && reg.calc && campo === 'meta') return;    // esse card é calculado
+  if (reg && reg.calcReal && campo === 'real') return; // esse vem da grade
   pcpCard(chave)[campo] = aagNum(v);
   pcpRenderCards();
   pcpRenderPremissas();
@@ -36917,7 +36936,7 @@ function pcpSetCard(chave, campo, v){
 // Aproveitamento: do que foi liberado no período, quanto virou pedido.
 // A regra fina ele ainda vai passar; por ora é emitidos ÷ liberados.
 function pcpAproveitamento(){
-  var lib = pcpCard('prod_ped').real;
+  var lib = pcpCardReal('prod_ped');
   var emi = pcpEmitidos();
   return lib ? emi / lib : null;
 }
@@ -37180,7 +37199,7 @@ function pcpRenderPremissas(){
     + '<span style="font-size:10px;color:var(--tx2);white-space:nowrap;'
     +   'border-left:1px solid var(--brd);padding-left:7px">'
     +   cpNum(Math.round(pcpEmitidos())) + ' emitidos ÷ '
-    +   cpNum(pcpCard('prod_ped').real) + ' liberados</span>'
+    +   cpNum(pcpCardReal('prod_ped')) + ' liberados</span>'
     + '</div>';
 }
 
@@ -37282,8 +37301,25 @@ function pcpSetReal(linha, dia, v){
   if (aagTxt(v) === '') delete _pcp.real[linha][dia];
   else _pcp.real[linha][dia] = aagNum(v);
   pcpPintarTotais();
+  // os contadores dos cards são a soma destas linhas: sem isto, o card
+  // continuaria no número antigo até alguém recarregar a tela
+  pcpRenderCards();
   pcpSalvar();
 }
+// Esvazia a linha do Programado de um bloco, para ele digitar só os
+// dias em que aquele volume entra de verdade.
+function pcpLimparPlan(bloco){
+  if (!_pcp || _pcp.fechada) return;
+  var b = PCP_BLOCOS.filter(function(x){ return x.chave === bloco; })[0];
+  if (!b) return;
+  if (!confirm('Apagar o Programado de ' + b.nome + ' em todos os dias?\n\n'
+    + 'Depois é só digitar em cada dia que recebe. O realizado não é tocado.')) return;
+  _pcp.plan[bloco] = {};
+  pcpRenderGrade();
+  pcpRenderCards();
+  pcpSalvar();
+}
+
 // Preenche a meta de um bloco em todos os dias de uma vez.
 function pcpMetaEmTodos(bloco, v){
   if (!_pcp || _pcp.fechada) return;
@@ -37587,15 +37623,24 @@ function pcpRenderCards(){
   // o contador pequeno embaixo, com o quanto representa da meta
   var contador = function(chave, palavra){
     var c = pcpCard(chave);
-    var pct = c.meta ? 100 * c.real / c.meta : null;
+    var reg = PCP_CARDS.filter(function(x){ return x.chave === chave; })[0];
+    var real = pcpCardReal(chave);
+    var pct = c.meta ? 100 * real / c.meta : null;
+    // quando vem da grade, o número é texto, não campo: digitar aqui
+    // criaria um segundo valor que o próximo desenho jogaria fora
+    var numero = (reg && reg.calcReal)
+      ? '<strong title="' + cpEsc(reg.deOnde || 'soma da grade')
+        + '" style="font-size:11px;font-weight:800;color:var(--tx)">'
+        + cpNum(real) + '</strong>'
+      : '<input type="text" value="' + cpNum(real) + '"' + trava
+        + ' onchange="pcpSetCard(\'' + chave + '\',\'real\',this.value)"'
+        + ' onfocus="this.select()" title="quantos já saíram até agora"'
+        + ' style="width:52px;font-size:11px;font-weight:800;text-align:right;color:var(--tx);'
+        + 'background:transparent;border:none;border-bottom:1px dashed var(--brd);padding:0">';
     return '<div style="margin-top:6px;padding-top:5px;border-top:1px dashed var(--brd);'
       + 'display:flex;align-items:center;justify-content:center;gap:4px;font-size:10px;'
       + 'color:var(--tx2);white-space:nowrap">'
-      + '<input type="text" value="' + cpNum(c.real) + '"' + trava
-      + ' onchange="pcpSetCard(\'' + chave + '\',\'real\',this.value)"'
-      + ' onfocus="this.select()" title="quantos já saíram até agora"'
-      + ' style="width:52px;font-size:11px;font-weight:800;text-align:right;color:var(--tx);'
-      + 'background:transparent;border:none;border-bottom:1px dashed var(--brd);padding:0">'
+      + numero
       + '<span>' + cpEsc(palavra) + '</span>'
       + '<strong style="color:' + (pct === null ? 'var(--tx2)'
           : pct >= 100 ? 'var(--vd)' : pct >= 80 ? 'var(--am)' : 'var(--vm)') + '">'
@@ -38287,9 +38332,18 @@ function pcpRenderGrade(){
     h += '<tr style="background:var(--cin)">'
       + '<td style="padding:5px 8px;font-weight:700;position:sticky;left:0;background:var(--cin);'
       +   'border-top:2px solid var(--brd)">' + cpEsc(b.nome)
-      +   '<div style="font-size:9.5px;font-weight:500;color:var(--tx2)">Programado'
+      +   '<div style="font-size:9.5px;font-weight:500;color:var(--tx2)">Programado · '
+      +   'total <strong id="pcp-ptl-' + b.chave + '" style="color:var(--tx)">'
+      +   cpNum(planT) + '</strong>'
+      // A distribuição é dia a dia, digitada: cada célula desta linha é
+      // um campo. "mesma em todos" era o único caminho e enchia os 19
+      // dias com o mesmo número, que não é o plano de recebimento.
       +   (_pcp.fechada ? '' : ' · <span onclick="pcpPerguntarMeta(\'' + b.chave + '\')" '
-          + 'style="color:var(--azm);cursor:pointer;text-decoration:underline">meta do bloco</span>')
+          + 'style="color:var(--azm);cursor:pointer;text-decoration:underline"'
+          + ' title="preenche o mesmo número em todos os dias">mesma em todos</span>'
+          + ' · <span onclick="pcpLimparPlan(\'' + b.chave + '\')" '
+          + 'style="color:var(--azm);cursor:pointer;text-decoration:underline"'
+          + ' title="apaga a linha para você digitar só os dias que recebem">limpar</span>')
       +   '</div></td>'
       ;
     dias.forEach(function(d){
@@ -38366,6 +38420,8 @@ function pcpPintarTotais(){
     var planT = pcpPlanTotal(b.chave);
     var el = document.getElementById('pcp-pt-' + b.chave);
     if (el) el.textContent = cpNum(planT);
+    var el2 = document.getElementById('pcp-ptl-' + b.chave);
+    if (el2) el2.textContent = cpNum(planT);
     b.linhas.forEach(function(l){
       var tr = document.getElementById('pcp-lin-' + l.chave);
       if (!tr) return;
