@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/10 14:10';
+var GTO_BUILD = '17/10 14:45';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -37212,6 +37212,21 @@ function pcpRenderPremissas(){
     +   'border-left:1px solid var(--brd);padding-left:7px">'
     +   cpNum(Math.round(pcpEmitidos())) + ' emitidos ÷ '
     +   cpNum(pcpCardReal('prod_ped')) + ' liberados</span>'
+    + '</div>'
+    // Dias úteis: saiu da grade de cards (17/10) e veio para cá, que é
+    // a faixa de cima — ela fica fora das abas e por isso acompanha as
+    // três telas do PCP.
+    + '<div title="dias úteis do período da medição; sábado, domingo e '
+    +   'feriado não entram" style="display:inline-flex;align-items:center;gap:7px;'
+    +   'margin-left:8px;background:var(--cin);border:1.5px solid var(--brd);'
+    +   'border-radius:10px;padding:6px 12px">'
+    + '<span style="font-size:11px;font-weight:700;color:var(--tx2);'
+    +   'text-transform:uppercase;letter-spacing:.3px">Dias úteis</span>'
+    + '<strong id="pcp-dias-uteis" style="font-size:15px;color:var(--az)">'
+    +   cpNum(dias) + '</strong>'
+    + '<span style="font-size:10px;color:var(--tx2);white-space:nowrap;'
+    +   'border-left:1px solid var(--brd);padding-left:7px">'
+    +   cpNum(pcpDiasDecorridos().length) + ' já decorrido(s)</span>'
     + '</div>';
 }
 
@@ -37686,10 +37701,8 @@ function pcpRenderCards(){
   var h = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(152px,1fr));'
         + 'gap:11px;margin-bottom:1rem">';
 
-  // 1. os dias úteis: sai do período, não se digita
-  h += moldura('<div style="font-size:24px;font-weight:800;color:var(--az);line-height:1.1">'
-       + cpNum(dias.length) + '</div>' + rotulo('DIAS ÚTEIS')
-       + legenda(decorridos + ' já decorrido(s)'));
+  // 1. os dias úteis saíram daqui em 17/10: viraram um chip na faixa de
+  // cima, junto das Premissas, que fica acima das abas e aparece nas três.
 
   // 2. os cards do meio: os que ele preenche e os que saem de conta
   PCP_CARDS.forEach(function(c){
