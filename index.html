@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/10 16:00';
+var GTO_BUILD = '17/10 16:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -36911,7 +36911,8 @@ var PCP_CARDS = [
   { chave:'prod_ped', nome:'PRODUTIVIDADE EM PEDIDOS', sub:'mínimo convertidos',
     conta:'convertidos', cor:'var(--az)',
     calcReal:function(){ return pcpConvertido(); },
-    deOnde:'liberado por tipo × peso, na curva (Petronect, Reap, Procureon e Catálogo)' },
+    deOnde:'liberado por tipo na curva, um para um — Petronect, Reap, '
+         + 'Procureon e Catálogo (sem peso, sem Devolução)' },
   // Não se digita: é a soma da linha Emissão de Pedido da grade, que por
   // sua vez vem da coluna Feitos do Controle de Pedidos.
   { chave:'emitidos', nome:'PEDIDOS EMITIDOS', sub:'soma da Emissão de Pedido',
@@ -36961,13 +36962,15 @@ function pcpSetCard(chave, campo, v){
   pcpSalvar();
 }
 
-// Aproveitamento: o emitido sobre o convertido do período.
-// Antes dividia o emitido pela soma da Emissão de Pedido — o mesmo
-// número em cima e embaixo, e por isso a faixa dizia 100% todo dia.
+// Aproveitamento: dos pedidos que saíram, quantos foram convertidos.
+// A conta é convertido ÷ emitido — nessa ordem. Invertida ela passa de
+// 100% sempre que o convertido é menor que o emitido, que é justamente
+// o caso normal: 917,6% no dia 17/10, com 1.147 emitidos e 125
+// convertidos. Aproveitamento não passa de 100%.
 function pcpAproveitamento(){
-  var conv = pcpConvertido();
   var emi = pcpEmitidos();
-  return conv ? emi / conv : null;
+  var conv = pcpConvertido();
+  return emi ? conv / emi : null;
 }
 // Os pedidos emitidos da medição: a soma da linha Emissão de Pedido.
 function pcpEmitidos(){ return pcpRealTotal('emissao'); }
@@ -37090,20 +37093,21 @@ function pcpSetCurva(tipo, dia, v){
 // ── as três séries, acumuladas ────────────────────────────────────
 // ── o CONVERTIDO: os quatro tipos de PEDIDO da curva ─────────────
 // Devolução fica de fora: ela é o outro lado da operação, não pedido
-// liberado. Cada tipo entra pelo peso que está na tabela da curva —
-// Petronect 1, Reap 0,5, Procureon 0,8, Catálogo 0,8 — e o peso é
-// editável por ele, então aqui se lê a tabela, nunca um número fixo.
+// liberado.
+//
+// UM PARA UM, sem peso. O peso (Petronect 1, Reap 0,5, Procureon 0,8,
+// Catálogo 0,8) é um fator de medição e continua valendo na curva e no
+// financeiro — lá ele diz quanto cada tipo VALE. Aqui a pergunta é
+// outra: de tudo que foi emitido, quanto foi convertido. Isso se conta
+// por cabeça; um pedido convertido é um pedido convertido, seja Reap ou
+// Petronect. Com peso, a conta dava 917,6% no dia 17/10.
 var PCP_TIPOS_CONVERTIDO = ['petronect', 'reap', 'procureon', 'catalogo'];
 
 function pcpConvertido(){
   if (!_pcp) return 0;
-  var pesos = pcpPesos();
   var tot = 0;
   (_pcp.dias || []).forEach(function(d){
-    pesos.forEach(function(t){
-      if (PCP_TIPOS_CONVERTIDO.indexOf(t.chave) === -1) return;
-      tot += pcpCurvaDia(t.chave, d) * (+t.peso || 0);
-    });
+    PCP_TIPOS_CONVERTIDO.forEach(function(ch){ tot += pcpCurvaDia(ch, d); });
   });
   return Math.round(tot * 100) / 100;
 }
@@ -37242,7 +37246,7 @@ function pcpRenderPremissas(){
         + '</strong>/dia</span>' : '')
     + '</div>'
     // Aproveitamento: quanto do que foi liberado virou pedido no período
-    + '<div title="pedidos emitidos ÷ convertidos (liberado por tipo × peso), '
+    + '<div title="convertidos ÷ emitidos, um para um e sem peso, '
     +   'dentro do período da medição"'
     +   ' style="display:inline-flex;align-items:center;gap:7px;margin-left:8px;'
     +   'background:var(--cin);border:1.5px solid var(--brd);border-radius:10px;'
@@ -37256,8 +37260,8 @@ function pcpRenderPremissas(){
     + '</strong>'
     + '<span style="font-size:10px;color:var(--tx2);white-space:nowrap;'
     +   'border-left:1px solid var(--brd);padding-left:7px">'
-    +   cpNum(Math.round(pcpEmitidos())) + ' emitidos ÷ '
-    +   cpNum(Math.round(pcpConvertido())) + ' convertidos</span>'
+    +   cpNum(Math.round(pcpConvertido())) + ' convertidos ÷ '
+    +   cpNum(Math.round(pcpEmitidos())) + ' emitidos</span>'
     + '</div>'
     // Dias úteis: saiu da grade de cards (17/10) e veio para cá, que é
     // a faixa de cima — ela fica fora das abas e por isso acompanha as
