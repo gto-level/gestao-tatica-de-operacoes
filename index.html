@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/10 11:20';
+var GTO_BUILD = '17/10 12:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -36818,7 +36818,8 @@ var PCP_CFG  = 'pcp_atual';        // qual medição está aberta
 
 var PCP_BLOCOS = [
   { chave:'receb', nome:'Recebimento de Itens', meta:500, linhas:[
-      { chave:'entrada', nome:'Entrada Itens Novos' },
+      { chave:'entrada', nome:'Entrada Itens Novos', auto:'entradas',
+        painel:'Novas Entradas, da frente ADLV · Publicação' },
       { chave:'satre',   nome:'Itens SATRE' } ] },
   { chave:'oport', nome:'Oportunidades', meta:260, linhas:[
       { chave:'envio_eco',  nome:'Envio Ecotações' },
@@ -38477,6 +38478,67 @@ async function pcpPedidosFeitos(ini, fim){
 // Pede a senha uma vez e autentica no projeto do módulo Pedidos, para o
 // PCP conseguir ler o Histórico dos dias de lá.
 var _pcpLiberando = false;
+// ── Entrada de Itens Novos: vem da frente ADLV · Publicação ──────
+// A Publicação é outro projeto do Firebase (patec-adlv-republicacao), e
+// é lá que o upload diário da BU grava o mapa data → quantidade. O PCP
+// lê esse mapa e recorta só os dias da medição aberta.
+//
+// Como no Controle de Pedidos: se a base recusar, NÃO invento número
+// nem caio para outra base. Dia sem dado fica em branco, e o aviso diz
+// por quê — número errado numa medição é pior do que campo vazio.
+var _pcpEntradasInfo = null;
+
+async function pcpEntradasNovas(ini, fim){
+  _pcpEntradasInfo = null;
+  try {
+    var db = (typeof getDBModulo === 'function') ? getDBModulo('adlv_republicacao') : null;
+    if (!db) throw new Error('sem conexão com a base da Publicação');
+    var doc = await db.collection('entradas').doc('historico').get();
+    var dias = (doc && doc.exists && (doc.data() || {}).dias) || {};
+    var out = {}, fora = 0;
+    Object.keys(dias).forEach(function(d){
+      if (d < ini || d > fim) { fora++; return; }
+      out[d] = +dias[d] || 0;
+    });
+    _pcpEntradasInfo = { base:'publicacao', dias:Object.keys(out).length,
+                         guardados:Object.keys(dias).length, fora:fora };
+    return out;
+  } catch (e) {
+    _pcpEntradasInfo = { erro: e.code || e.message || String(e) };
+    console.warn('pcpEntradasNovas:', _pcpEntradasInfo.erro);
+    return {};
+  }
+}
+
+var _pcpLiberandoEnt = false;
+async function pcpLiberarEntradas(){
+  if (_pcpLiberandoEnt) return false;
+  _pcpLiberandoEnt = true;
+  var st = document.getElementById('pcp-status');
+  try {
+    var r = await _autenticarModulo('adlv_republicacao');
+    if (!r.ok) {
+      var senha = await _pedirSenhaModal('Confirme sua senha para o PCP ler as '
+        + 'Novas Entradas (frente ADLV · Publicação):');
+      if (!senha) { _pcpLiberandoEnt = false; return false; }
+      r = await _autenticarModulo('adlv_republicacao', senha);
+    }
+    if (!r.ok) {
+      if (st) st.innerHTML = '<span style="color:var(--vm)">✗ não consegui liberar a leitura '
+        + 'da Publicação (' + cpEsc(r.motivo || 'erro desconhecido') + ')</span>';
+      _pcpLiberandoEnt = false;
+      return false;
+    }
+    _dbPorModulo['adlv_republicacao'] = null;   // reabre já autenticada
+    _pcpLiberandoEnt = false;
+    return true;
+  } catch (e) {
+    if (st) st.innerHTML = '<span style="color:var(--vm)">✗ ' + cpEsc(e.message) + '</span>';
+    _pcpLiberandoEnt = false;
+    return false;
+  }
+}
+
 async function pcpLiberarPedidos(){
   if (_pcpLiberando) return false;
   _pcpLiberando = true;
@@ -38559,6 +38621,24 @@ async function pcpPuxarDoDash(){
     }
     if (Object.keys(porDia).length) achados['pedidos'] = porDia;
 
+    // Entrada de Itens Novos: o histórico da frente ADLV · Publicação
+    var entradas = await pcpEntradasNovas(_pcp.inicio, _pcp.fim);
+    if (_pcpEntradasInfo && _pcpEntradasInfo.erro) {
+      if (st) st.innerHTML = '⏳ A base da Publicação pediu autenticação...';
+      var liberouEnt = await pcpLiberarEntradas();
+      if (liberouEnt) entradas = await pcpEntradasNovas(_pcp.inicio, _pcp.fim);
+    }
+    // na própria frente Publicação o histórico já está em memória
+    if (!Object.keys(entradas).length && typeof _pubDias !== 'undefined'
+        && Object.keys(_pubDias || {}).length) {
+      Object.keys(_pubDias).forEach(function(d){
+        if (d >= _pcp.inicio && d <= _pcp.fim) entradas[d] = +_pubDias[d] || 0;
+      });
+      if (Object.keys(entradas).length)
+        _pcpEntradasInfo = { base:'memoria', dias:Object.keys(entradas).length };
+    }
+    if (Object.keys(entradas).length) achados['entradas'] = entradas;
+
     // As seis linhas do bloco PATEC, da Análise PCP do Painel Estratégico
     var doPainel = await pcpAcoesDoPainel(_pcp.inicio, _pcp.fim);
     Object.keys(doPainel).forEach(function(k){ achados['painel_' + k] = doPainel[k]; });
@@ -38591,7 +38671,7 @@ async function pcpPuxarDoDash(){
   if (!mudou) {
     if (st) st.innerHTML = '<span style="color:var(--am)">Nada encontrado no dashboard para '
       + 'os dias desta medição. As linhas com ⟳ são as que eu consigo puxar.</span>'
-      + pcpAvisoPedidos();
+      + pcpAvisos();
     return;
   }
   pcpRenderGrade();
@@ -38601,12 +38681,40 @@ async function pcpPuxarDoDash(){
     + cpEsc(linhas.join(' · '))
     + (sobrescritos ? ' · <span style="color:var(--am)">' + cpNum(sobrescritos)
         + ' valor(es) que você tinha digitado foram substituídos pelo do dashboard</span>' : '')
-    + '</span>' + pcpAvisoPedidos();
+    + '</span>' + pcpAvisos();
 }
 
 // A base do módulo Pedidos é outro projeto do Firebase. O aviso sempre
 // diz de qual base os números da Emissão de Pedido saíram — é o que
 // separa "não veio" de "veio da cópia velha".
+// Os dois avisos juntos: cada origem diz de onde veio, ou por que não veio
+function pcpAvisos(){ return pcpAvisoPedidos() + pcpAvisoEntradas(); }
+
+function pcpAvisoEntradas(){
+  var i = _pcpEntradasInfo;
+  if (!i) return '';
+  var cx = function(cor, txt){
+    return '<div style="font-size:11px;color:' + cor + ';margin-top:5px">' + txt + '</div>';
+  };
+  if (i.erro) {
+    return cx('var(--vm)', '⚠ A <strong>Entrada Itens Novos</strong> não veio: a base da frente '
+      + '<strong>ADLV · Publicação</strong> recusou a leitura (' + cpEsc(i.erro) + '). '
+      + '<span onclick="pcpPuxarDoDash()" style="color:var(--azm);cursor:pointer;'
+      + 'text-decoration:underline;font-weight:700">tentar de novo</span>');
+  }
+  if (i.base === 'memoria') {
+    return cx('var(--tx2)', 'A Entrada Itens Novos veio do histórico já carregado nesta tela.');
+  }
+  if (!i.dias) {
+    return cx('var(--am)', 'A base da <strong>Publicação</strong> respondeu, mas nenhum dos '
+      + cpNum(i.guardados || 0) + ' dia(s) guardados cai dentro desta medição. '
+      + 'Suba a BU no tópico <strong>Novas Entradas</strong>.');
+  }
+  return cx('var(--tx2)', 'Entrada Itens Novos: ' + cpNum(i.dias)
+    + ' dia(s) lidos na base da Publicação'
+    + (i.fora ? ' (outros ' + cpNum(i.fora) + ' estão fora do período)' : '') + '.');
+}
+
 function pcpAvisoPedidos(){
   var i = _pcpPedidosInfo;
   if (!i) return '';
@@ -44366,6 +44474,31 @@ function _sessaoDoApp(app, ms){
   });
 }
 
+// O que o Firebase devolve é um código seco ('auth/configuration-not-found'),
+// e quem está na frente da tela não tem como adivinhar o que fazer com ele.
+// Os três primeiros não são erro de senha nem de rede: são projeto do
+// Firebase criado sem a Autenticação ligada — o passo que não dá para
+// pular quando se cria uma frente nova.
+function _motivoAuth(c){
+  var m = {
+    'auth/configuration-not-found':
+      'a Autenticação ainda não foi ligada nesse projeto do Firebase.\n\n'
+      + 'No Console → Authentication → Começar → Método de login → '
+      + 'E-mail/senha → Ativar. Depois recarregue esta página.',
+    'auth/operation-not-allowed':
+      'o método E-mail/senha está desligado nesse projeto do Firebase.\n\n'
+      + 'No Console → Authentication → Método de login → E-mail/senha → Ativar.',
+    'auth/invalid-api-key':
+      'a chave do Firebase dessa frente está errada ou incompleta.',
+    'auth/wrong-password':      'a senha não confere.',
+    'auth/invalid-credential':  'o e-mail ou a senha não conferem.',
+    'auth/user-not-found':      'esse e-mail ainda não existe nesse projeto.',
+    'auth/network-request-failed': 'sem conexão com o Firebase.',
+    'sem_senha':                'a senha não está em memória — saia e entre de novo.'
+  };
+  return m[c] || ('erro do Firebase: ' + (c || 'desconhecido'));
+}
+
 async function _autenticarModulo(mod, senhaOverride){
   const email = _authUser?.email || window._authUser?.email;
   const cfg = modConfig(mod);
@@ -44534,7 +44667,8 @@ async function selecionarModulo(mod){
       if(!senhaConfirm) return;
       r = await _autenticarFast(senhaConfirm);
       if(!r.ok){
-        alert('Não foi possível autenticar no FAST (' + (r.motivo||'erro desconhecido') + '). Se isso persistir, anota essa mensagem e avisa quem administra o sistema.');
+        alert('Não consegui entrar no FAST:\n\n' + _motivoAuth(r.motivo)
+          + '\n\n(código: ' + (r.motivo || 'desconhecido') + ')');
         return;
       }
       _aproveitarSenha(senhaConfirm);
@@ -44548,8 +44682,9 @@ async function selecionarModulo(mod){
       _aproveitarSenha(senhaConfirm);
       rp = await _autenticarModulo(mod, senhaConfirm);
       if(!rp.ok){
-        alert('Não foi possível autenticar em ' + modNome(mod)
-          + ' (' + (rp.motivo||'erro desconhecido') + ').');
+        alert('Não consegui entrar em ' + modNome(mod) + ':\n\n'
+          + _motivoAuth(rp.motivo)
+          + '\n\n(código: ' + (rp.motivo || 'desconhecido') + ')');
         return;
       }
     }
