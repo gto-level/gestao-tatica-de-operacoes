@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '18/10 23:40';
+var GTO_BUILD = '19/10 00:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -55953,7 +55953,15 @@ function reuFaixa(){
   var set = function(id, txt){
     var el = document.getElementById(id); if (el) el.textContent = txt;
   };
-  var n = (typeof _gnvBase !== 'undefined' && _gnvBase) ? _gnvBase.length : 0;
+  // "Itens na governança" é o MESMO número do card "Em andamento" — os
+  // itens com status de Patec. A base bruta traz muito mais linha (as já
+  // concluídas de outras cargas), e mostrar 342 ao lado de um card de 95
+  // fazia a faixa e a tela contarem coisas diferentes.
+  var temBase = (typeof _gnvBase !== 'undefined' && _gnvBase);
+  var n = temBase ? _gnvBase.length : 0;
+  if (temBase && typeof _gnvBaseAba === 'function') {
+    try { n = _gnvBaseAba().length; } catch (e) { /* fica o bruto */ }
+  }
   var nPed = (typeof _pedDados !== 'undefined' && _pedDados) ? _pedDados.length : 0;
   set('reu-meta-itens', _reuAba === 'pedidos'
       ? (nPed ? cpNum(nPed) + ' pedidos' : '—')
