@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '18/10 17:40';
+var GTO_BUILD = '18/10 18:25';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -60086,7 +60086,13 @@ function rfLigado(el){
 function rfFundoDoCard(el){
   var st = el.getAttribute('style') || '';
   var m = st.match(/background:\s*([^;]+)/);
-  return (m && !/#fff/i.test(m[1])) ? m[1].trim() : '#fff';
+  if (!m) return '#fff';
+  var cor = m[1].trim();
+  // var(--bg) é a cor do FUNDO da página: os cards de fila vêm com ela,
+  // e dentro de um card isso vira cinza sobre cinza — foi o que deixou
+  // a faixa das filas parecendo apagada
+  if (/#fff/i.test(cor) || /var\(--bg\)/.test(cor)) return '#fff';
+  return cor;
 }
 // Que recorte este card representa — lido do onclick que o gerador pôs.
 // É o mesmo clique que já filtrava a tabela; aqui ele só é interpretado.
@@ -60101,8 +60107,14 @@ function rfCorteDoCard(el){
 
 function rfCorDoCard(el){
   var st = el.getAttribute('style') || '';
-  var m = st.match(/border:[^;]*solid\s+([^;]+)/);
-  return m ? m[1].trim() : 'var(--c-principal)';
+  // o card de fila carrega a cor dele no border-top (o border comum é só
+  // a linha cinza da caixa); quando não há, vale o border comum
+  var m = st.match(/border-top:[^;]*solid\s+([^;]+)/)
+       || st.match(/border:[^;]*solid\s+([^;]+)/);
+  var cor = m ? m[1].trim() : '';
+  // var(--brd) é o cinza da borda: como cor de TEXTO ele some na tela
+  if (!cor || /var\(--brd\)/.test(cor)) cor = 'var(--az)';
+  return cor;
 }
 
 function rfTrocarCard(el){
@@ -60120,13 +60132,20 @@ function rfTrocarCard(el){
   var apagado = /opacity:\s*\.?\d/.test(el.getAttribute('style') || '')
              && !el.getAttribute('onclick');
 
-  el.className = 'kpi small' + (ligado ? ' rf-on' : '') + (apagado ? ' rf-off' : '');
+  // as classes que já vinham ficam: é uma delas (gnv-tp-status-b) que
+  // esconde o card do Status B aqui no Radar. Sobrescrever a lista
+  // inteira fazia ele voltar a aparecer.
+  el.className = (el.className ? el.className + ' ' : '')
+    + 'kpi small' + (ligado ? ' rf-on' : '') + (apagado ? ' rf-off' : '');
   // o fundo claro que o card já tinha continua: todo branco deixou a
   // tela lavada, e é o tom que diz de que grupo o card é
   el.setAttribute('style', 'border-left-color:' + cor + ';'
     + (ligado ? '' : 'background:' + rfFundoDoCard(el) + ';'));
-  // o ⊕, igual ao do painel: abre os itens daquele card
+  // O ⊕ fica só nos cards de FILA (Parecerista, Parada Requisitante,
+  // Parada Fornecedor, MDG…). É deles que a quebra por nº de cobranças
+  // faz sentido; nos outros ela não diz nada.
   var corte = rfCorteDoCard(el);
+  if (!corte || corte.fn !== 'gnvFiltrarFila') corte = null;
   el.innerHTML =
       (corte ? '<div class="kpi-actions"><button class="kpi-expand-btn" type="button"'
              + ' title="Ver os itens" onclick="rfDetAbrir(this);event.stopPropagation()">+</button>'
@@ -60233,28 +60252,32 @@ function rfDetAbrir(btn){
   document.getElementById('ra-det-sub').textContent =
     cpNum(calc.length) + ' item(ns) nesse recorte';
 
-  // os dois cortes que ele pediu: por cobrança e por prazo
+  // Quatro cards, a quebra por nº de cobranças. O item que ainda não
+  // foi cobrado é o que está dentro do prazo — é assim que ele lê, e é
+  // esse o nome do primeiro card.
   var porCobr = { 0:0, 1:0, 2:0, 3:0 };
-  var prazo = { 'DENTRO DO PRAZO':0, 'VENCIDA':0, 'CONCLUÍDO':0 };
+  var acima = 0;
   calc.forEach(function(x){
     var q = x.c.cobranca || 0;
+    if (q > 3) acima++;
     porCobr[q >= 3 ? 3 : q]++;
-    if (prazo[x.c.status] !== undefined) prazo[x.c.status]++;
   });
-  var mini = function(rot, n, classe){
+  var mini = function(rot, n, classe, cap){
     return '<div class="kpi small ' + (classe || '') + '">'
       + '<div class="lbl">' + cpEsc(rot) + '</div>'
-      + '<div class="val">' + cpNum(n) + '</div></div>';
+      + '<div class="val">' + cpNum(n) + '</div>'
+      + (cap ? '<div class="cap">' + cpEsc(cap) + '</div>' : '')
+      + '</div>';
   };
   document.getElementById('ra-det-cards').className = 'rf-kpis';
   document.getElementById('ra-det-cards').innerHTML =
-      mini('Dentro do prazo', prazo['DENTRO DO PRAZO'], 'light-green')
-    + mini('Vencidas', prazo['VENCIDA'], 'purple')
-    + mini('Concluídos', prazo['CONCLUÍDO'], 'light-blue')
-    + mini('Sem cobrança', porCobr[0])
-    + mini('1 cobrança', porCobr[1])
-    + mini('2 cobranças', porCobr[2])
-    + mini('3 ou mais', porCobr[3]);
+      mini('Dentro do prazo', porCobr[0], 'light-green', 'ainda sem cobrança')
+    + mini('1ª cobrança', porCobr[1], 'light-blue')
+    + mini('2ª cobrança', porCobr[2], 'purple')
+    // quem já passou de três continua contado aqui: some-lo seria
+    // perder item na conta
+    + mini('3ª cobrança', porCobr[3], '',
+           acima ? ('inclui ' + cpNum(acima) + ' com mais de 3') : '');
 
   document.getElementById('ra-det-thead').innerHTML =
     '<tr>' + RF_DET_COLS.map(function(c){ return '<th>' + c.t + '</th>'; }).join('') + '</tr>';
