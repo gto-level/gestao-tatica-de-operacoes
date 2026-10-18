@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '18/10 19:10';
+var GTO_BUILD = '18/10 19:55';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -256,6 +256,16 @@ body{
 #rv-ov .rf-kpis .kpi.rf-on .lbl,
 #rv-ov .rf-kpis .kpi.rf-on .cap{ color:rgba(255,255,255,.82); }
 #rv-ov .rf-kpis .kpi.rf-on .val{ color:#fff; }
+/* a janela não cresce com a tabela: ela cabe na tela e a TABELA rola
+   dentro, com o cabeçalho preso no topo. Sem isto, 64 itens empurravam
+   o rodapé para fora da janela. */
+#rv-ov .detail-panel{ max-height:88vh; display:flex; flex-direction:column; }
+#rv-ov .detail-body{ overflow:hidden; display:flex; flex-direction:column; min-height:0; }
+#rv-ov .detail-table-wrap{
+  flex:1 1 auto; min-height:120px; max-height:52vh; overflow:auto;
+  border:1px solid var(--border); border-radius:10px; background:#fff;
+}
+#rv-ov .detail-table-wrap thead th{ position:sticky; top:0; z-index:2; }
 #p-reuniao .rf-kpis .kpi[onclick]{ cursor:pointer; }
 /* o card do filtro ligado: fundo escuro, como o "Em tratativa" do painel */
 #p-reuniao .rf-kpis .kpi.rf-on{
@@ -52399,6 +52409,11 @@ function _cobEhFast(){
 function _fcAreas(){
   var todas = document.querySelectorAll('.page'), out = [], i;
   for (i = 0; i < todas.length; i++) out.push(todas[i]);
+  // a janela de detalhe das telas de Reunião não é uma .page — ela vive
+  // fora delas, para poder ser aberta por mais de uma tela. Sem estar
+  // aqui, a tabela dela ficava sem os ▾.
+  var ov = document.getElementById('rv-ov');
+  if (ov) out.push(ov);
   return out;
 }
 
@@ -52732,8 +52747,14 @@ function _fcVarrer(forcar){
   var areas = _fcAreas(), i, j;
   for (i = 0; i < areas.length; i++) {
     var area = areas[i];
-    // tela fechada não precisa de ▾ agora: go() varre de novo quando abrir
-    if (!forcar && !area.classList.contains('active')) continue;
+    // tela fechada não precisa de ▾ agora: go() varre de novo quando abrir.
+    // A janela de detalhe não tem .active — quem diz se ela conta é a
+    // própria janela estar aberta.
+    var ehJanela = (area.id === 'rv-ov');
+    var vale = ehJanela
+      ? !!area.querySelector('.detail-overlay.open')
+      : area.classList.contains('active');
+    if (!forcar && !vale) continue;
     var tabs = area.querySelectorAll('table');
     for (j = 0; j < tabs.length; j++) {
       if (forcar) tabs[j].removeAttribute('data-fc-sig');
@@ -59773,6 +59794,7 @@ function raDetAbrir(chave){
     : '';
   if (typeof pfAlinhar === 'function') pfAlinhar();
   document.getElementById('raDetalhe').classList.add('open');
+  if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
 }
 function raDetFechar(){
   document.getElementById('raDetalhe').classList.remove('open');
@@ -60273,6 +60295,7 @@ function rfDetAbrir(btn){
   rfDetPintar();
   rfAlinharJanela();
   document.getElementById('raDetalhe').classList.add('open');
+  if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
 }
 
 // A faixa de cobrança de um item: 0, 1, 2 e 3 (o 3 leva junto quem já
@@ -60338,6 +60361,8 @@ function rfDetPintar(){
   document.getElementById('ra-det-rodape').textContent = lista.length > RA_DET_MAX
     ? ('mostrando os ' + cpNum(RA_DET_MAX) + ' primeiros de ' + cpNum(lista.length)
        + ' — o XLSX leva todos') : '';
+  // a tabela foi redesenhada: os ▾ de coluna precisam voltar
+  if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
 }
 
 var RF_FAIXAS = [
