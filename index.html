@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '18/10 19:55';
+var GTO_BUILD = '18/10 20:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -60127,10 +60127,15 @@ function rfFundoDoCard(el){
 }
 // Que recorte este card representa — lido do onclick que o gerador pôs.
 // É o mesmo clique que já filtrava a tabela; aqui ele só é interpretado.
+var RF_CORTES_OK = ['gnvFiltrarFila', 'govPedidosStatusFiltrar'];
+
 function rfCorteDoCard(el){
   var oc = el.getAttribute('onclick') || '';
   var m = oc.match(/^\s*(\w+)\s*\(\s*'((?:\\'|[^'])*)'\s*\)/);
   if (m) return { fn: m[1], arg: m[2].replace(/\\'/g, "'") };
+  // os cards de status dos Pedidos chamam pelo ÍNDICE, sem aspas
+  var mN = oc.match(/^\s*(\w+)\s*\(\s*(-?\d+)\s*\)/);
+  if (mN) return { fn: mN[1], arg: mN[2] };
   var m2 = oc.match(/^\s*(\w+)\s*\(\s*\)/);
   if (m2) return { fn: m2[1], arg: '' };
   return null;
@@ -60176,7 +60181,10 @@ function rfTrocarCard(el){
   // Parada Fornecedor, MDG…). É deles que a quebra por nº de cobranças
   // faz sentido; nos outros ela não diz nada.
   var corte = rfCorteDoCard(el);
-  if (!corte || corte.fn !== 'gnvFiltrarFila') corte = null;
+  // No PATEC o ⊕ é dos cards de FILA. Na Gestão de Pedidos é dos cards
+  // de STATUS — os que, ao serem clicados, abriam a segunda linha de
+  // cards (Pedido Memorizado, Pedido Rejeitado, Análise para Emissão…).
+  if (!corte || RF_CORTES_OK.indexOf(corte.fn) === -1) corte = null;
   el.innerHTML =
       (corte ? '<div class="kpi-actions"><button class="kpi-expand-btn" type="button"'
              + ' title="Ver os itens" onclick="rfDetAbrir(this);event.stopPropagation()">+</button>'
@@ -60280,90 +60288,21 @@ var RF_DET_COLS = [
 
 var _rfDet = null;
 
-var _rfDetFiltro = null;   // null = todas; 0,1,2,3 = a faixa de cobrança
+var _rfDetFiltro = null;   // null = todas; senão, o índice da caixa clicada
 
-function rfDetAbrir(btn){
-  var card = btn.closest('.kpi');
-  if (!card) return;
-  var fn = card.getAttribute('data-rf-fn') || '';
-  var arg = card.getAttribute('data-rf-arg') || '';
-  var titulo = (card.querySelector('.lbl') || {}).textContent || 'Itens';
-  var itens = rfItensDoCorte(fn, arg);
-  _rfDet = { titulo: titulo.trim(),
-             linhas: itens.map(function(r){ return { r:r, c:_gnvLinhaCalc(r) }; }) };
-  _rfDetFiltro = null;
-  rfDetPintar();
-  rfAlinharJanela();
-  document.getElementById('raDetalhe').classList.add('open');
-  if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
-}
-
-// A faixa de cobrança de um item: 0, 1, 2 e 3 (o 3 leva junto quem já
-// passou disso — tirar seria perder item da conta).
-function rfFaixaCobranca(c){
-  var q = c.cobranca || 0;
-  return q >= 3 ? 3 : q;
-}
-
-// Clicar numa das quatro caixas filtra a tabela; clicar de novo solta.
-function rfDetFiltrar(faixa){
-  _rfDetFiltro = (_rfDetFiltro === faixa) ? null : faixa;
-  rfDetPintar();
-}
-
-function rfDetLinhas(){
-  if (!_rfDet) return [];
-  if (_rfDetFiltro === null) return _rfDet.linhas;
-  return _rfDet.linhas.filter(function(x){
-    return rfFaixaCobranca(x.c) === _rfDetFiltro; });
-}
-
-function rfDetPintar(){
-  if (!_rfDet) return;
-  var todas = _rfDet.linhas;
-  var lista = rfDetLinhas();
-
-  document.getElementById('ra-det-titulo').textContent = _rfDet.titulo;
-  document.getElementById('ra-det-sub').textContent =
-    (_rfDetFiltro === null
-      ? cpNum(todas.length) + ' item(ns) nesse recorte'
-      : cpNum(lista.length) + ' de ' + cpNum(todas.length) + ' item(ns) · '
-        + RF_FAIXAS[_rfDetFiltro].nome + ' · clique de novo na caixa para soltar');
-
-  var porCobr = [0, 0, 0, 0], acima = 0;
-  todas.forEach(function(x){
-    if ((x.c.cobranca || 0) > 3) acima++;
-    porCobr[rfFaixaCobranca(x.c)]++;
-  });
-  document.getElementById('ra-det-cards').className = 'rf-kpis';
-  document.getElementById('ra-det-cards').innerHTML = RF_FAIXAS.map(function(f, i){
-    var on = (_rfDetFiltro === i);
-    return '<div class="kpi small ' + f.classe + (on ? ' rf-on' : '') + '"'
-      + ' onclick="rfDetFiltrar(' + i + ')" style="cursor:pointer"'
-      + ' title="Ver só estes itens na tabela">'
-      + '<div class="lbl">' + f.nome + '</div>'
-      + '<div class="val">' + cpNum(porCobr[i]) + '</div>'
-      + (f.cap || (i === 3 && acima) ?
-          '<div class="cap">' + (i === 3 && acima
-            ? 'inclui ' + cpNum(acima) + ' com mais de 3' : f.cap) + '</div>' : '')
-      + '</div>';
-  }).join('');
-
-  document.getElementById('ra-det-thead').innerHTML =
-    '<tr>' + RF_DET_COLS.map(function(c){ return '<th>' + c.t + '</th>'; }).join('') + '</tr>';
-  document.getElementById('ra-det-tbody').innerHTML = lista.length
-    ? lista.slice(0, RA_DET_MAX).map(function(x){
-        return '<tr>' + RF_DET_COLS.map(function(c){
-          return '<td>' + cpEsc(String(c.v(x.r, x.c))) + '</td>'; }).join('') + '</tr>';
-      }).join('')
-    : '<tr><td colspan="' + RF_DET_COLS.length + '" style="padding:1.5rem;text-align:center;'
-      + 'color:var(--muted)">Nenhum item nessa faixa.</td></tr>';
-  document.getElementById('ra-det-rodape').textContent = lista.length > RA_DET_MAX
-    ? ('mostrando os ' + cpNum(RA_DET_MAX) + ' primeiros de ' + cpNum(lista.length)
-       + ' — o XLSX leva todos') : '';
-  // a tabela foi redesenhada: os ▾ de coluna precisam voltar
-  if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
-}
+// As colunas de cada lado. No PATEC o item tem cobrança, prazo de
+// retorno e dias parados; na Gestão de Pedidos, não — lá o que existe
+// é status, fila, liberação para E&P, SLA e prazo.
+var RF_COLS_PED = [
+  { t:'RC',            v:function(r){ return r.rc || '—'; } },
+  { t:'Item RC',       v:function(r){ return r.itemRc || '—'; } },
+  { t:'Analista',      v:function(r){ return r.analista || '—'; } },
+  { t:'Status',        v:function(r){ return String(r.status || '').trim() || '—'; } },
+  { t:'Fila',          v:function(r){ return String(r.filaGov || '').trim() || '—'; } },
+  { t:'Liberado E&P',  v:function(r){ return String(r.liberado || '').trim() || '—'; } },
+  { t:'SLA',           v:function(r){ return String(r.sla || '').trim() || '—'; } },
+  { t:'Prazo',         v:function(r){ return String(r.prazo || '').trim() || '—'; } }
+];
 
 var RF_FAIXAS = [
   { nome:'Dentro do prazo', classe:'light-green', cap:'ainda sem cobrança' },
@@ -60371,6 +60310,118 @@ var RF_FAIXAS = [
   { nome:'2ª cobrança',     classe:'purple',      cap:'' },
   { nome:'3ª cobrança',     classe:'',            cap:'' }
 ];
+// a faixa de um item: 0, 1, 2 e 3 (o 3 leva junto quem passou disso —
+// tirar seria perder item da conta)
+function rfFaixaCobranca(c){
+  var q = c.cobranca || 0;
+  return q >= 3 ? 3 : q;
+}
+
+function rfDetAbrir(btn){
+  var card = btn.closest('.kpi');
+  if (!card) return;
+  var fn = card.getAttribute('data-rf-fn') || '';
+  var arg = card.getAttribute('data-rf-arg') || '';
+  var titulo = ((card.querySelector('.lbl') || {}).textContent || 'Itens').trim();
+
+  if (fn === 'govPedidosStatusFiltrar') {
+    var status = (_pedStatusLista || [])[parseInt(arg, 10)];
+    var itens = _pedDados.filter(function(r){ return _cobIgual(_pedStatus(r), status); });
+    // as caixas são as filas daquele status — a mesma quebra que a tela
+    // já abre no segundo nível quando se clica no card
+    var porFila = {};
+    itens.forEach(function(r){
+      var f = _pedFila(r);
+      porFila[f] = (porFila[f] || 0) + 1;
+    });
+    var classes = ['light-green', 'light-blue', 'purple', ''];
+    var caixas = Object.keys(porFila)
+      .sort(function(a, b){ return porFila[b] - porFila[a]; })
+      .map(function(f, i){
+        return { nome:f, classe: classes[i % classes.length], cap:'',
+                 teste: (function(nome){
+                   return function(x){ return _pedFila(x.r) === nome; };
+                 })(f) };
+      });
+    _rfDet = { titulo: titulo, cols: RF_COLS_PED, caixas: caixas, onde: 'pedidos',
+               linhas: itens.map(function(r){ return { r:r, c:{} }; }) };
+  } else {
+    var lista = rfItensDoCorte(fn, arg);
+    _rfDet = { titulo: titulo, cols: RF_DET_COLS, onde: 'patec',
+               caixas: RF_FAIXAS.map(function(f, i){
+                 return { nome:f.nome, classe:f.classe, cap:f.cap,
+                          teste: (function(k){
+                            return function(x){ return rfFaixaCobranca(x.c) === k; };
+                          })(i) };
+               }),
+               linhas: lista.map(function(r){ return { r:r, c:_gnvLinhaCalc(r) }; }) };
+  }
+  _rfDetFiltro = null;
+  rfDetPintar();
+  rfAlinharJanela();
+  document.getElementById('raDetalhe').classList.add('open');
+  if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
+}
+
+// Clicar numa caixa filtra a tabela; clicar de novo solta.
+function rfDetFiltrar(i){
+  _rfDetFiltro = (_rfDetFiltro === i) ? null : i;
+  rfDetPintar();
+}
+
+function rfDetLinhas(){
+  if (!_rfDet) return [];
+  if (_rfDetFiltro === null) return _rfDet.linhas;
+  var cx = _rfDet.caixas[_rfDetFiltro];
+  if (!cx) return _rfDet.linhas;
+  return _rfDet.linhas.filter(cx.teste);
+}
+
+function rfDetPintar(){
+  if (!_rfDet) return;
+  var todas = _rfDet.linhas, lista = rfDetLinhas(), cols = _rfDet.cols;
+
+  document.getElementById('ra-det-titulo').textContent = _rfDet.titulo;
+  document.getElementById('ra-det-sub').textContent =
+    (_rfDetFiltro === null
+      ? cpNum(todas.length) + ' item(ns) nesse recorte'
+      : cpNum(lista.length) + ' de ' + cpNum(todas.length) + ' item(ns) · '
+        + _rfDet.caixas[_rfDetFiltro].nome + ' · clique de novo na caixa para soltar');
+
+  // só no PATEC: quem já passou de três cobranças continua na 3ª caixa
+  var acima = 0;
+  if (_rfDet.onde === 'patec') {
+    todas.forEach(function(x){ if ((x.c.cobranca || 0) > 3) acima++; });
+  }
+  document.getElementById('ra-det-cards').className = 'rf-kpis';
+  document.getElementById('ra-det-cards').innerHTML = _rfDet.caixas.map(function(cx, i){
+    var n = todas.filter(cx.teste).length;
+    var cap = (_rfDet.onde === 'patec' && i === 3 && acima)
+      ? ('inclui ' + cpNum(acima) + ' com mais de 3') : cx.cap;
+    return '<div class="kpi small ' + cx.classe + (_rfDetFiltro === i ? ' rf-on' : '') + '"'
+      + ' onclick="rfDetFiltrar(' + i + ')" style="cursor:pointer"'
+      + ' title="Ver só estes itens na tabela">'
+      + '<div class="lbl">' + cpEsc(cx.nome) + '</div>'
+      + '<div class="val">' + cpNum(n) + '</div>'
+      + (cap ? '<div class="cap">' + cpEsc(cap) + '</div>' : '')
+      + '</div>';
+  }).join('');
+
+  document.getElementById('ra-det-thead').innerHTML =
+    '<tr>' + cols.map(function(c){ return '<th>' + c.t + '</th>'; }).join('') + '</tr>';
+  document.getElementById('ra-det-tbody').innerHTML = lista.length
+    ? lista.slice(0, RA_DET_MAX).map(function(x){
+        return '<tr>' + cols.map(function(c){
+          return '<td>' + cpEsc(String(c.v(x.r, x.c))) + '</td>'; }).join('') + '</tr>';
+      }).join('')
+    : '<tr><td colspan="' + cols.length + '" style="padding:1.5rem;text-align:center;'
+      + 'color:var(--muted)">Nenhum item nessa caixa.</td></tr>';
+  document.getElementById('ra-det-rodape').textContent = lista.length > RA_DET_MAX
+    ? ('mostrando os ' + cpNum(RA_DET_MAX) + ' primeiros de ' + cpNum(lista.length)
+       + ' — o XLSX leva todos') : '';
+  // a tabela foi redesenhada: os ▾ de coluna precisam voltar
+  if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
+}
 
 function rfAlinharJanela(){
   var pg = document.getElementById('p-reuniao');
@@ -60386,9 +60437,10 @@ function rfAlinharJanela(){
 // a delas. Quem está aberto manda.
 function rfDetExportar(){
   if (!_rfDet || typeof XLSX === 'undefined' || !rfDetLinhas().length) return;
+  var cols = _rfDet.cols || RF_DET_COLS;
   var linhas = rfDetLinhas().map(function(x){
     var o = {};
-    RF_DET_COLS.forEach(function(c){ o[c.t] = c.v(x.r, x.c); });
+    cols.forEach(function(c){ o[c.t] = c.v(x.r, x.c); });
     return o;
   });
   var wb = XLSX.utils.book_new();
