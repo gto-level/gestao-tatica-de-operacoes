@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/10 17:05';
+var GTO_BUILD = '18/10 11:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -840,6 +840,118 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
          contagem de RC_ITEM) e SOMA os dias novos ao histórico — a
          planilha traz uma janela curta, e o que saiu dela continua aqui.
     ══════════════════════════════════════════ -->
+
+    <!-- ══════════════════════════════════════════
+         ADLV · REUNIÃO — Status Carteira, Radar Level e Upload
+         Três telas de uma frente só. Os números saem dos três
+         arquivos que entram pelo tópico Upload; o André ainda vai
+         ajustar o que cada tela mostra.
+    ══════════════════════════════════════════ -->
+    <div id="p-reuniao-adlv" class="page">
+      <div class="cd" style="margin-bottom:1rem;border-top:3px solid var(--azm)">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
+          <div>
+            <div class="cd-t" style="margin:0">📊 Status Carteira — ADLV</div>
+            <div id="ra-sc-fonte" style="font-size:11px;color:var(--tx2);margin-top:4px"></div>
+          </div>
+          <button class="btn btn-s" style="font-size:11px" onclick="raIrUpload()">⬆ Subir planilhas</button>
+        </div>
+      </div>
+      <div id="ra-sc-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin-bottom:1rem"></div>
+      <div class="cd">
+        <div class="cd-t">🧭 Status do processo</div>
+        <div id="ra-sc-fase" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px"></div>
+      </div>
+      <div class="cd">
+        <div class="cd-t">🔤 Status da RC</div>
+        <div id="ra-sc-statusrc" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px"></div>
+      </div>
+      <div class="cd">
+        <div class="cd-t">📈 Itens por etapa</div>
+        <div style="height:300px;position:relative"><canvas id="ra-sc-gr"></canvas></div>
+      </div>
+      <div class="cd">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div class="cd-t" style="margin:0">🗂 Etapas</div>
+          <button class="btn btn-s" style="font-size:11px" onclick="raExportar('etapa')">⬇ XLSX</button>
+        </div>
+        <div class="tw" style="margin-top:.75rem"><table>
+          <thead><tr><th>Etapa</th><th style="text-align:right">Itens</th><th style="text-align:right">% da carteira</th><th style="text-align:right">Idade média</th></tr></thead>
+          <tbody id="ra-sc-tb"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div id="p-reuniao-adlv-radar" class="page">
+      <div class="cd" style="margin-bottom:1rem;border-top:3px solid var(--vd)">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
+          <div>
+            <div class="cd-t" style="margin:0">📡 Radar Level</div>
+            <div id="ra-rd-fonte" style="font-size:11px;color:var(--tx2);margin-top:4px"></div>
+          </div>
+          <button class="btn btn-s" style="font-size:11px" onclick="raIrUpload()">⬆ Subir planilhas</button>
+        </div>
+      </div>
+      <div id="ra-rd-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin-bottom:1rem"></div>
+      <div class="cd">
+        <div class="cd-t">⏱️ Idade da carteira</div>
+        <div id="ra-rd-sla" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px"></div>
+      </div>
+      <div class="cd">
+        <div class="cd-t">📈 Itens por faixa de SLA</div>
+        <div style="height:280px;position:relative"><canvas id="ra-rd-gr"></canvas></div>
+      </div>
+      <div class="cd">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <div class="cd-t" style="margin:0">🗂 Modalidade × etapa</div>
+          <button class="btn btn-s" style="font-size:11px" onclick="raExportar('modalidade')">⬇ XLSX</button>
+        </div>
+        <div class="tw" style="margin-top:.75rem"><table>
+          <thead><tr><th>Modalidade</th><th style="text-align:right">Itens</th><th style="text-align:right">Idade média</th><th>Etapa com mais itens</th></tr></thead>
+          <tbody id="ra-rd-tb"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <div id="p-reuniao-adlv-upload" class="page">
+      <div class="cd" style="margin-bottom:1rem;border-top:3px solid var(--azm)">
+        <div class="cd-t" style="margin:0">⬆️ Upload — Reunião ADLV</div>
+        <div style="font-size:11px;color:var(--tx2);margin-top:4px;line-height:1.5">
+          Os três são independentes: suba só o que mudou. Cada arquivo recalcula as telas
+          e grava na base da frente, para quem abrir depois ver os mesmos números.
+        </div>
+        <div style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px">
+          <label style="display:flex;flex-direction:column;gap:4px;background:var(--cin);border:1px solid var(--brd);border-radius:9px;padding:9px 12px">
+            <span style="font-size:10.5px;font-weight:700;color:var(--az)">1 · BU</span>
+            <span style="font-size:10px;color:var(--tx2)">aba BU · a carteira inteira</span>
+            <input type="file" id="raFileBU" accept=".xlsb,.xlsx,.xls" style="font-size:11px" />
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;background:var(--cin);border:1px solid var(--brd);border-radius:9px;padding:9px 12px">
+            <span style="font-size:10.5px;font-weight:700;color:var(--az)">2 · Levelbord</span>
+            <span style="font-size:10px;color:var(--tx2)">itens da carteira Level (.csv)</span>
+            <input type="file" id="raFileLB" accept=".csv,.txt,.xlsx" style="font-size:11px" />
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;background:var(--cin);border:1px solid var(--brd);border-radius:9px;padding:9px 12px">
+            <span style="font-size:10.5px;font-weight:700;color:var(--az)">3 · Liberados E&amp;P</span>
+            <span style="font-size:10px;color:var(--tx2)">Requisições EP_BENS, aba Export</span>
+            <input type="file" id="raFileEP" accept=".xlsx,.xlsb,.xls" style="font-size:11px" />
+          </label>
+        </div>
+        <div id="raStatus" style="font-size:11.5px;color:var(--tx2);margin-top:10px"></div>
+        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-s" style="font-size:11px" onclick="go('reuniao-adlv')">→ Ver o Status Carteira</button>
+          <button class="btn btn-s" style="font-size:11px" onclick="go('reuniao-adlv-radar')">→ Ver o Radar Level</button>
+        </div>
+      </div>
+      <div class="cd">
+        <div class="cd-t">📦 O que está gravado</div>
+        <div class="tw"><table>
+          <thead><tr><th>Arquivo</th><th style="text-align:right">Linhas</th><th>Subido em</th><th>Por</th></tr></thead>
+          <tbody id="ra-up-tb"></tbody>
+        </table></div>
+      </div>
+    </div>
+
     <div id="p-pub-entradas" class="page">
 
       <div class="cd" style="margin-bottom:1rem;border-top:3px solid var(--azm)">
@@ -8041,7 +8153,7 @@ function _dbComPrefixo(db, pre){
 // já criado: entrar sem tela própria mostraria as telas do PATEC gravando
 // na base errada.
 var FRENTES_COM_TELA = ['adlv', 'fast', 'pedidos', 'adlv_pcp', 'fast_reuniao',
-                        'adlv_republicacao'];
+                        'adlv_republicacao', 'adlv_reuniao'];
 // Frentes que mostram SÓ as telas marcadas com soFrente para elas. A base
 // de cada uma é outro projeto do Firebase: deixar passar uma tela do PATEC
 // aqui seria ela lendo e gravando na base errada — foi o que aconteceu em
@@ -8052,6 +8164,7 @@ function modSoProprias(m){ return FRENTES_SO_PROPRIAS.indexOf(m) !== -1; }
 // Direcionamento da Equipe, que é do PATEC e lê a base do ADLV.
 var FRENTE_TELA_INICIAL = {
   'fast_reuniao':      'reuniao-fast',
+  'adlv_reuniao':      'reuniao-adlv',
   'adlv_republicacao': 'pub-entradas'
 };
 // As duas Reuniões, especificamente (o Radar FAST usa isto)
@@ -8833,6 +8946,7 @@ function go(id, el) {
   document.getElementById('ttl').textContent = titles[id] || labelSidebar || id;
   if(id==='reuniao'){ if(typeof reuniaoAbrir==='function') reuniaoAbrir(); }
   if(id==='pub-entradas' && typeof pubAbrir==='function'){ pubAbrir(); }
+  if(id.indexOf('reuniao-adlv')===0 && typeof raAbrir==='function'){ raAbrir(); }
   if(id.indexOf('reuniao-fast')===0 && typeof pfAbrir==='function'){
     pfAbrir();
     pfAba(id === 'reuniao-fast-itens'  ? 'geral'
@@ -44406,6 +44520,10 @@ const PERMS_SIDEBAR = {
   'governanca-pedidos': { icon:'🏛️', label:'Governança',           mod:'EXECUÇÃO', soPedidos:true },
   'pedidos':        { icon:'📦', label:'Controle de Pedidos',      mod:'EXECUÇÃO', soPedidos:true },
   'apres-rejeite':  { icon:'🖥️', label:'Apresentação',             mod:'EXECUÇÃO', soPedidos:true },
+  // Frente ADLV · Reunião — três telas, abastecidas por upload
+  'reuniao-adlv':       { icon:'📊', label:'Status Carteira', mod:'EXECUÇÃO', soFrente:'adlv_reuniao' },
+  'reuniao-adlv-radar': { icon:'📡', label:'Radar Level',     mod:'EXECUÇÃO', soFrente:'adlv_reuniao' },
+  'reuniao-adlv-upload':{ icon:'⬆️', label:'Upload',          mod:'EXECUÇÃO', soFrente:'adlv_reuniao' },
   // Frente ADLV · Publicação — a BU entra por upload todo dia
   'pub-entradas':   { icon:'📥', label:'Novas Entradas',        mod:'EXECUÇÃO', soFrente:'adlv_republicacao' },
   // Só existe dentro da frente FAST · Reunião — o Painel FAST portado
@@ -59201,6 +59319,506 @@ async function pubAbrir(){
     }
   }
   pubDesenhar();
+}
+
+
+// ══════════════════════════════════════════════════════════════════
+//  ADLV · REUNIÃO — Status Carteira, Radar Level e Upload
+//
+//  Três arquivos entram pelo tópico Upload:
+//    BU (.xlsb)        — a carteira inteira; daqui sai só o resumo
+//    Levelbord (.csv)  — item a item da carteira Level; é a base das telas
+//    Liberados E&P     — Requisições EP_BENS, aba Export
+//
+//  O Levelbord vem com 78 colunas e 2,5 MB. Guardar tudo no Firestore
+//  repetiria o problema da medição, então só as colunas que as telas
+//  usam são gravadas (RA_COLS), como texto em pedaços — texto longo não
+//  é indexado, e é o índice que estoura antes do tamanho.
+//
+//  As telas são um primeiro desenho: o André disse que ajusta depois o
+//  que cada uma mostra.
+// ══════════════════════════════════════════════════════════════════
+var RA_COL   = 'reuniao';          // coleção (já vai prefixada por frente)
+var RA_PARTE = 700000;
+
+// as colunas do Levelbord que as telas usam
+var RA_COLS = ['RC','SEQ','RC_ITEM','STATUS_RC','FASE','Status_Desc','MODALIDADE',
+               'SLA_Dias','SLA_PATEC','RESPONSAVEL','Data_Inicio_SLA','CENTRO',
+               'GRUPO_COMPRADORES','NUMERO_OPORTUNIDADE','STATUS_OPORTUNIDADE',
+               'MOTIVO_PARADA','TEXTO_BREVE','VALOR_TOTAL_RC'];
+
+var _raLevel = [];     // itens da carteira Level
+var _raEp    = [];     // { chave, status, tipo }
+var _raBu    = null;   // { linhas, status:{} }
+var _raMeta  = {};
+var _raCharts = {};
+
+function raMsg(txt, cor){
+  var el = document.getElementById('raStatus');
+  if (!el) return;
+  el.textContent = txt || '';
+  el.style.color = cor || 'var(--tx2)';
+}
+function raNum(n){ return (typeof cpNum === 'function') ? cpNum(n) : String(n); }
+function raDec(n){ return String(Math.round(n * 10) / 10).replace('.', ','); }
+
+// ── leitura dos arquivos ──────────────────────────────────────────
+// O Levelbord sai do sistema em Windows-1252 e separado por ponto e
+// vírgula. Cada linha tem o mesmo número de separadores — conferido no
+// arquivo dele: 78 em todas as 5.859 linhas — então a divisão é simples.
+// Aspas aparecem DENTRO de campos (1/2", por exemplo) e não envolvem
+// campo nenhum; um parser que as respeitasse quebraria aqui.
+function raTexto(buf){
+  var bytes = new Uint8Array(buf);
+  try { return new TextDecoder('utf-8', { fatal:true }).decode(bytes); }
+  catch (e) { return new TextDecoder('windows-1252').decode(bytes); }
+}
+function raCampo(v){
+  var t = String(v == null ? '' : v).trim();
+  if (t.length > 1 && t.charAt(0) === '"' && t.charAt(t.length-1) === '"') {
+    t = t.slice(1, -1).trim();
+  }
+  return t;
+}
+function raLerLevelbord(txt){
+  var linhas = txt.split(/\r?\n/).filter(function(l){ return l.trim() !== ''; });
+  if (linhas.length < 2) throw new Error('o Levelbord veio sem linhas');
+  var cab = linhas[0].split(';').map(raCampo);
+  var faltando = ['RC','STATUS_RC','FASE','Status_Desc','SLA_Dias']
+    .filter(function(c){ return cab.indexOf(c) === -1; });
+  if (faltando.length) {
+    throw new Error('não achei no Levelbord a(s) coluna(s): ' + faltando.join(', '));
+  }
+  var idx = {};
+  RA_COLS.forEach(function(c){ idx[c] = cab.indexOf(c); });
+  var out = [];
+  for (var i = 1; i < linhas.length; i++) {
+    var p = linhas[i].split(';');
+    var o = {};
+    RA_COLS.forEach(function(c){ o[c] = (idx[c] >= 0) ? raCampo(p[idx[c]]) : ''; });
+    if (!o.RC) continue;
+    out.push(o);
+  }
+  if (!out.length) throw new Error('o Levelbord não tinha nenhuma linha com RC');
+  return out;
+}
+
+function raChaveRcItem(rc, item){
+  var n = function(v){
+    var t = String(v == null ? '' : v).trim();
+    var f = parseFloat(t.replace(',', '.'));
+    return isFinite(f) ? String(Math.round(f)) : t;
+  };
+  return n(rc) + '|' + n(item);
+}
+
+function raLerEp(wb){
+  var nome = (wb.SheetNames || []).filter(function(n){
+    return String(n).toLowerCase().trim() === 'export'; })[0] || wb.SheetNames[0];
+  var linhas = XLSX.utils.sheet_to_json(wb.Sheets[nome], { defval:null });
+  if (!linhas.length) throw new Error('a aba ' + nome + ' veio vazia');
+  var k = Object.keys(linhas[0]);
+  var limpo = function(c){
+    return String(c).toLowerCase().trim()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  };
+  // BUG (18/10): a busca era só por "contém", e a primeira coluna da
+  // planilha é "Status do Item" — ela casava com 'item' antes da coluna
+  // Item de verdade. A chave virava "requisição|Liberado | Químicos",
+  // nenhum item cruzava com a carteira e o card dava 0.
+  // Agora o nome exato ganha; "contém" só entra se não houver exato.
+  var achar = function(exato, parcial){
+    var e = k.filter(function(c){ return limpo(c) === exato; })[0];
+    if (e) return e;
+    return k.filter(function(c){ return limpo(c).indexOf(parcial) !== -1; })[0];
+  };
+  var cRq = achar('requisicao', 'requisi');
+  var cIt = achar('item', 'item');
+  var cSt = achar('status do item', 'status');
+  var cTp = achar('tipo de demanda', 'tipo');
+  if (!cRq) throw new Error('não achei a coluna de Requisição na aba ' + nome);
+  return linhas.map(function(r){
+    return { chave: raChaveRcItem(r[cRq], cIt ? r[cIt] : ''),
+             status: String(r[cSt] == null ? '' : r[cSt]).trim(),
+             tipo:   String(r[cTp] == null ? '' : r[cTp]).trim() };
+  });
+}
+
+function raLerBu(wb){
+  var nome = (wb.SheetNames || []).filter(function(n){
+    return String(n).toUpperCase().trim() === 'BU'; })[0];
+  if (!nome) throw new Error('não achei a aba "BU" nesta planilha');
+  var aoa = XLSX.utils.sheet_to_json(wb.Sheets[nome], { header:1, raw:true, defval:null });
+  if (aoa.length < 2) throw new Error('a aba BU veio vazia');
+  var cab = (aoa[0] || []).map(function(c){ return String(c == null ? '' : c).trim(); });
+  var iSt = cab.indexOf('STATUS_CARTEIRA');
+  var st = {};
+  for (var i = 1; i < aoa.length; i++) {
+    var v = (iSt >= 0) ? String((aoa[i] || [])[iSt] == null ? '' : (aoa[i])[iSt]).trim() : '';
+    if (!v) v = '(sem status)';
+    st[v] = (st[v] || 0) + 1;
+  }
+  return { linhas: aoa.length - 1, status: st };
+}
+
+// ── as contas das telas ───────────────────────────────────────────
+function raSla(r){
+  var f = parseFloat(String(r.SLA_Dias || '').replace(',', '.'));
+  return isFinite(f) ? f : null;
+}
+function raIdadeMedia(lista){
+  var s = 0, n = 0;
+  lista.forEach(function(r){ var v = raSla(r); if (v !== null) { s += v; n++; } });
+  return n ? s / n : 0;
+}
+function raContar(lista, campo){
+  var o = {};
+  lista.forEach(function(r){
+    var v = String(r[campo] || '').trim() || '(em branco)';
+    o[v] = (o[v] || 0) + 1;
+  });
+  return o;
+}
+function raOrdenado(obj){
+  return Object.keys(obj).map(function(k){ return { nome:k, n:obj[k] }; })
+    .sort(function(a, b){ return b.n - a.n; });
+}
+var RA_FAIXAS = [
+  { nome:'0 a 30 dias',  cor:'var(--vd)',  teste:function(v){ return v <= 30; } },
+  { nome:'31 a 60 dias', cor:'var(--azm)', teste:function(v){ return v > 30 && v <= 60; } },
+  { nome:'61 a 90 dias', cor:'var(--am)',  teste:function(v){ return v > 60 && v <= 90; } },
+  { nome:'mais de 90',   cor:'var(--vm)',  teste:function(v){ return v > 90; } }
+];
+function raFaixas(lista){
+  var o = RA_FAIXAS.map(function(f){ return { nome:f.nome, cor:f.cor, n:0 }; });
+  lista.forEach(function(r){
+    var v = raSla(r); if (v === null) return;
+    for (var i = 0; i < RA_FAIXAS.length; i++) {
+      if (RA_FAIXAS[i].teste(v)) { o[i].n++; return; }
+    }
+  });
+  return o;
+}
+// Liberados E&P que estão na carteira Level: o cruzamento é RC+item.
+function raLiberadosNaCarteira(){
+  if (!_raEp.length || !_raLevel.length) return 0;
+  var naCarteira = {};
+  _raLevel.forEach(function(r){ naCarteira[raChaveRcItem(r.RC, r.SEQ)] = true; });
+  var vistos = {};
+  var n = 0;
+  _raEp.forEach(function(e){
+    if (!naCarteira[e.chave] || vistos[e.chave]) return;
+    vistos[e.chave] = true; n++;
+  });
+  return n;
+}
+
+// ── desenho ───────────────────────────────────────────────────────
+function raCard(rot, val, sub, cor){
+  return '<div style="background:#fff;border:1px solid var(--brd);border-left:3px solid '
+    + (cor || 'var(--azm)') + ';border-radius:10px;padding:.7rem .9rem">'
+    + '<div style="font-size:9.5px;font-weight:700;color:var(--tx2);letter-spacing:.5px;'
+    +   'text-transform:uppercase">' + cpEsc(rot) + '</div>'
+    + '<div style="font-size:21px;font-weight:800;color:var(--az);line-height:1.25">' + val + '</div>'
+    + '<div style="font-size:10px;color:var(--tx2)">' + (sub || '') + '</div></div>';
+}
+function raPor(id, html){
+  var el = document.getElementById(id);
+  if (el) el.innerHTML = html;
+}
+function raVazio(){
+  return '<div style="padding:1.5rem;text-align:center;color:var(--tx2);font-size:12px">'
+    + 'Nenhum arquivo subido ainda — suba o Levelbord no tópico Upload.</div>';
+}
+function raGrafico(id, rotulos, valores, cores){
+  var el = document.getElementById(id);
+  if (!el || typeof Chart === 'undefined') return;
+  if (_raCharts[id]) { try { _raCharts[id].destroy(); } catch (e) {} _raCharts[id] = null; }
+  if (!rotulos.length) return;
+  _raCharts[id] = new Chart(el, {
+    type: 'bar',
+    data: { labels: rotulos,
+            datasets: [{ data: valores, backgroundColor: cores || '#1A4A8A',
+                         borderRadius: 4, maxBarThickness: 38 }] },
+    options: { responsive:true, maintainAspectRatio:false, indexAxis: 'y',
+      plugins: { legend:{ display:false }, datalabels:{ display:false } },
+      scales: { x: { beginAtZero:true, ticks:{ precision:0 } },
+                y: { grid:{ display:false } } } }
+  });
+}
+
+function raDesenharStatusCarteira(){
+  var n = _raLevel.length;
+  var fonte = document.getElementById('ra-sc-fonte');
+  if (fonte) fonte.textContent = _raMeta.atualizadoEm
+    ? ('Números de ' + cpDataBR(String(_raMeta.atualizadoEm).slice(0,10))
+       + (_raMeta.atualizadoPor ? ', subidos por ' + _raMeta.atualizadoPor : '')
+       + ' · ' + raNum(n) + ' itens da carteira Level')
+    : 'Nenhum arquivo subido ainda.';
+
+  if (!n) {
+    raPor('ra-sc-cards', raVazio()); raPor('ra-sc-fase', ''); raPor('ra-sc-statusrc', '');
+    raPor('ra-sc-tb', '<tr><td colspan="4" style="padding:1.5rem;text-align:center;'
+      + 'color:var(--tx2)">—</td></tr>');
+    raGrafico('ra-sc-gr', [], []);
+    return;
+  }
+  var rcs = {};
+  _raLevel.forEach(function(r){ rcs[r.RC] = true; });
+  raPor('ra-sc-cards',
+      raCard('Em tratativa', raNum(n), 'itens na carteira Level', 'var(--vd)')
+    + raCard('RCs distintas', raNum(Object.keys(rcs).length), 'no mesmo recorte')
+    + raCard('Idade da carteira', raDec(raIdadeMedia(_raLevel)), 'média de SLA, em dias', 'var(--am)')
+    + raCard('Liberados E&P', _raEp.length ? raNum(raLiberadosNaCarteira()) : '—',
+             _raEp.length ? ('de ' + raNum(_raEp.length) + ' do EP_BENS') : 'suba o arquivo 3'));
+
+  var fases = raOrdenado(raContar(_raLevel, 'FASE'));
+  raPor('ra-sc-fase', fases.map(function(f){
+    return raCard(f.nome, raNum(f.n), raDec(100 * f.n / n) + '% da carteira');
+  }).join(''));
+
+  var srcCor = { A:'var(--vd)', B:'var(--azm)', E:'var(--am)', N:'var(--vm)' };
+  var src = raOrdenado(raContar(_raLevel, 'STATUS_RC'));
+  raPor('ra-sc-statusrc', src.map(function(x){
+    return raCard('Status ' + x.nome, raNum(x.n),
+                  raDec(100 * x.n / n) + '% da carteira', srcCor[x.nome]);
+  }).join(''));
+
+  var etapas = raOrdenado(raContar(_raLevel, 'Status_Desc'));
+  raGrafico('ra-sc-gr', etapas.map(function(e){ return e.nome; }),
+                        etapas.map(function(e){ return e.n; }));
+  raPor('ra-sc-tb', etapas.map(function(e){
+    var da = _raLevel.filter(function(r){
+      return (String(r.Status_Desc || '').trim() || '(em branco)') === e.nome; });
+    return '<tr><td style="font-weight:600">' + cpEsc(e.nome) + '</td>'
+      + '<td style="text-align:right;font-weight:700">' + raNum(e.n) + '</td>'
+      + '<td style="text-align:right;color:var(--tx2)">' + raDec(100 * e.n / n) + '%</td>'
+      + '<td style="text-align:right">' + raDec(raIdadeMedia(da)) + '</td></tr>';
+  }).join(''));
+}
+
+function raDesenharRadar(){
+  var n = _raLevel.length;
+  var fonte = document.getElementById('ra-rd-fonte');
+  if (fonte) fonte.textContent = n
+    ? (raNum(n) + ' itens · idade média ' + raDec(raIdadeMedia(_raLevel)) + ' dias')
+    : 'Nenhum arquivo subido ainda.';
+  if (!n) {
+    raPor('ra-rd-cards', raVazio()); raPor('ra-rd-sla', '');
+    raPor('ra-rd-tb', '<tr><td colspan="4" style="padding:1.5rem;text-align:center;'
+      + 'color:var(--tx2)">—</td></tr>');
+    raGrafico('ra-rd-gr', [], []);
+    return;
+  }
+  var mods = raOrdenado(raContar(_raLevel, 'MODALIDADE'));
+  raPor('ra-rd-cards', mods.map(function(m){
+    return raCard(m.nome, raNum(m.n), raDec(100 * m.n / n) + '% da carteira');
+  }).join(''));
+
+  var fx = raFaixas(_raLevel);
+  raPor('ra-rd-sla', fx.map(function(f){
+    return raCard(f.nome, raNum(f.n), raDec(100 * f.n / n) + '% da carteira', f.cor);
+  }).join(''));
+  raGrafico('ra-rd-gr', fx.map(function(f){ return f.nome; }),
+                        fx.map(function(f){ return f.n; }),
+                        ['#0E9E6A', '#1A4A8A', '#C07A12', '#D94040']);
+
+  raPor('ra-rd-tb', mods.map(function(m){
+    var da = _raLevel.filter(function(r){
+      return (String(r.MODALIDADE || '').trim() || '(em branco)') === m.nome; });
+    var top = raOrdenado(raContar(da, 'Status_Desc'))[0];
+    return '<tr><td style="font-weight:600">' + cpEsc(m.nome) + '</td>'
+      + '<td style="text-align:right;font-weight:700">' + raNum(m.n) + '</td>'
+      + '<td style="text-align:right">' + raDec(raIdadeMedia(da)) + '</td>'
+      + '<td style="color:var(--tx2)">' + (top ? cpEsc(top.nome) + ' · ' + raNum(top.n) : '—')
+      + '</td></tr>';
+  }).join(''));
+}
+
+function raDesenharUpload(){
+  var linhas = [
+    { nome:'BU', n: _raBu ? _raBu.linhas : 0, q: _raMeta.buEm, p: _raMeta.buPor },
+    { nome:'Levelbord', n: _raLevel.length, q: _raMeta.lbEm, p: _raMeta.lbPor },
+    { nome:'Liberados E&P', n: _raEp.length, q: _raMeta.epEm, p: _raMeta.epPor }
+  ];
+  raPor('ra-up-tb', linhas.map(function(l){
+    return '<tr><td style="font-weight:600">' + l.nome + '</td>'
+      + '<td style="text-align:right;font-weight:700">' + (l.n ? raNum(l.n) : '—') + '</td>'
+      + '<td>' + (l.q ? cpDataBR(String(l.q).slice(0,10)) : '—') + '</td>'
+      + '<td style="color:var(--tx2)">' + cpEsc(l.p || '—') + '</td></tr>';
+  }).join(''));
+}
+function raDesenhar(){
+  raDesenharStatusCarteira();
+  raDesenharRadar();
+  raDesenharUpload();
+}
+
+// ── Firebase: a base é a da própria frente (ADLV · Reunião) ───────
+function raPartes(txt){
+  var out = [];
+  for (var i = 0; i < txt.length; i += RA_PARTE) out.push(txt.slice(i, i + RA_PARTE));
+  return out;
+}
+async function raGravar(){
+  var db = (typeof getDB === 'function') ? getDB() : null;
+  if (!db) return false;
+  var col = db.collection(RA_COL);
+  var blocos = { level: _raLevel, ep: _raEp, bu: _raBu || {} };
+  var partes = {}, escritas = [];
+  Object.keys(blocos).forEach(function(k){
+    var ps = raPartes(JSON.stringify(blocos[k]));
+    partes[k] = ps.length;
+    ps.forEach(function(t, i){ escritas.push(col.doc(k + '_' + i).set({ t: t })); });
+  });
+  await Promise.all(escritas);
+  _raMeta.atualizadoEm = new Date().toISOString();
+  _raMeta.atualizadoPor = (typeof cpQuem === 'function') ? cpQuem() : '';
+  await col.doc('meta').set({
+    v: 1, partes: partes,
+    atualizadoEm: _raMeta.atualizadoEm, atualizadoPor: _raMeta.atualizadoPor,
+    buEm: _raMeta.buEm || '', buPor: _raMeta.buPor || '',
+    lbEm: _raMeta.lbEm || '', lbPor: _raMeta.lbPor || '',
+    epEm: _raMeta.epEm || '', epPor: _raMeta.epPor || '',
+    nLevel: _raLevel.length, nEp: _raEp.length, nBu: _raBu ? _raBu.linhas : 0
+  });
+  return true;
+}
+async function raCarregar(){
+  var db = (typeof getDB === 'function') ? getDB() : null;
+  if (!db) return false;
+  try {
+    var col = db.collection(RA_COL);
+    var meta = await col.doc('meta').get();
+    if (!meta || !meta.exists) return false;
+    var m = meta.data() || {};
+    _raMeta = m;
+    var nomes = Object.keys(m.partes || {});
+    var leituras = [];
+    nomes.forEach(function(k){
+      for (var i = 0; i < m.partes[k]; i++) leituras.push({ k:k, p: col.doc(k + '_' + i).get() });
+    });
+    var docs = await Promise.all(leituras.map(function(x){ return x.p; }));
+    var txt = {};
+    leituras.forEach(function(x, i){
+      var d = docs[i];
+      txt[x.k] = (txt[x.k] || '') + ((d && d.exists && d.data().t) || '');
+    });
+    var val = function(k, vazio){
+      try { return txt[k] ? JSON.parse(txt[k]) : vazio; } catch (e) { return vazio; }
+    };
+    _raLevel = val('level', []);
+    _raEp    = val('ep', []);
+    var bu   = val('bu', null);
+    _raBu    = (bu && bu.linhas) ? bu : null;
+    return true;
+  } catch (e) {
+    console.warn('raCarregar:', e);
+    raMsg('⚠ não consegui ler o que está gravado: ' + e.message, 'var(--vm)');
+    return false;
+  }
+}
+
+// ── o upload ──────────────────────────────────────────────────────
+function raIrUpload(){ go('reuniao-adlv-upload'); }
+
+function raLigarUpload(){
+  [['raFileBU','bu'], ['raFileLB','lb'], ['raFileEP','ep']].forEach(function(par){
+    var inp = document.getElementById(par[0]);
+    if (!inp || inp.__ligado) return;
+    inp.__ligado = true;
+    inp.addEventListener('change', function(){ raSubir(par[1], inp); });
+  });
+}
+
+async function raSubir(qual, inp){
+  var f = inp.files && inp.files[0];
+  if (!f) return;
+  var nomes = { bu:'BU', lb:'Levelbord', ep:'Liberados E&P' };
+  if (typeof XLSX === 'undefined' && qual !== 'lb') {
+    raMsg('❌ Biblioteca XLSX não carregada — atualize a página (F5).', 'var(--vm)');
+    inp.value = ''; return;
+  }
+  raMsg('⏳ Lendo ' + f.name + '...');
+  try {
+    var buf = await f.arrayBuffer();
+    var quem = (typeof cpQuem === 'function') ? cpQuem() : '';
+    var agora = new Date().toISOString();
+    var resumo = '';
+    if (qual === 'lb') {
+      // .csv é texto; se vier .xlsx, passa pelo SheetJS e vira texto igual
+      var txt = /\.(csv|txt)$/i.test(f.name) ? raTexto(buf)
+              : XLSX.utils.sheet_to_csv(
+                  XLSX.read(new Uint8Array(buf), { type:'array' })
+                      .Sheets[XLSX.read(new Uint8Array(buf), { type:'array' }).SheetNames[0]],
+                  { FS:';' });
+      _raLevel = raLerLevelbord(txt);
+      _raMeta.lbEm = agora; _raMeta.lbPor = quem;
+      resumo = raNum(_raLevel.length) + ' itens da carteira Level';
+    } else if (qual === 'ep') {
+      var wbE = XLSX.read(new Uint8Array(buf), { type:'array' });
+      _raEp = raLerEp(wbE);
+      _raMeta.epEm = agora; _raMeta.epPor = quem;
+      resumo = raNum(_raEp.length) + ' linhas do EP_BENS'
+             + (_raLevel.length ? (' · ' + raNum(raLiberadosNaCarteira())
+                 + ' na carteira Level') : '');
+    } else {
+      var wbB = XLSX.read(new Uint8Array(buf), { type:'array' });
+      _raBu = raLerBu(wbB);
+      _raMeta.buEm = agora; _raMeta.buPor = quem;
+      var emTrat = _raBu.status['EM TRATATIVA'] || 0;
+      resumo = raNum(_raBu.linhas) + ' linhas da BU · '
+             + raNum(emTrat) + ' em tratativa';
+    }
+    raDesenhar();
+    var ok = await raGravar();
+    raMsg('✅ ' + nomes[qual] + ' atualizado — ' + resumo
+      + (ok ? ' · gravado para todo mundo.' : ' · ⚠ não gravado, vale só nesta aba.'),
+      ok ? 'var(--vd)' : 'var(--am)');
+  } catch (e) {
+    console.warn('raSubir:', e);
+    raMsg('❌ ' + nomes[qual] + ': ' + e.message, 'var(--vm)');
+  }
+  inp.value = '';
+}
+
+function raExportar(qual){
+  if (typeof XLSX === 'undefined' || !_raLevel.length) return;
+  var linhas, aba;
+  if (qual === 'modalidade') {
+    aba = 'Modalidade';
+    linhas = raOrdenado(raContar(_raLevel, 'MODALIDADE')).map(function(m){
+      var da = _raLevel.filter(function(r){
+        return (String(r.MODALIDADE || '').trim() || '(em branco)') === m.nome; });
+      return { Modalidade:m.nome, Itens:m.n, 'Idade média': Math.round(raIdadeMedia(da) * 10) / 10 };
+    });
+  } else {
+    aba = 'Etapas';
+    var n = _raLevel.length;
+    linhas = raOrdenado(raContar(_raLevel, 'Status_Desc')).map(function(e){
+      var da = _raLevel.filter(function(r){
+        return (String(r.Status_Desc || '').trim() || '(em branco)') === e.nome; });
+      return { Etapa:e.nome, Itens:e.n,
+               '% da carteira': Math.round(1000 * e.n / n) / 10,
+               'Idade média': Math.round(raIdadeMedia(da) * 10) / 10 };
+    });
+  }
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(linhas), aba);
+  XLSX.writeFile(wb, 'Reuniao_ADLV_' + aba + '_'
+    + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.xlsx');
+}
+
+var _raPronto = false;
+async function raAbrir(){
+  raLigarUpload();
+  if (!_raPronto) {
+    raMsg('⏳ Buscando o que está gravado...');
+    var veio = await raCarregar();
+    _raPronto = true;
+    raMsg(veio ? '' : 'Nenhum arquivo subido ainda — suba os três aqui em cima.');
+  }
+  raDesenhar();
 }
 
 </script>
