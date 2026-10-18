@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '18/10 22:00';
+var GTO_BUILD = '18/10 23:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -275,57 +275,15 @@ body{
 #p-reuniao .rf-kpis .kpi.rf-on .lbl{ color:rgba(255,255,255,.82); }
 #p-reuniao .rf-kpis .kpi.rf-on .val{ color:#fff; }
 #p-reuniao .rf-kpis .kpi.rf-off{ opacity:.55; }
-/* Os títulos de grupo ganham a mesma barrinha verde das seções, para
-   a tela ler igual ao Status Carteira. */
 #p-reuniao .rf-tit{
-  font-size:12px; font-weight:700; color:#0E2B28; letter-spacing:.2px;
-  margin:18px 0 10px; display:flex; align-items:center; gap:8px;
-  text-transform:none;
-}
-#p-reuniao .rf-tit::before{
-  content:""; width:4px; height:14px; border-radius:3px;
-  background:linear-gradient(#0AAD8F,#007D77);
+  font-size:10px; font-weight:700; color:#5C7370; text-transform:uppercase;
+  letter-spacing:.4px; margin:14px 0 6px;
 }
 
-/* ── O arranjo dos cards do Radar, igual ao do Status Carteira ──
-   O gerador monta duas colunas: à esquerda o total e os sub-grupos,
-   separados por um tracejado, e à direita as filas. Fica apertado e
-   não é o desenho das outras telas. Aqui a casca vira bloco, os grupos
-   viram grade de colunas iguais e tudo passa a ocupar a largura toda.
-   Só CSS, preso a #p-reuniao: a Governança não enxerga nada disto. */
-#p-reuniao #reu-cards > div,
-#p-reuniao #reuped-cards > div{
-  display:block !important; padding-right:0 !important;
-}
-#p-reuniao #reu-cards div[style*="border-right"],
-#p-reuniao #reuped-cards div[style*="border-right"]{
-  border-right:none !important; padding-right:0 !important;
-  min-width:0 !important;
-}
-#p-reuniao #reu-cards div[style*="flex:1 1 0"],
-#p-reuniao #reuped-cards div[style*="flex:1 1 0"]{
-  min-width:0 !important;
-}
-#p-reuniao .rf-kpis{
-  display:grid !important;
-  /* três por linha, como no Status Carteira. Com auto-fit, um grupo de
-     um card só esticava de ponta a ponta. */
-  grid-template-columns:repeat(3, minmax(0, 1fr));
-  gap:12px !important; margin-bottom:4px;
-}
-@media (max-width:1100px){
-  #p-reuniao .rf-kpis{ grid-template-columns:repeat(2, minmax(0,1fr)); }
-}
-@media (max-width:720px){
-  #p-reuniao .rf-kpis{ grid-template-columns:1fr; }
-}
-#p-reuniao .rf-kpis .kpi{ min-width:0; }
-/* as faixas de título do gerador vinham centralizadas (fazia sentido
-   na coluna estreita); na largura toda elas precisam começar à esquerda */
-#p-reuniao #reu-cards div[style*="justify-content:center"],
-#p-reuniao #reuped-cards div[style*="justify-content:center"]{
-  justify-content:flex-start !important;
-}
+/* As regras de .kpi do painel, copiadas para o escopo #p-reuniao: a
+   folha do painel só vale dentro de #pf-root/#ra-root/#rd-root/#rv-ov,
+   e o Radar FAST mora fora dela. Sem isto os cards reescritos por
+   rfPele() ficam sem raio, sem barra à esquerda e sem sombra. */
 #p-reuniao .rf-kpis .kpi{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:13px 15px 12px; border-left:3px solid var(--c-principal); position:relative; box-shadow:var(--shadow-sm); transition:transform .14s ease, box-shadow .14s ease;}
 #p-reuniao .rf-kpis .kpi:hover{transform:translateY(-2px); box-shadow:var(--shadow-md);}
 #p-reuniao .rf-kpis .kpi.alt{border-left-color:var(--c-secundaria);}
@@ -365,6 +323,14 @@ body{
 #p-reuniao .rf-kpis .kpi.kpi-clickable:hover{background:#EEF1FF; box-shadow:0 0 0 1px #C7D0FA inset;}
 #p-reuniao .rf-kpis .kpi-actions ~ .lbl{padding-right:22px;}
 #p-reuniao .rf-kpis .kpi .cap{padding-left:8px;}
+
+/* ── A margem da página do Radar ───────────────────────────────
+   As telas do Status Carteira moram dentro do .ct, que tem 24px de
+   respiro dos dois lados: elas começam em 244 e terminam em 1476 numa
+   janela de 1500. O Radar fica FORA do .ct e encostava no menu (220 a
+   1500). O que faltava era só isso — o arranjo dos cards já estava
+   certo. ── */
+#p-reuniao{ padding:0 24px; box-sizing:border-box; }
 
 /* ── A pele do Radar FAST ──────────────────────────────────────
    Os cards e a tabela do Radar são os MESMOS da Governança: o código
