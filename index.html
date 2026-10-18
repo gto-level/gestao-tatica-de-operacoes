@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '18/10 20:40';
+var GTO_BUILD = '18/10 21:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -392,6 +392,8 @@ tfoot td{background:linear-gradient(180deg,#EEF3FA,#E8EFF8);font-weight:700;posi
 .gnv-col-acao{ display:table-cell; }
 /* a aba PATEC da Reunião não mostra o card de Status B (fica na Governança) */
 #reu-cards .gnv-tp-status-b{ display:none; }
+/* o aviso "⚠ N vencida(s)" sai do Radar FAST e continua na Governança */
+#reu-cards .gnv-aviso-venc{ display:none; }
 #reu-tabela .gnv-col-acao{ display:none; }   /* a Reunião é só leitura */
 .stab{padding:5px 14px;font-size:11.5px;border:none;border-radius:7px;background:transparent;cursor:pointer;color:var(--tx2);transition:all .18s;font-weight:500}
 .stab:hover{background:rgba(255,255,255,.7);color:var(--tx)}
@@ -54457,8 +54459,11 @@ function _gnvDesenhar(){
       + '</div></div>';
 
     // o alerta de vencidas continua, logo abaixo do total
+    // A classe deixa esconder o aviso num lugar só: no Radar FAST ele
+    // sai (a reunião não cobra por ali), na Governança continua.
     var avisoVenc = nVenc
-      ? '<div onclick="gnvFiltrarVencidas()" title="Ver quais RCs estão vencidas"'
+      ? '<div class="gnv-aviso-venc" onclick="gnvFiltrarVencidas()"'
+        + ' title="Ver quais RCs estão vencidas"'
         + ' style="cursor:pointer;font-size:10px;font-weight:700;border:1px solid var(--vm);'
         + 'border-radius:6px;padding:3px 10px;text-align:center;margin-bottom:8px;'
         + (_gnvFiltroVenc ? 'color:#fff;background:var(--vm)' : 'color:var(--vm);background:var(--vmc)')
