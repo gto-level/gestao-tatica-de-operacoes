@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/10 01:20';
+var GTO_BUILD = '19/10 01:50';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -369,7 +369,14 @@ body{
 #rd-root .pa-btn-novo{ background:#007D77; border-color:#007D77; color:#fff; }
 #rd-root .pa-btn-novo:hover{ background:#0AAD8F; border-color:#0AAD8F; }
 #rd-root .pa-wrap{ max-height:none; }
-#rd-root .pa-tb td{ vertical-align:top; padding:6px; white-space:normal; }
+#rd-root .pa-tb td{ padding:6px; white-space:normal; }
+/* A linha inteira acompanha a célula mais alta. O truque é o de sempre
+   em tabela: a célula pede height:1px (que o navegador ignora e troca
+   pela altura real da linha) e o campo dentro pede 100% — assim, quando
+   um campo cresce, os outros crescem junto em vez de ficarem num
+   quadradinho no topo. Prazo e Status não esticam: ficam no meio. */
+#rd-root .pa-tb td.pa-cel-txt{ vertical-align:top; height:1px; }
+#rd-root .pa-tb td.pa-cel-mid{ vertical-align:middle; text-align:center; }
 #rd-root .pa-tb textarea,
 #rd-root .pa-tb input,
 #rd-root .pa-tb select{
@@ -378,8 +385,11 @@ body{
   background:transparent; color:#0E2B28; resize:vertical;
   backdrop-filter:none; cursor:text;
 }
-#rd-root .pa-tb select{ cursor:pointer; }
-#rd-root .pa-tb textarea{ min-height:34px; line-height:1.4; }
+#rd-root .pa-tb select{ cursor:pointer; text-align:center; }
+#rd-root .pa-tb input[type="date"]{ cursor:pointer; }
+#rd-root .pa-tb textarea{
+  display:block; height:100%; min-height:38px; line-height:1.4; overflow:hidden;
+}
 #rd-root .pa-tb textarea:hover,
 #rd-root .pa-tb input:hover,
 #rd-root .pa-tb select:hover{ border-color:#E4EDEB; background:#F7FAF9; }
@@ -60473,10 +60483,10 @@ function paDesenhar(){
 
   tb.innerHTML = lista.map(function(p){
     var q = esc(p.id);
-    var campo = function(nome, valor, linhas){
-      return '<textarea rows="' + (linhas || 1) + '" data-campo="' + nome + '"'
-        + ' oninput="paEditar(\'' + q + '\',\'' + nome + '\',this.value)">'
-        + esc(valor || '') + '</textarea>';
+    var campo = function(nome, valor){
+      return '<td class="pa-cel-txt"><textarea rows="1" data-campo="' + nome + '"'
+        + ' oninput="paEditar(\'' + q + '\',\'' + nome + '\',this.value);paCrescer(this)">'
+        + esc(valor || '') + '</textarea></td>';
     };
     var opts = PA_STATUS.map(function(s){
       return '<option value="' + s.v + '"' + (p.status === s.v ? ' selected' : '') + '>'
@@ -60488,18 +60498,31 @@ function paDesenhar(){
         + esc(cpDataBR(String(p.concluidoEm).slice(0, 10))) + '</div>'
       : '';
     return '<tr' + (paVenceu(p) ? ' class="pa-venceu"' : '') + '>'
-      + '<td>' + campo('tema', p.tema, 2) + '</td>'
-      + '<td>' + campo('resp', p.resp) + '</td>'
-      + '<td>' + campo('fase', p.fase) + '</td>'
-      + '<td><input type="date" value="' + esc(p.prazo || '') + '"'
+      + campo('tema', p.tema)
+      + campo('resp', p.resp)
+      + campo('fase', p.fase)
+      + '<td class="pa-cel-mid"><input type="date" value="' + esc(p.prazo || '') + '"'
       +   ' onchange="paEditar(\'' + q + '\',\'prazo\',this.value)"></td>'
-      + '<td><select class="' + cfg.classe + '"'
+      + '<td class="pa-cel-mid"><select class="' + cfg.classe + '"'
       +   ' onchange="paStatus(\'' + q + '\',this.value)">' + opts + '</select>' + fechado + '</td>'
-      + '<td>' + campo('conclusao', p.conclusao, 2) + '</td>'
-      + '<td><button class="pa-del" title="Apagar este tema"'
+      + campo('conclusao', p.conclusao)
+      + '<td class="pa-cel-mid"><button class="pa-del" title="Apagar este tema"'
       +   ' onclick="paRemover(\'' + q + '\')">✕</button></td>'
       + '</tr>';
   }).join('');
+
+  // cada campo nasce do tamanho do que está escrito; a linha fica da
+  // altura do maior e os outros esticam até lá
+  [].forEach.call(tb.querySelectorAll('textarea'), paCrescer);
+}
+
+// cresce pelo min-height, não pelo height: assim o height:100% da folha
+// continua valendo e os campos vizinhos acompanham a linha
+function paCrescer(el){
+  if (!el) return;
+  el.style.minHeight = '0px';
+  var h = Math.max(38, el.scrollHeight + 2);
+  el.style.minHeight = h + 'px';
 }
 
 
