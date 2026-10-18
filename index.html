@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '18/10 16:30';
+var GTO_BUILD = '18/10 17:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -243,6 +243,10 @@ body{
   display:flex; flex-wrap:wrap; gap:10px; align-items:stretch;
 }
 #p-reuniao .rf-kpis .kpi{ flex:1 1 0; min-width:132px; }
+/* a janela de detalhe mora fora de #p-reuniao: a grade dela precisa da
+   regra aqui também, senão os mini-cards empilham um por linha */
+#rv-ov .rf-kpis{ display:flex; flex-wrap:wrap; gap:10px; }
+#rv-ov .rf-kpis .kpi{ flex:1 1 0; min-width:120px; }
 #p-reuniao .rf-kpis .kpi[onclick]{ cursor:pointer; }
 /* o card do filtro ligado: fundo escuro, como o "Em tratativa" do painel */
 #p-reuniao .rf-kpis .kpi.rf-on{
@@ -1005,7 +1009,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 <div class="sub" id="ra-det-sub"></div>
               </div>
               <div style="display:flex;gap:8px;flex:0 0 auto">
-                <button class="btn-small" type="button" onclick="raDetExportar()">⬇ XLSX</button>
+                <button class="btn-small" type="button" onclick="rvDetExportar()">⬇ XLSX</button>
                 <button class="btn-close" type="button" onclick="raDetFechar()" aria-label="Fechar">✕</button>
               </div>
             </div>
@@ -59735,6 +59739,7 @@ var _raDet = null;
 function raDetAbrir(chave){
   var c = RA_CORTES[chave];
   if (!c) return;
+  if (typeof _rfDet !== 'undefined') _rfDet = null;
   _raDet = c;
   var itens = c.itens || [];
   document.getElementById('ra-det-titulo').textContent = c.titulo;
@@ -59762,6 +59767,13 @@ function raDetAbrir(chave){
 }
 function raDetFechar(){
   document.getElementById('raDetalhe').classList.remove('open');
+  _rfDet = null;
+}
+// A janela é uma só, usada pelo Radar FAST e pelas telas do ADLV.
+// Quem exporta é quem a abriu por último.
+function rvDetExportar(){
+  if (typeof _rfDet !== 'undefined' && _rfDet) return rfDetExportar();
+  return raDetExportar();
 }
 function raDetExportar(){
   if (!_raDet || typeof XLSX === 'undefined') return;
@@ -60070,6 +60082,23 @@ function rfLigado(el){
   var st = el.getAttribute('style') || '';
   return /color:\s*#fff/i.test(st);
 }
+// O fundo claro que o gerador já tinha posto no card.
+function rfFundoDoCard(el){
+  var st = el.getAttribute('style') || '';
+  var m = st.match(/background:\s*([^;]+)/);
+  return (m && !/#fff/i.test(m[1])) ? m[1].trim() : '#fff';
+}
+// Que recorte este card representa — lido do onclick que o gerador pôs.
+// É o mesmo clique que já filtrava a tabela; aqui ele só é interpretado.
+function rfCorteDoCard(el){
+  var oc = el.getAttribute('onclick') || '';
+  var m = oc.match(/^\s*(\w+)\s*\(\s*'((?:\\'|[^'])*)'\s*\)/);
+  if (m) return { fn: m[1], arg: m[2].replace(/\\'/g, "'") };
+  var m2 = oc.match(/^\s*(\w+)\s*\(\s*\)/);
+  if (m2) return { fn: m2[1], arg: '' };
+  return null;
+}
+
 function rfCorDoCard(el){
   var st = el.getAttribute('style') || '';
   var m = st.match(/border:[^;]*solid\s+([^;]+)/);
@@ -60092,11 +60121,21 @@ function rfTrocarCard(el){
              && !el.getAttribute('onclick');
 
   el.className = 'kpi small' + (ligado ? ' rf-on' : '') + (apagado ? ' rf-off' : '');
+  // o fundo claro que o card já tinha continua: todo branco deixou a
+  // tela lavada, e é o tom que diz de que grupo o card é
   el.setAttribute('style', 'border-left-color:' + cor + ';'
-    + (ligado ? '' : 'background:#fff;'));
-  el.innerHTML = '<div class="lbl">' + (emoji ? emoji + ' ' : '') + cpEsc(rotulo) + '</div>'
-               + '<div class="val"' + (ligado ? '' : ' style="color:' + cor + '"') + '>'
-               + cpEsc(numero) + '</div>';
+    + (ligado ? '' : 'background:' + rfFundoDoCard(el) + ';'));
+  // o ⊕, igual ao do painel: abre os itens daquele card
+  var corte = rfCorteDoCard(el);
+  el.innerHTML =
+      (corte ? '<div class="kpi-actions"><button class="kpi-expand-btn" type="button"'
+             + ' title="Ver os itens" onclick="rfDetAbrir(this);event.stopPropagation()">+</button>'
+             + '</div>' : '')
+    + '<div class="lbl"' + (ligado ? '' : ' style="color:' + cor + '"') + '>'
+    +   (emoji ? emoji + ' ' : '') + cpEsc(rotulo) + '</div>'
+    + '<div class="val"' + (ligado ? '' : ' style="color:' + cor + '"') + '>'
+    +   cpEsc(numero) + '</div>';
+  if (corte) { el.setAttribute('data-rf-fn', corte.fn); el.setAttribute('data-rf-arg', corte.arg); }
   return true;
 }
 
@@ -60134,6 +60173,128 @@ function rfPele(){
   if (typeof _radarEhDaqui === 'function' && !_radarEhDaqui()) return;
   rfPeleEm('reu-cards');
   rfPeleEm('reuped-cards');
+}
+
+
+// ── O ⊕ do Radar FAST: os itens daquele card ─────────────────────
+//
+// Para saber QUAIS itens um card representa, nada é recalculado aqui:
+// liga-se o mesmo filtro que o clique do card já ligava e chama-se o
+// _gnvFiltrar() da própria tela. Uma regra só, num lugar só — se a
+// regra de uma fila mudar amanhã, o ⊕ acompanha sozinho.
+function rfItensDoCorte(fn, arg){
+  var salvo = {
+    tp: _gnvFiltroTipoProc, sp: _gnvFiltroStPatec, vc: _gnvFiltroVenc,
+    fl: _gnvFiltroFila, sub: _gnvSubFiltro, cc: _gnvFiltroConc, bu: _gnvBusca
+  };
+  // o card mostra o total do recorte dele, sem os outros filtros em cima
+  _gnvFiltroTipoProc = null; _gnvFiltroStPatec = null; _gnvFiltroVenc = false;
+  _gnvFiltroFila = null; _gnvSubFiltro = null; _gnvFiltroConc = null; _gnvBusca = '';
+  if (fn === 'gnvFiltrarTipoProc')         _gnvFiltroTipoProc = arg;
+  else if (fn === 'gnvFiltrarStatusPatec') _gnvFiltroStPatec = arg;
+  else if (fn === 'gnvFiltrarFila')        _gnvFiltroFila = arg;
+  else if (fn === 'gnvFiltrarConclusao')   _gnvFiltroConc = arg;
+  else if (/Venc/i.test(fn))               _gnvFiltroVenc = true;
+  var lista;
+  try { lista = _gnvFiltrar(); } catch (e) { console.warn('rfItensDoCorte:', e); lista = []; }
+  _gnvFiltroTipoProc = salvo.tp; _gnvFiltroStPatec = salvo.sp; _gnvFiltroVenc = salvo.vc;
+  _gnvFiltroFila = salvo.fl; _gnvSubFiltro = salvo.sub; _gnvFiltroConc = salvo.cc;
+  _gnvBusca = salvo.bu;
+  return lista;
+}
+
+var RF_DET_COLS = [
+  { t:'Analista',  v:function(r,c){ return r.analista || '—'; } },
+  { t:'RC',        v:function(r,c){ return r.rc || '—'; } },
+  { t:'Item RC',   v:function(r,c){ return r.itemRc || '—'; } },
+  { t:'Oportunidade', v:function(r,c){ return r.oportunidade || '—'; } },
+  { t:'Centro',    v:function(r,c){ return r.centro || '—'; } },
+  { t:'Status do Patec', v:function(r,c){ return c.statusPatec || '—'; } },
+  { t:'Fila',      v:function(r,c){ return c.fila || 'Sem fila'; } },
+  { t:'Envio',     v:function(r,c){ return cpDataBR(r.envio || '') || '—'; } },
+  { t:'Prazo de retorno', v:function(r,c){ return cpDataBR(c.prazoRet || '') || '—'; } },
+  { t:'Situação',  v:function(r,c){ return c.status || '—'; } },
+  { t:'Cobranças', v:function(r,c){ return String(c.cobranca || 0); } }
+];
+
+var _rfDet = null;
+
+function rfDetAbrir(btn){
+  var card = btn.closest('.kpi');
+  if (!card) return;
+  var fn = card.getAttribute('data-rf-fn') || '';
+  var arg = card.getAttribute('data-rf-arg') || '';
+  var titulo = (card.querySelector('.lbl') || {}).textContent || 'Itens';
+  var itens = rfItensDoCorte(fn, arg);
+  var calc = itens.map(function(r){ return { r:r, c:_gnvLinhaCalc(r) }; });
+  _rfDet = { titulo: titulo.trim(), linhas: calc };
+
+  document.getElementById('ra-det-titulo').textContent = _rfDet.titulo;
+  document.getElementById('ra-det-sub').textContent =
+    cpNum(calc.length) + ' item(ns) nesse recorte';
+
+  // os dois cortes que ele pediu: por cobrança e por prazo
+  var porCobr = { 0:0, 1:0, 2:0, 3:0 };
+  var prazo = { 'DENTRO DO PRAZO':0, 'VENCIDA':0, 'CONCLUÍDO':0 };
+  calc.forEach(function(x){
+    var q = x.c.cobranca || 0;
+    porCobr[q >= 3 ? 3 : q]++;
+    if (prazo[x.c.status] !== undefined) prazo[x.c.status]++;
+  });
+  var mini = function(rot, n, classe){
+    return '<div class="kpi small ' + (classe || '') + '">'
+      + '<div class="lbl">' + cpEsc(rot) + '</div>'
+      + '<div class="val">' + cpNum(n) + '</div></div>';
+  };
+  document.getElementById('ra-det-cards').className = 'rf-kpis';
+  document.getElementById('ra-det-cards').innerHTML =
+      mini('Dentro do prazo', prazo['DENTRO DO PRAZO'], 'light-green')
+    + mini('Vencidas', prazo['VENCIDA'], 'purple')
+    + mini('Concluídos', prazo['CONCLUÍDO'], 'light-blue')
+    + mini('Sem cobrança', porCobr[0])
+    + mini('1 cobrança', porCobr[1])
+    + mini('2 cobranças', porCobr[2])
+    + mini('3 ou mais', porCobr[3]);
+
+  document.getElementById('ra-det-thead').innerHTML =
+    '<tr>' + RF_DET_COLS.map(function(c){ return '<th>' + c.t + '</th>'; }).join('') + '</tr>';
+  document.getElementById('ra-det-tbody').innerHTML =
+    calc.slice(0, RA_DET_MAX).map(function(x){
+      return '<tr>' + RF_DET_COLS.map(function(c){
+        return '<td>' + cpEsc(String(c.v(x.r, x.c))) + '</td>'; }).join('') + '</tr>';
+    }).join('');
+  document.getElementById('ra-det-rodape').textContent = calc.length > RA_DET_MAX
+    ? ('mostrando os ' + cpNum(RA_DET_MAX) + ' primeiros de ' + cpNum(calc.length)
+       + ' — o XLSX leva todos') : '';
+
+  // a janela mora fora das páginas: alinha pela que está aberta
+  rfAlinharJanela();
+  document.getElementById('raDetalhe').classList.add('open');
+}
+
+function rfAlinharJanela(){
+  var pg = document.getElementById('p-reuniao');
+  var ov = document.getElementById('rv-ov');
+  if (!pg || !ov || !pg.classList.contains('active')) return;
+  var r = pg.getBoundingClientRect();
+  if (!r.width) return;
+  ov.style.setProperty('--pf-esq', Math.max(0, Math.round(r.left)) + 'px');
+  ov.style.setProperty('--pf-dir', Math.max(0, Math.round(window.innerWidth - r.right)) + 'px');
+}
+
+// O XLSX da janela: do Radar sai a lista do Radar; das telas do ADLV,
+// a delas. Quem está aberto manda.
+function rfDetExportar(){
+  if (!_rfDet || typeof XLSX === 'undefined' || !_rfDet.linhas.length) return;
+  var linhas = _rfDet.linhas.map(function(x){
+    var o = {};
+    RF_DET_COLS.forEach(function(c){ o[c.t] = c.v(x.r, x.c); });
+    return o;
+  });
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(linhas), 'Itens');
+  XLSX.writeFile(wb, 'Radar_FAST_' + _rfDet.titulo.replace(/[^\w]+/g, '_') + '_'
+    + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.xlsx');
 }
 
 </script>
