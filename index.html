@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '18/10 15:35';
+var GTO_BUILD = '18/10 16:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -226,6 +226,75 @@ body{
   letter-spacing:.2px;display:flex;align-items:center;gap:8px}
 .rv-sec::before{content:"";width:4px;height:14px;border-radius:3px;
   background:linear-gradient(#0AAD8F,#007D77)}
+
+/* ── Os cards do Radar FAST, no desenho do painel ──────────────
+   O gerador é o mesmo da Governança e não pode mudar. Então o que
+   acontece aqui é: o HTML sai como sempre, e rfPele() reescreve só o
+   que está dentro de #reu-cards/#reuped-cards no formato .kpi — rótulo
+   em cima, número embaixo, barra de cor à esquerda. As regras abaixo
+   são as MESMAS do painel, copiadas para o escopo .rf-kpis; o resto da
+   folha do painel (botões, tabelas) continua de fora, senão o "limpar"
+   e o "Exportar" desta tela virariam branco no branco. ── */
+#p-reuniao .rf-kpis{
+  --card:#FFFFFF; --border:#E4EDEB; --muted:#5C7370; --ink:#0E2B28;
+  --c-principal:#007D77; --c-secundaria:#0AAD8F;
+  --shadow-sm:0 1px 2px rgba(14,43,40,.04), 0 1px 3px rgba(14,43,40,.06);
+  --shadow-md:0 2px 6px rgba(14,43,40,.06), 0 8px 24px rgba(14,43,40,.07);
+  display:flex; flex-wrap:wrap; gap:10px; align-items:stretch;
+}
+#p-reuniao .rf-kpis .kpi{ flex:1 1 0; min-width:132px; }
+#p-reuniao .rf-kpis .kpi[onclick]{ cursor:pointer; }
+/* o card do filtro ligado: fundo escuro, como o "Em tratativa" do painel */
+#p-reuniao .rf-kpis .kpi.rf-on{
+  background:linear-gradient(135deg,#0B4F49 0%, #0A6B63 100%);
+  box-shadow:0 8px 22px rgba(11,79,73,.26);
+}
+#p-reuniao .rf-kpis .kpi.rf-on .lbl{ color:rgba(255,255,255,.82); }
+#p-reuniao .rf-kpis .kpi.rf-on .val{ color:#fff; }
+#p-reuniao .rf-kpis .kpi.rf-off{ opacity:.55; }
+#p-reuniao .rf-tit{
+  font-size:10px; font-weight:700; color:#5C7370; text-transform:uppercase;
+  letter-spacing:.4px; margin:14px 0 6px;
+}
+#p-reuniao .rf-kpis .kpi{background:var(--card); border:1px solid var(--border); border-radius:14px; padding:13px 15px 12px; border-left:3px solid var(--c-principal); position:relative; box-shadow:var(--shadow-sm); transition:transform .14s ease, box-shadow .14s ease;}
+#p-reuniao .rf-kpis .kpi:hover{transform:translateY(-2px); box-shadow:var(--shadow-md);}
+#p-reuniao .rf-kpis .kpi.alt{border-left-color:var(--c-secundaria);}
+#p-reuniao .rf-kpis .kpi.grey{border-left-color:#C7D1CE; background:#F5F7F6;}
+#p-reuniao .rf-kpis .kpi-actions{position:absolute; top:8px; right:8px; display:flex; gap:5px;}
+#p-reuniao .rf-kpis .kpi-expand-btn{width:18px; height:18px; border-radius:50%; border:1.5px solid var(--c-principal); background:#fff; color:var(--c-principal); font-size:11px; font-weight:700; line-height:1; cursor:pointer; padding:0; display:flex; align-items:center; justify-content:center;}
+#p-reuniao .rf-kpis .kpi-expand-btn:hover{background:var(--c-principal); color:#fff;}
+#p-reuniao .rf-kpis .kpi-info-btn{position:absolute; bottom:6px; left:6px; width:9px; height:9px; border-radius:50%; border:1px solid var(--muted); background:#fff; color:var(--muted); font-size:6px; font-weight:700; line-height:1; cursor:pointer; padding:0; display:flex; align-items:center; justify-content:center; font-family:Georgia, serif; font-style:italic;}
+#p-reuniao .rf-kpis .kpi-info-btn:hover{background:var(--muted); color:#fff;}
+#p-reuniao .rf-kpis .kpi .lbl{font-size:10px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; color:var(--muted); margin-bottom:5px; line-height:1.25;}
+#p-reuniao .rf-kpis .kpi .val{font-size:24px; font-weight:750; line-height:1.1; letter-spacing:-.3px;}
+#p-reuniao .rf-kpis .kpi .cap{font-size:10.5px; color:var(--muted); margin-top:4px;}
+#p-reuniao .rf-kpis .kpi.dark-green{background:linear-gradient(135deg,#0B4F49 0%, #0A6B63 100%); border-left-color:#0AAD8F; box-shadow:0 8px 22px rgba(11,79,73,.26);}
+#p-reuniao .rf-kpis .kpi.dark-green .lbl{color:rgba(255,255,255,.82);}
+#p-reuniao .rf-kpis .kpi.dark-green .val{color:#fff;}
+#p-reuniao .rf-kpis .kpi.dark-green .cap{color:rgba(255,255,255,.75);}
+#p-reuniao .rf-kpis .kpi.light-green{background:#E4F5F0; border-left-color:#0AAD8F;}
+#p-reuniao .rf-kpis .kpi.light-green .lbl{color:#2E6B60;}
+#p-reuniao .rf-kpis .kpi.light-green .val{color:#0B4F49;}
+#p-reuniao .rf-kpis .kpi.small{padding:8px 10px 7px;}
+#p-reuniao .rf-kpis .kpi.small .lbl{font-size:9px; margin-bottom:3px;}
+#p-reuniao .rf-kpis .kpi.small .val{font-size:17px;}
+#p-reuniao .rf-kpis .kpi.small .cap{font-size:9px; margin-top:2px;}
+#p-reuniao .rf-kpis .kpi.purple{background:#F2EEFA; border-left-color:#7C5CBF;}
+#p-reuniao .rf-kpis .kpi.purple .lbl{color:#6E4FB0;}
+#p-reuniao .rf-kpis .kpi.purple .val{color:#4B2E83;}
+#p-reuniao .rf-kpis .kpi.purple .cap{color:#7C5CBF;}
+#p-reuniao .rf-kpis .kpi.purple-light{background:#FAF8FD; border-left-color:#C7B3E8;}
+#p-reuniao .rf-kpis .kpi.purple-light .lbl{color:#9B7FCB;}
+#p-reuniao .rf-kpis .kpi.purple-light .val{color:#7C5CBF;}
+#p-reuniao .rf-kpis .kpi.purple-light .cap{color:#B49BDD;}
+#p-reuniao .rf-kpis .kpi.light-blue{background:#E8F3FC; border-left-color:#4FA3E3;}
+#p-reuniao .rf-kpis .kpi.light-blue .lbl{color:#2E77B0;}
+#p-reuniao .rf-kpis .kpi.light-blue .val{color:#1C5A8A;}
+#p-reuniao .rf-kpis .kpi.light-blue .cap{color:#4FA3E3;}
+#p-reuniao .rf-kpis .kpi.kpi-clickable{cursor:pointer; transition:background .12s ease, box-shadow .12s ease;}
+#p-reuniao .rf-kpis .kpi.kpi-clickable:hover{background:#EEF1FF; box-shadow:0 0 0 1px #C7D0FA inset;}
+#p-reuniao .rf-kpis .kpi-actions ~ .lbl{padding-right:22px;}
+#p-reuniao .rf-kpis .kpi .cap{padding-left:8px;}
 
 /* ── A pele do Radar FAST ──────────────────────────────────────
    Os cards e a tabela do Radar são os MESMOS da Governança: o código
@@ -52788,6 +52857,7 @@ function _pedAlvos(nome){
 }
 function _pedSet(nome, html){
   _pedAlvos(nome).forEach(function(el){ el.innerHTML = html; });
+  if (typeof setTimeout === 'function' && typeof rfPele === 'function') setTimeout(rfPele, 0);
 }
 
 // ── Carregar do Firebase ──
@@ -53520,6 +53590,11 @@ var _GNV_ESPELHO = {
 };
 
 function _gnvPor(id, html, display){
+  // depois que o HTML cai no Radar, a pele reescreve os cards de lá.
+  // Fica aqui, e não em cada chamada, porque são sete pontos diferentes
+  // que escrevem nesses alvos — um deles ia ficar de fora.
+  if (typeof setTimeout === 'function' && typeof rfPele === 'function'
+      && (id === 'gnv-cards' || id === 'gnv-tabela')) setTimeout(rfPele, 0);
   [id, _GNV_ESPELHO[id]].forEach(function(alvo){
     if (!alvo) return;
     var el = document.getElementById(alvo);
@@ -59953,6 +60028,112 @@ async function raAbrir(){
     raMsg(veio ? '' : 'Nenhum arquivo subido ainda — suba os três aqui em cima.');
   }
   raDesenhar();
+}
+
+
+// ── A pele do Radar FAST: reescreve os cards no desenho do painel ──
+//
+// O gerador dos cards é o MESMO da Governança: ele monta um HTML e joga
+// nos dois lugares. Mexer nele mudaria as duas telas, e a Governança
+// tem de continuar como está. Então aqui o HTML chega pronto e é
+// reescrito, só dentro do Radar.
+//
+// Cada card gerado tem a mesma anatomia: um <div> com estilo no
+// atributo, dentro dele um pedaço grande (o número) e um pedaço em
+// caixa alta (o rótulo). É isso que se procura — não uma classe, que
+// não existe em todos. O onclick é preservado: é ele que filtra.
+function rfCardPartes(el){
+  var num = null, rot = null, emoji = null;
+  var filhos = el.querySelectorAll('div, span');
+  for (var i = 0; i < filhos.length; i++) {
+    var f = filhos[i];
+    // folha de verdade: o <br> de "Em<br>carteira" conta como texto,
+    // senão o card do total ficava de fora da troca
+    if (f.querySelector('*:not(br)')) continue;
+    var st = f.getAttribute('style') || '';
+    var txt = (f.textContent || '').trim();
+    if (!txt) continue;
+    var m = st.match(/font-size:\s*(\d+(?:\.\d+)?)px/);
+    var tam = m ? parseFloat(m[1]) : 0;
+    if (/text-transform:\s*uppercase/.test(st)) { if (!rot) rot = f; continue; }
+    if (tam >= 17) { if (!num) num = f; continue; }
+    if (tam && tam <= 12 && /^[^\w\s]+$/.test(txt)) { if (!emoji) emoji = f; continue; }
+    if (tam >= 18 && !num) num = f;
+  }
+  if (!num || !rot) return null;
+  return { num: num, rot: rot, emoji: emoji };
+}
+
+// o card está com o filtro ligado? o gerador marca isso pintando o
+// fundo com a cor forte e o texto de branco
+function rfLigado(el){
+  var st = el.getAttribute('style') || '';
+  return /color:\s*#fff/i.test(st);
+}
+function rfCorDoCard(el){
+  var st = el.getAttribute('style') || '';
+  var m = st.match(/border:[^;]*solid\s+([^;]+)/);
+  return m ? m[1].trim() : 'var(--c-principal)';
+}
+
+function rfTrocarCard(el){
+  var p = rfCardPartes(el);
+  if (!p) return false;
+  var cor = rfCorDoCard(el);
+  var ligado = rfLigado(el);
+  var rotulo = (p.rot.textContent || '').replace(/\s+/g, ' ').trim();
+  if (p.rot.querySelector('br')) {
+    rotulo = (p.rot.innerHTML || '').replace(/<br\s*\/?>/gi, ' ')
+             .replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  }
+  var numero = (p.num.textContent || '').trim();
+  var emoji = p.emoji ? (p.emoji.textContent || '').trim() : '';
+  var apagado = /opacity:\s*\.?\d/.test(el.getAttribute('style') || '')
+             && !el.getAttribute('onclick');
+
+  el.className = 'kpi small' + (ligado ? ' rf-on' : '') + (apagado ? ' rf-off' : '');
+  el.setAttribute('style', 'border-left-color:' + cor + ';'
+    + (ligado ? '' : 'background:#fff;'));
+  el.innerHTML = '<div class="lbl">' + (emoji ? emoji + ' ' : '') + cpEsc(rotulo) + '</div>'
+               + '<div class="val"' + (ligado ? '' : ' style="color:' + cor + '"') + '>'
+               + cpEsc(numero) + '</div>';
+  return true;
+}
+
+// Reescreve os cards de um container. Volta o número de cards trocados;
+// se der qualquer problema, o HTML original fica como estava.
+function rfPeleEm(id){
+  var box = document.getElementById(id);
+  if (!box || !box.firstElementChild) return 0;
+  var n = 0;
+  try {
+    // os cards são os div com raio no atributo style — é a marca que o
+    // gerador deixa em todos eles, com classe ou sem
+    var cards = box.querySelectorAll('div[style*="border-radius"]');
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].querySelector('div[style*="border-radius"]')) continue;  // é caixa, não card
+      if (rfTrocarCard(cards[i])) n++;
+    }
+    if (!n) return 0;
+    // as faixas que agrupam os cards viram a grade do painel
+    var grupos = box.querySelectorAll('div[style*="display:flex"]');
+    for (var j = 0; j < grupos.length; j++) {
+      var g = grupos[j];
+      if (!g.querySelector(':scope > .kpi')) continue;
+      g.classList.add('rf-kpis');
+      g.style.gap = '10px';
+    }
+    // os rótulos soltos ("Status do Patec", "Tipo de Processo")
+    var tits = box.querySelectorAll('span[style*="text-transform:uppercase"]');
+    for (var k = 0; k < tits.length; k++) tits[k].classList.add('rf-tit');
+  } catch (e) { console.warn('rfPele:', e); }
+  return n;
+}
+
+function rfPele(){
+  if (typeof _radarEhDaqui === 'function' && !_radarEhDaqui()) return;
+  rfPeleEm('reu-cards');
+  rfPeleEm('reuped-cards');
 }
 
 </script>
