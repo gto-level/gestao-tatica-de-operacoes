@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '18/10 23:10';
+var GTO_BUILD = '18/10 23:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -52935,6 +52935,9 @@ function govPedidosRender(){
       return String(a.rc || '').localeCompare(String(b.rc || ''));
     });
     _pedDesenhar();
+    // a faixa do Radar mostra a data da base de PEDIDOS quando esta aba
+    // está aberta; ela só chega aqui, depois da leitura
+    if (typeof reuFaixa === 'function') reuFaixa();
   }).catch(function(err){
     _pedSet('tabela', '<div style="padding:2rem;color:var(--vm);font-size:13px">❌ ' + _cobEsc(err.message) + '</div>');
   });
@@ -55955,8 +55958,21 @@ function reuFaixa(){
   set('reu-meta-itens', _reuAba === 'pedidos'
       ? (nPed ? cpNum(nPed) + ' pedidos' : '—')
       : (n ? cpNum(n) : '—'));
-  var em = (typeof _gnvResumo !== 'undefined' && _gnvResumo && _gnvResumo.atualizadoEm)
-         ? _gnvResumo.atualizadoEm : '';
+  // Cada aba tem a SUA base e a SUA planilha de upload: a do PATEC
+  // (Governança Nova) e a de Pedidos. Subir uma não mexe na outra, então
+  // a data da faixa é a do upload daquela aba — mostrar a mesma data nas
+  // duas fazia a base antiga parecer recém-atualizada.
+  var res = (_reuAba === 'pedidos')
+    ? ((typeof _pedResumo !== 'undefined') ? _pedResumo : null)
+    : ((typeof _gnvResumo !== 'undefined') ? _gnvResumo : null);
+  var em = (res && res.atualizadoEm) ? res.atualizadoEm : '';
+  // base subida antes de existir o resumo: cada item guarda a hora da
+  // gravação, então a mais recente serve de data da base
+  if (!em && _reuAba === 'pedidos' && typeof _pedDados !== 'undefined' && _pedDados) {
+    _pedDados.forEach(function(p){
+      if (p && p.atualizadoEm && (!em || p.atualizadoEm > em)) em = p.atualizadoEm;
+    });
+  }
   set('reu-meta-data', em ? new Date(em).toLocaleString('pt-BR') : '—');
   set('reu-meta-hoje', cpDataBR(cpHojeISO()));
 }
