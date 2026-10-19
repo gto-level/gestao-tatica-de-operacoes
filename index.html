@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/10 23:20';
+var GTO_BUILD = '20/10 00:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1484,6 +1484,18 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               <div class="extra-head">Rejeite de Pedidos</div>
               <div class="kpi-grid" id="rj-kpi-topo" style="margin-bottom:18px"></div>
 
+              <div class="extra-head">Prazos — tempo parado</div>
+              <div class="rj-prazos">
+                <div class="rj-prazo">
+                  <div class="rj-prazo-t rj-t-sup">Supervisor — dias parados desde o envio do cockpit</div>
+                  <div id="rj-barras-sup"></div>
+                </div>
+                <div class="rj-prazo">
+                  <div class="rj-prazo-t rj-t-forn">Fornecedor — dias parados desde a rejeição</div>
+                  <div id="rj-barras-forn"></div>
+                </div>
+              </div>
+
               <div class="extra-head">Rejeite Supervisor — de quem é o motivo</div>
               <div class="kpi-grid" id="rj-kpi-sup" style="margin-bottom:10px"></div>
               <div id="rj-sem-classe"></div>
@@ -1503,18 +1515,6 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 </table>
               </div>
 
-              <div class="extra-head">Prazos — tempo parado</div>
-              <div class="kpi-grid" id="rj-kpi-60" style="margin-bottom:14px"></div>
-              <div class="rj-prazos">
-                <div class="rj-prazo">
-                  <div class="rj-prazo-t rj-t-sup">Supervisor — dias parados desde o envio do cockpit</div>
-                  <div id="rj-barras-sup"></div>
-                </div>
-                <div class="rj-prazo">
-                  <div class="rj-prazo-t rj-t-forn">Fornecedor — dias parados desde a rejeição</div>
-                  <div id="rj-barras-forn"></div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -60083,9 +60083,13 @@ function raKpi(it){
     + '</div>';
 }
 // cols é opcional: quem passa um recorte de outra base (o Detalhamento
-// Patec, por exemplo) manda junto as colunas daquela base
-function raCorte(chave, titulo, itens, cols){
-  RA_CORTES[chave] = { titulo: titulo, itens: itens, cols: cols || null };
+// Patec, por exemplo) manda junto as colunas daquela base.
+// caixas também: [{nome, cap, classe, teste(item)}] vira uma fileira de
+// mini-cards no topo da janela, e clicar num deles filtra a tabela — é
+// como se abre "do que esse número é feito" sem sair da janela.
+function raCorte(chave, titulo, itens, cols, caixas){
+  RA_CORTES[chave] = { titulo: titulo, itens: itens, cols: cols || null,
+                       caixas: caixas || null };
   return chave;
 }
 
@@ -60187,30 +60191,79 @@ function raDetAbrir(chave){
   // o recorte pode trazer as colunas dele: os itens do Levelbord usam
   // nomes de coluna em MAIÚSCULAS, e os da base do PATEC, minúsculas.
   // Sem isto a tabela sairia com todas as células vazias.
+  _raDetFiltro = null;
+  raDetPintar();
+  if (typeof pfAlinhar === 'function') pfAlinhar();
+  document.getElementById('raDetalhe').classList.add('open');
+  if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
+}
+
+// a caixa escolhida; null = a lista inteira
+var _raDetFiltro = null;
+function raDetLinhas(){
+  var c = _raDet;
+  if (!c) return [];
+  var todas = c.itens || [];
+  if (_raDetFiltro === null || !c.caixas || !c.caixas[_raDetFiltro]) return todas;
+  return todas.filter(c.caixas[_raDetFiltro].teste);
+}
+// clicar de novo na mesma caixa solta o filtro — senão não dá para
+// voltar à lista inteira sem fechar e abrir a janela
+function raDetFiltrar(i){
+  _raDetFiltro = (_raDetFiltro === i) ? null : i;
+  raDetPintar();
+}
+
+function raDetPintar(){
+  var c = _raDet;
+  if (!c) return;
   var cols = c.cols || RA_DET_COLS;
+  var todas = c.itens || [];
+  var lista = raDetLinhas();
   document.getElementById('ra-det-titulo').textContent = c.titulo;
   document.getElementById('ra-det-sub').textContent =
-    raNum(itens.length) + ' item(ns) nesse recorte';
+    (_raDetFiltro === null || !c.caixas)
+      ? raNum(todas.length) + ' item(ns) nesse recorte'
+      : raNum(lista.length) + ' de ' + raNum(todas.length) + ' item(ns) · '
+        + c.caixas[_raDetFiltro].nome + ' · clique de novo na caixa para soltar';
 
-  // os cards por Status da RC só fazem sentido para o Levelbord
-  var porStatus = c.cols ? [] : raOrdenado(raContar(itens, 'STATUS_RC'));
-  document.getElementById('ra-det-cards').innerHTML = porStatus.map(function(x){
-    return raKpi({ l:'Status ' + x.nome, v: raNum(x.n), small:true });
-  }).join('') || '';
+  var cards = document.getElementById('ra-det-cards');
+  if (c.caixas) {
+    cards.className = 'rf-kpis';
+    cards.innerHTML = c.caixas.map(function(cx, i){
+      var n = todas.filter(cx.teste).length;
+      return '<div class="kpi small ' + (cx.classe || '')
+        + (_raDetFiltro === i ? ' rf-on' : '') + '"'
+        + ' onclick="raDetFiltrar(' + i + ')" style="cursor:pointer"'
+        + ' title="Ver só estes itens na tabela">'
+        + '<div class="lbl">' + cpEsc(cx.nome) + '</div>'
+        + '<div class="val">' + raNum(n) + '</div>'
+        + (cx.cap ? '<div class="cap">' + cpEsc(cx.cap) + '</div>' : '')
+        + '</div>';
+    }).join('');
+  } else {
+    // os cards por Status da RC só fazem sentido para o Levelbord
+    cards.className = 'kpi-grid';
+    var porStatus = c.cols ? [] : raOrdenado(raContar(todas, 'STATUS_RC'));
+    cards.innerHTML = porStatus.map(function(x){
+      return raKpi({ l:'Status ' + x.nome, v: raNum(x.n), small:true });
+    }).join('') || '';
+  }
 
   document.getElementById('ra-det-thead').innerHTML =
     '<tr>' + cols.map(function(c2){ return '<th>' + c2.t + '</th>'; }).join('') + '</tr>';
-  document.getElementById('ra-det-tbody').innerHTML =
-    itens.slice(0, RA_DET_MAX).map(function(r){
-      return '<tr>' + cols.map(function(c2){
-        return '<td>' + cpEsc(r[c2.k] == null ? '' : r[c2.k]) + '</td>'; }).join('') + '</tr>';
-    }).join('');
-  document.getElementById('ra-det-rodape').textContent = itens.length > RA_DET_MAX
-    ? ('mostrando os ' + raNum(RA_DET_MAX) + ' primeiros de ' + raNum(itens.length)
+  document.getElementById('ra-det-tbody').innerHTML = lista.length
+    ? lista.slice(0, RA_DET_MAX).map(function(r){
+        return '<tr>' + cols.map(function(c2){
+          return '<td>' + cpEsc(r[c2.k] == null ? '' : r[c2.k]) + '</td>'; }).join('') + '</tr>';
+      }).join('')
+    : '<tr><td colspan="' + cols.length + '" style="padding:1.5rem;text-align:center;'
+      + 'color:var(--tx2)">Nenhum item nessa caixa.</td></tr>';
+  document.getElementById('ra-det-rodape').textContent = lista.length > RA_DET_MAX
+    ? ('mostrando os ' + raNum(RA_DET_MAX) + ' primeiros de ' + raNum(lista.length)
        + ' — o XLSX leva todos')
     : '';
-  if (typeof pfAlinhar === 'function') pfAlinhar();
-  document.getElementById('raDetalhe').classList.add('open');
+  // a tabela foi redesenhada: os ▾ de coluna precisam voltar
   if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
 }
 function raDetFechar(){
@@ -60226,7 +60279,8 @@ function rvDetExportar(){
 function raDetExportar(){
   if (!_raDet || typeof XLSX === 'undefined') return;
   var colsEx = _raDet.cols || RA_DET_COLS;
-  var linhas = (_raDet.itens || []).map(function(r){
+  // o XLSX leva o que está na tela: se uma caixa está escolhida, só ela
+  var linhas = raDetLinhas().map(function(r){
     var o = {};
     colsEx.forEach(function(c){ o[c.t] = (r[c.k] == null) ? '' : r[c.k]; });
     return o;
@@ -61544,7 +61598,7 @@ function rvjDesenhar(){
   var av = document.getElementById('rj-aviso');
   var limpar = function(){
     ['rj-kpi-topo','rj-kpi-sup','rj-kpi-forn','rj-sem-classe'].forEach(function(i){ rvjPor(i, ''); });
-    ['rj-tb-sup','rj-tb-forn','rj-tb-sla'].forEach(function(i){ rvjPor(i, ''); });
+    ['rj-tb-sup','rj-tb-forn','rj-barras-sup','rj-barras-forn'].forEach(function(i){ rvjPor(i, ''); });
     var f = document.getElementById('rj-fonte'); if (f) f.textContent = '—';
   };
   if (_rvjErro) {
@@ -61578,24 +61632,53 @@ function rvjDesenhar(){
   if (fonte) fonte.innerHTML = 'Base de Pedidos — fornecedor de <b>' + br(d.dataForn)
     + '</b> · supervisor de <b>' + br(d.dataSup) + '</b>';
 
-  // ── o topo: os dois lados e o total ──
+  // ── o topo: os dois lados, o total e quem passou de 60 dias ──
+  // Os dois lados medem coisas diferentes, e é por isso que o rótulo de
+  // cada card de 60 dias diz qual campo usou: no supervisor existe o SLA
+  // da RC (Levelboard); na planilha de rejeitados do fornecedor não há
+  // RC nem SLA, só os dias desde a rejeição.
+  var supSla = d.sup.filter(function(l){ return Number(l.slaRc || 0) > 60; });
+  var supSemSla = d.sup.filter(function(l){ return l.slaRc == null || l.slaRc === ''; }).length;
+  var fornVelhos = d.forn.filter(function(i){ return Number(i.diasHoje || 0) > 60; });
+
+  // o ⊕ dos dois lados abre a janela já repartida: no supervisor, as
+  // caixas que compõem o número (Level, Petrobras, sem classificação);
+  // no fornecedor, dentro e fora do prazo
+  var caixasSup = [
+    { nome:'Motivo Level', classe:'purple', cap:'nasce do nosso lado',
+      teste: function(r){ return rjsCulpa(r.padrao || '') === 'level'; } },
+    { nome:'Motivo Petrobras', classe:'light-blue', cap:'preço e data de parada',
+      teste: function(r){ return rjsCulpa(r.padrao || '') === 'petro'; } },
+    { nome:'Sem classificação', classe:'', cap:'código ainda sem lado',
+      teste: function(r){ return rjsCulpa(r.padrao || '') === 'sem'; } }
+  ];
+  var caixasForn = [
+    { nome:'No prazo', classe:'light-green', cap:'dentro do prazo da planilha',
+      teste: function(r){ return !/FORA/i.test(r.prazo || ''); } },
+    { nome:'Fora do prazo', classe:'purple', cap:'estourou o prazo',
+      teste: function(r){ return /FORA/i.test(r.prazo || ''); } }
+  ];
+
   rvjPor('rj-kpi-topo',
       raKpi({ l:'Total rejeitado', v: dpNum(d.total), darkGreen:true,
               cap:'fornecedor + supervisor' })
     + raKpi({ l:'Rejeite Fornecedor', v: dpNum(d.forn.length), small:true, purple:true,
               cap: d.foraPrazo ? dpNum(d.foraPrazo) + ' fora do prazo' : '',
               corte: d.forn.length
-                ? raCorte('rj_forn', 'Rejeite Fornecedor', d.forn, RVJ_FORN_COLS) : null })
+                ? raCorte('rj_forn', 'Rejeite Fornecedor', d.forn, RVJ_FORN_COLS, caixasForn) : null })
     + raKpi({ l:'Rejeite Supervisor', v: dpNum(d.sup.length), small:true, lightBlue:true,
               cap: d.conta ? dpNum(d.conta.apontados || 0) + ' apontados pelo Rodrigo' : '',
               corte: d.sup.length
-                ? raCorte('rj_sup', 'Rejeite Supervisor', d.sup, RVJ_SUP_COLS) : null })
-    + raKpi({ l:'Média parada — fornecedor',
-              v: d.mediaForn == null ? '—' : String(d.mediaForn).replace('.', ','),
-              small:true, cap:'mediana ' + (d.medianaForn == null ? '—' : d.medianaForn) })
-    + raKpi({ l:'Média parada — supervisor',
-              v: d.mediaSup == null ? '—' : String(d.mediaSup).replace('.', ','),
-              small:true, cap:'mediana ' + (d.medianaSup == null ? '—' : d.medianaSup) }));
+                ? raCorte('rj_sup', 'Rejeite Supervisor', d.sup, RVJ_SUP_COLS, caixasSup) : null })
+    + raKpi({ l:'Supervisor acima de 60 dias', v: dpNum(supSla.length), small:true, purple:true,
+              cap:'pelo SLA da RC (Levelboard)'
+                 + (supSemSla ? ' · ' + dpNum(supSemSla) + ' sem SLA na base' : ''),
+              corte: supSla.length
+                ? raCorte('rj_60s', 'Supervisor acima de 60 dias', supSla, RVJ_SUP_COLS, caixasSup) : null })
+    + raKpi({ l:'Fornecedor acima de 60 dias', v: dpNum(fornVelhos.length), small:true, lightBlue:true,
+              cap:'pelos dias parados desde a rejeição',
+              corte: fornVelhos.length
+                ? raCorte('rj_60f', 'Fornecedor acima de 60 dias', fornVelhos, RVJ_FORN_COLS, caixasForn) : null }));
 
   // ── supervisor: de quem é o motivo ──
   var q = d.q || { level:0, petro:0, sem:0 };
@@ -61650,25 +61733,6 @@ function rvjDesenhar(){
     return raKpi(o);
   }).join('') : '');
   rvjPor('rj-tb-forn', linhas(d.motivosForn, d.forn.length, false));
-
-  // ── acima de 60 dias ──
-  // Os dois lados medem coisas diferentes, e é por isso que o rótulo de
-  // cada card diz qual campo usou: no supervisor existe o SLA da RC
-  // (Levelboard); na planilha de rejeitados do fornecedor não há RC nem
-  // SLA, só os dias desde a rejeição.
-  var supSla = d.sup.filter(function(l){ return Number(l.slaRc || 0) > 60; });
-  var supSemSla = d.sup.filter(function(l){ return l.slaRc == null || l.slaRc === ''; }).length;
-  var fornVelhos = d.forn.filter(function(i){ return Number(i.diasHoje || 0) > 60; });
-  rvjPor('rj-kpi-60',
-      raKpi({ l:'Supervisor acima de 60 dias', v: dpNum(supSla.length), purple:true,
-              cap:'pelo SLA da RC (Levelboard)'
-                 + (supSemSla ? ' · ' + dpNum(supSemSla) + ' sem SLA na base' : ''),
-              corte: supSla.length
-                ? raCorte('rj_60s', 'Supervisor acima de 60 dias', supSla, RVJ_SUP_COLS) : null })
-    + raKpi({ l:'Fornecedor acima de 60 dias', v: dpNum(fornVelhos.length), lightBlue:true,
-              cap:'pelos dias parados desde a rejeição',
-              corte: fornVelhos.length
-                ? raCorte('rj_60f', 'Fornecedor acima de 60 dias', fornVelhos, RVJ_FORN_COLS) : null }));
 
   // ── tempo parado, em barras, um lado em cada coluna ──
   var barras = function(mapa, total, classe){
