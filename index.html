@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/10 19:05';
+var GTO_BUILD = '19/10 20:15';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -60705,6 +60705,7 @@ var _dpRadar = null;       // itens da base do PATEC
 var _dpMapa  = [];         // mapa_diario, para os gráficos
 var _dpXgl   = { itens: [], dados: {} };
 var _dpSb    = { itens: [], dados: {} };   // Status B, irmão do XGL
+var _dpHist  = [];         // marcos diários do Ag. Tratamento
 var _dpQuando = '';        // ts da base do Radar
 var _dpErro  = null;       // { titulo, detalhe, codigo }
 var _dpLendo = false;
@@ -60804,7 +60805,18 @@ async function dpLerTudo(db){
   try { _dpMapa = await dpLerMapa(db); } catch (e) { _dpMapa = []; }
   try { _dpXgl = await dpLerXgl(db); } catch (e) { _dpXgl = { itens:[], dados:{} }; }
   try { _dpSb  = await dpLerSb(db); }  catch (e) { _dpSb  = { itens:[], dados:{} }; }
+  try { _dpHist = await dpLerHist(db); } catch (e) { _dpHist = []; }
   return true;
+}
+
+// Os marcos diários do Ag. Tratamento. O Monitoramento do PATEC desenha
+// essa linha, e ela NÃO sai do mapa: o mapa guarda l3..l8, e o Ag.
+// Tratamento é um recorte do Radar (status exato + duas filas) que o
+// PATEC grava uma vez por dia aqui.
+async function dpLerHist(db){
+  var d = await db.collection('config').doc('pa_historico').get();
+  var lista = (d && d.exists) ? ((d.data() || {}).lista || []) : [];
+  return Array.isArray(lista) ? lista : [];
 }
 
 // o Radar é gravado em pedaços: um doc de meta e N docs com as linhas
@@ -61181,6 +61193,29 @@ function dpPeriodo(){
   return { ini: corte[0], fim: corte[corte.length - 1] };
 }
 
+// O dia do upload do Radar que está carregado. O Ag. Tratamento de HOJE
+// só vale se o Radar for o de hoje — senão a tela mostraria o recorte de
+// ontem como se fosse o de agora.
+function dpDiaDoRadar(){
+  if (!_dpQuando) return null;
+  var d = new Date(_dpQuando);
+  if (isNaN(d)) return null;
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+       + '-' + String(d.getDate()).padStart(2, '0');
+}
+// mesma contagem do card do Radar Estratégico: status exato mais as
+// filas PATEC e Análise de Oportunidade
+function dpAgTratAoVivo(){
+  if (!_dpRadar || !_dpRadar.length) return null;
+  var hoje = (typeof cpHojeISO === 'function') ? cpHojeISO()
+           : new Date().toISOString().slice(0, 10);
+  if (dpDiaDoRadar() !== hoje) return null;
+  return _dpRadar.filter(function(r){
+    return String(r.analista_auto || '').trim() === 'Analisar PATEC Finalizado'
+        && DP_FILAS_AG.indexOf(dpNormF(r.fila)) >= 0;
+  }).length;
+}
+
 function dpSerie(){
   var p = dpPeriodo();
   if (!p) return [];
@@ -61189,14 +61224,29 @@ function dpSerie(){
     .filter(function(d){ return d >= p.ini && d <= p.fim; });
   var porDia = {};
   _dpMapa.forEach(function(r){ porDia[r.data] = r; });
+  var hoje = (typeof cpHojeISO === 'function') ? cpHojeISO()
+           : new Date().toISOString().slice(0, 10);
+  var vivo = dpAgTratAoVivo();
   return dias.map(function(d){
     var m = porDia[d];
     var n = function(k){ return m ? Number(m[k] || 0) : null; };
+    // o marco do dia, gravado pelo PATEC ("Auto" no rótulo); para hoje,
+    // o Radar ao vivo tem preferência, como no Monitoramento do ADM
+    var marco = null;
+    for (var i = 0; i < _dpHist.length; i++) {
+      var h = _dpHist[i];
+      if (h && h.dt === d && h.label && String(h.label).indexOf('Auto') >= 0) {
+        marco = h; break;
+      }
+    }
+    var ag = (d === hoje && vivo !== null) ? vivo : (marco ? marco.val : null);
     return { data: d,
              totalPatec: m ? n('l3') + n('l4') + n('l5') + n('l6') : null,
              totalAbrir: m ? n('l7') + n('l8') : null,
              totalGeral: m ? n('l3') + n('l4') + n('l5') + n('l6') + n('l7') + n('l8') : null,
-             fin: n('l3'), agfin: n('l4') };
+             // "PATEC Finalizado" do Monitoramento é l3+l5+l6, não só l3
+             patecFin: m ? n('l3') + n('l5') + n('l6') : null,
+             agfin: n('l4'), agTrat: ag };
   });
 }
 
@@ -61259,11 +61309,14 @@ function dpDesenharGraficos(){
              borderColor:cor, backgroundColor:cor, tension:.3, spanGaps:true,
              pointRadius:3, borderWidth:2 };
   };
+  // as mesmas três linhas do Monitoramento do PATEC do ADM, nas mesmas
+  // cores: PATEC Finalizado (l3+l5+l6), Ag. PATEC Finalizar (l4) e o
+  // Ag. Tratamento, que vem dos marcos diários
   dpGrafico('dp-gr-mon', '_dpGrMon', {
     type:'line',
-    data:{ labels:rot, datasets:[ linha('Total PATEC', 'totalPatec', '#1A4A8A'),
-                                  linha('PATEC Finalizado', 'fin', '#0E9E6A'),
-                                  linha('Ag. PATEC Finalizar', 'agfin', '#C07A12') ] }
+    data:{ labels:rot, datasets:[ linha('PATEC Finalizado', 'patecFin', '#3266AD'),
+                                  linha('Ag. PATEC Finalizar', 'agfin', '#6A93C9'),
+                                  linha('Ag. Tratamento', 'agTrat', '#2e7d32') ] }
   });
   dpGrafico('dp-gr-barra', '_dpGrBarra', {
     type:'bar',
