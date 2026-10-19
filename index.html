@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/10 15:40';
+var GTO_BUILD = '19/10 16:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -60651,8 +60651,27 @@ function _dpDB(){
   return null;
 }
 var _dpAutOk = false;
+var _dpTentouAut = false;
+// O PATEC do ADLV é o MESMO projeto do login (patec-dashboard), e o
+// login entra no app [DEFAULT] — que é de onde getDBModulo('adlv') tira
+// o handle. Ou seja: quem está logado no GTO já está autenticado aqui,
+// venha de qual frente vier. Pedir sessão antes de ler, como o Radar
+// FAST faz, estava barrando a leitura à toa: _autenticarModulo('adlv')
+// olha o app NOMEADO 'adlvApp', que é outra instância, sempre sem
+// ninguém dentro. Então aqui a ordem é outra: lê primeiro, e só se o
+// Firestore recusar é que tenta abrir sessão.
 async function _dpAutenticar(){
   if (_dpAutOk) return true;
+  try {
+    if (typeof ensureDefaultApp === 'function') ensureDefaultApp();
+    var app = (typeof firebase !== 'undefined' && firebase.apps)
+      ? firebase.apps.filter(function(a){ return a.name === '[DEFAULT]'; })[0] : null;
+    if (app && typeof app.auth === 'function') {
+      var u = app.auth().currentUser;
+      if (!u && typeof _sessaoDoApp === 'function') u = await _sessaoDoApp(app, 2500);
+      if (u) { _dpAutOk = true; return true; }
+    }
+  } catch (e) { console.warn('_dpAutenticar (default):', e); }
   try {
     var r = (typeof _autenticarModulo === 'function')
           ? await _autenticarModulo('adlv') : { ok:true };
@@ -60660,6 +60679,10 @@ async function _dpAutenticar(){
     if (!_dpAutOk) console.warn('Detalhamento Patec sem sessão no ADLV:', r && r.motivo);
   } catch (e) { _dpAutOk = false; console.warn('_dpAutenticar:', e); }
   return _dpAutOk;
+}
+function _dpEhPermissao(e){
+  var c = String((e && (e.code || e.message)) || '').toLowerCase();
+  return /permission|unauthenticated|insufficient|missing or insufficient/.test(c);
 }
 
 function dpNum(n){ return (typeof raNum === 'function') ? raNum(n) : String(n); }
@@ -60669,12 +60692,6 @@ function dpNormF(v){ return String(v == null ? '' : v).trim().toLowerCase(); }
 // ── a leitura ─────────────────────────────────────────────────────
 async function dpCarregar(){
   _dpErro = null;
-  if (!(await _dpAutenticar())) {
-    _dpErro = { titulo:'Não consegui abrir a base do PATEC do ADLV a partir daqui.',
-                detalhe:'Entre uma vez na frente ADLV · PATEC nesta máquina e volte — '
-                      + 'cada projeto do Firebase tem a sua própria sessão.' };
-    return false;
-  }
   var db = _dpDB();
   if (!db) {
     _dpErro = { titulo:'Firebase do PATEC indisponível.',
@@ -60682,26 +60699,43 @@ async function dpCarregar(){
     return false;
   }
   try {
-    var itens = await dpLerRadar(db);
-    if (!itens.length) {
-      _dpErro = { titulo:'A base do Radar do PATEC está vazia.',
-                  detalhe:'Suba o Radar no PATEC do ADLV — enquanto não subir, '
-                        + 'esta aba não tem o que mostrar.' };
-      return false;
-    }
-    _dpRadar = itens;
-    // o mapa e o XGL são complemento: se falharem, os cards principais
-    // continuam de pé e a tela avisa o que ficou de fora
-    try { _dpMapa = await dpLerMapa(db); } catch (e) { _dpMapa = []; }
-    try { _dpXgl = await dpLerXgl(db); } catch (e) { _dpXgl = { itens:[], dados:{} }; }
-    return true;
+    return await dpLerTudo(db);
   } catch (e) {
+    // só agora, se o Firestore recusou, é que vale tentar abrir sessão
+    if (_dpEhPermissao(e) && !_dpTentouAut) {
+      _dpTentouAut = true;
+      if (await _dpAutenticar()) {
+        try { return await dpLerTudo(_dpDB() || db); }
+        catch (e2) { e = e2; }
+      } else {
+        console.warn('dpCarregar: sem sessão no PATEC do ADLV');
+        _dpErro = { titulo:'Não consegui abrir a base do PATEC do ADLV a partir daqui.',
+                    detalhe:'Saia e entre de novo no GTO — a sessão do PATEC expirou.' };
+        return false;
+      }
+    }
     console.warn('dpCarregar:', e);
     _dpErro = { titulo:'A base do PATEC do ADLV recusou a leitura.',
                 detalhe:'Verifique se o seu acesso ao PATEC continua valendo.',
                 codigo: (e && (e.code || e.message)) || '' };
     return false;
   }
+}
+
+async function dpLerTudo(db){
+  var itens = await dpLerRadar(db);
+  if (!itens.length) {
+    _dpErro = { titulo:'A base do Radar do PATEC está vazia.',
+                detalhe:'Suba o Radar no PATEC do ADLV — enquanto não subir, '
+                      + 'esta aba não tem o que mostrar.' };
+    return false;
+  }
+  _dpRadar = itens;
+  // o mapa e o XGL são complemento: se falharem, os cards principais
+  // continuam de pé e a tela avisa o que ficou de fora
+  try { _dpMapa = await dpLerMapa(db); } catch (e) { _dpMapa = []; }
+  try { _dpXgl = await dpLerXgl(db); } catch (e) { _dpXgl = { itens:[], dados:{} }; }
+  return true;
 }
 
 // o Radar é gravado em pedaços: um doc de meta e N docs com as linhas
@@ -61051,7 +61085,7 @@ async function dpAbrir(){
 }
 
 async function dpRecarregar(){
-  _dpRadar = null; _dpErro = null; _dpAutOk = false;
+  _dpRadar = null; _dpErro = null; _dpAutOk = false; _dpTentouAut = false;
   await dpAbrir();
 }
 
