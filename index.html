@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/10 22:30';
+var GTO_BUILD = '19/10 23:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -493,6 +493,39 @@ body{
   font-size:12px; font-weight:700; color:#0E2B28; margin-bottom:10px;
 }
 #rd-root .dp-graf-c{ height:260px; position:relative; }
+
+/* as barras de tempo parado, no desenho da Apresentação de Pedidos */
+#rd-root .rj-prazos{
+  display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:18px;
+}
+@media (max-width:980px){ #rd-root .rj-prazos{ grid-template-columns:1fr; } }
+#rd-root .rj-prazo{
+  background:#fff; border:1px solid #E4EDEB; border-radius:14px; padding:0 0 10px;
+  box-shadow:0 1px 2px rgba(14,43,40,.04), 0 1px 3px rgba(14,43,40,.06); overflow:hidden;
+}
+#rd-root .rj-prazo-t{
+  font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px;
+  color:#0E2B28; padding:9px 14px; border-bottom:3px solid #C07A12; background:#FBFCFC;
+}
+#rd-root .rj-prazo-t.rj-t-forn{ border-bottom-color:#C0392B; }
+#rd-root .rj-linha{
+  display:flex; align-items:center; gap:10px; padding:5px 14px; font-size:11.5px;
+}
+#rd-root .rj-lbl{ width:108px; flex:0 0 108px; color:#0E2B28; }
+/* trilho e barra são <span>: sem display:block o navegador trata os dois
+   como texto e ignora a largura — a barra some e fica só o trilho */
+#rd-root .rj-trilho{
+  display:block; flex:1 1 auto; height:13px; border-radius:7px;
+  background:#EEF2F1; overflow:hidden;
+}
+#rd-root .rj-barra{
+  display:block; height:100%; min-height:13px; border-radius:7px; background:#E8A33D;
+}
+#rd-root .rj-barra.rj-b-forn{ background:#C0392B; }
+#rd-root .rj-num{
+  width:82px; flex:0 0 82px; text-align:right; font-weight:700; color:#0E2B28;
+}
+#rd-root .rj-num i{ font-style:normal; font-weight:600; color:#5C7370; }
 
 /* ── A margem da página do Radar ───────────────────────────────
    As telas do Status Carteira moram dentro do .ct, que tem 24px de
@@ -1470,12 +1503,17 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 </table>
               </div>
 
-              <div class="extra-head">Tempo parado</div>
-              <div class="detail-table-wrap" style="margin-bottom:18px">
-                <table class="items-table">
-                  <thead><tr><th>Faixa</th><th>Supervisor</th><th>Fornecedor</th></tr></thead>
-                  <tbody id="rj-tb-sla"></tbody>
-                </table>
+              <div class="extra-head">Prazos — tempo parado</div>
+              <div class="kpi-grid" id="rj-kpi-60" style="margin-bottom:14px"></div>
+              <div class="rj-prazos">
+                <div class="rj-prazo">
+                  <div class="rj-prazo-t rj-t-sup">Supervisor — dias parados desde o envio do cockpit</div>
+                  <div id="rj-barras-sup"></div>
+                </div>
+                <div class="rj-prazo">
+                  <div class="rj-prazo-t rj-t-forn">Fornecedor — dias parados desde a rejeição</div>
+                  <div id="rj-barras-forn"></div>
+                </div>
               </div>
             </div>
           </div>
@@ -61613,12 +61651,40 @@ function rvjDesenhar(){
   }).join('') : '');
   rvjPor('rj-tb-forn', linhas(d.motivosForn, d.forn.length, false));
 
-  // ── tempo parado, lado a lado ──
-  rvjPor('rj-tb-sla', (d.ordemSla || []).map(function(f){
-    return '<tr><td style="font-weight:600">' + cpEsc(f) + '</td>'
-      + '<td>' + dpNum(d.slaSup[f] || 0) + '</td>'
-      + '<td>' + dpNum(d.slaForn[f] || 0) + '</td></tr>';
-  }).join(''));
+  // ── acima de 60 dias ──
+  // Os dois lados medem coisas diferentes, e é por isso que o rótulo de
+  // cada card diz qual campo usou: no supervisor existe o SLA da RC
+  // (Levelboard); na planilha de rejeitados do fornecedor não há RC nem
+  // SLA, só os dias desde a rejeição.
+  var supSla = d.sup.filter(function(l){ return Number(l.slaRc || 0) > 60; });
+  var supSemSla = d.sup.filter(function(l){ return l.slaRc == null || l.slaRc === ''; }).length;
+  var fornVelhos = d.forn.filter(function(i){ return Number(i.diasHoje || 0) > 60; });
+  rvjPor('rj-kpi-60',
+      raKpi({ l:'Supervisor acima de 60 dias', v: dpNum(supSla.length), purple:true,
+              cap:'pelo SLA da RC (Levelboard)'
+                 + (supSemSla ? ' · ' + dpNum(supSemSla) + ' sem SLA na base' : ''),
+              corte: supSla.length
+                ? raCorte('rj_60s', 'Supervisor acima de 60 dias', supSla, RVJ_SUP_COLS) : null })
+    + raKpi({ l:'Fornecedor acima de 60 dias', v: dpNum(fornVelhos.length), lightBlue:true,
+              cap:'pelos dias parados desde a rejeição',
+              corte: fornVelhos.length
+                ? raCorte('rj_60f', 'Fornecedor acima de 60 dias', fornVelhos, RVJ_FORN_COLS) : null }));
+
+  // ── tempo parado, em barras, um lado em cada coluna ──
+  var barras = function(mapa, total, classe){
+    var maior = 0;
+    (d.ordemSla || []).forEach(function(f){ maior = Math.max(maior, mapa[f] || 0); });
+    return (d.ordemSla || []).map(function(f){
+      var n = mapa[f] || 0;
+      var larg = maior > 0 ? Math.round(n / maior * 100) : 0;
+      return '<div class="rj-linha"><span class="rj-lbl">' + cpEsc(f) + '</span>'
+        + '<span class="rj-trilho"><span class="rj-barra ' + classe
+        + '" style="width:' + larg + '%"></span></span>'
+        + '<span class="rj-num">' + dpNum(n) + ' <i>· ' + dpPct(n, total) + '%</i></span></div>';
+    }).join('');
+  };
+  rvjPor('rj-barras-sup', barras(d.slaSup, d.sup.length, ''));
+  rvjPor('rj-barras-forn', barras(d.slaForn, d.forn.length, 'rj-b-forn'));
 
   if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
 }
@@ -61627,7 +61693,8 @@ function rvjDesenhar(){
 var RVJ_SUP_COLS = [
   { k:'rc', t:'RC' }, { k:'itemRc', t:'Item da RC' }, { k:'pedido', t:'Pedido' },
   { k:'comprador', t:'Comprador' }, { k:'padrao', t:'Padrão de rejeite' },
-  { k:'justificativa', t:'Justificativa' }, { k:'slaHoje', t:'Dias parados' }
+  { k:'justificativa', t:'Justificativa' }, { k:'slaRc', t:'SLA da RC' },
+  { k:'slaHoje', t:'Dias parados' }
 ];
 var RVJ_FORN_COLS = [
   { k:'pedido', t:'Pedido' }, { k:'forn', t:'Fornecedor' }, { k:'grupo', t:'Grupo' },
