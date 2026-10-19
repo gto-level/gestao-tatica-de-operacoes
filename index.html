@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/10 21:10';
+var GTO_BUILD = '19/10 22:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1437,10 +1437,46 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               </div>
             </div>
 
+            <!-- ── Rejeite de Pedidos ─────────────────────────────────
+                 As mesmas contas da Apresentação do módulo de Pedidos
+                 (arjDados), lendo ao vivo a base daquele projeto. Só
+                 leitura: nada é gravado do lado de Pedidos. -->
             <div class="rd-pane" id="rd-pane-rejeite" style="display:none">
+              <div class="dp-topo">
+                <div class="dp-fonte" id="rj-fonte">—</div>
+                <button class="pa-btn" onclick="rvjRecarregar()">↻ Buscar de novo</button>
+              </div>
+              <div id="rj-aviso"></div>
+
               <div class="extra-head">Rejeite de Pedidos</div>
-              <div class="rd-apronto">Rejeite por fornecedor e por supervisor, nas mesmas
-                regras da Apresentação do módulo de Pedidos.</div>
+              <div class="kpi-grid" id="rj-kpi-topo" style="margin-bottom:18px"></div>
+
+              <div class="extra-head">Rejeite Supervisor — de quem é o motivo</div>
+              <div class="kpi-grid" id="rj-kpi-sup" style="margin-bottom:10px"></div>
+              <div id="rj-sem-classe"></div>
+              <div class="detail-table-wrap" style="margin-bottom:18px">
+                <table class="items-table">
+                  <thead><tr><th>Padrão de rejeite</th><th>Lado</th><th>Itens</th><th>%</th></tr></thead>
+                  <tbody id="rj-tb-sup"></tbody>
+                </table>
+              </div>
+
+              <div class="extra-head">Rejeite Fornecedor — motivos</div>
+              <div class="kpi-grid" id="rj-kpi-forn" style="margin-bottom:10px"></div>
+              <div class="detail-table-wrap" style="margin-bottom:18px">
+                <table class="items-table">
+                  <thead><tr><th>Motivo</th><th>Itens</th><th>%</th></tr></thead>
+                  <tbody id="rj-tb-forn"></tbody>
+                </table>
+              </div>
+
+              <div class="extra-head">Tempo parado</div>
+              <div class="detail-table-wrap" style="margin-bottom:18px">
+                <table class="items-table">
+                  <thead><tr><th>Faixa</th><th>Supervisor</th><th>Fornecedor</th></tr></thead>
+                  <tbody id="rj-tb-sla"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -17654,53 +17690,55 @@ function arjGerar(){
 }
 
 // ── a tela ────────────────────────────────────────────────────────
-async function arjAbrir(){
-  var av = document.getElementById('arj-aviso');
-  if (av) av.innerHTML = '⏳ Carregando as bases...';
-  try {
-    var db = getDB();
-    if (db) {
-      var docs = await Promise.all([
+// As quatro bases do rejeite, lidas de UMA base qualquer. Ficou em
+// função própria quando a Reunião do ADLV passou a mostrar os mesmos
+// números: lá o db é o do projeto de Pedidos, não o da frente aberta.
+async function arjCarregarBases(db){
+  if (!db) return false;
+  var docs = await Promise.all([
         db.collection('config').doc('governanca_rejeitados').get(),
         db.collection('config').doc('rejeite_sup_medicao').get(),
         db.collection('config').doc('rejeite_sup_sla').get(),
         db.collection('config').doc('rejeite_sup_rodrigo').get(),
-        // Com RJ_EVOLUCAO desligado estes dois nem são buscados: é
-        // leitura do Firebase que não serviria para nada na tela.
         RJ_EVOLUCAO ? db.collection('config').doc(RJH_DOC).get() : null,
         RJ_EVOLUCAO ? db.collection('config').doc(RJL_DOC).get() : null
-      ]);
-      if (docs[0] && docs[0].exists) {
-        var R = docs[0].data() || {};
-        _gpRej = { itens:R.itens || [], arquivo:R.arquivo || '', aba:R.aba || '',
-                   lidas:+R.lidas || 0, fora:+R.fora || 0, grupos:R.grupos || {},
-                   atualizadoEm:R.atualizadoEm || '', atualizadoPor:R.atualizadoPor || '' };
-      }
-      if (docs[1] && docs[1].exists) {
-        _rjsMed = rjsDoDoc(docs[1].data() || {});
-      }
-      if (docs[2] && docs[2].exists) {
-        var S = docs[2].data() || {};
-        _rjsSla = { itens:S.itens || {}, chaves:+S.chaves || 0, cortou:!!S.cortou,
-                    arquivo:S.arquivo || '', atualizadoEm:S.atualizadoEm || '' };
-      }
-      if (docs[3] && docs[3].exists) {
-        var D = docs[3].data() || {};
-        _rjsRod = { cockpit:D.cockpit || {}, motivos:D.motivos || {},
-                    nCockpit:+D.nCockpit || 0, nMotivos:+D.nMotivos || 0,
-                    nDados:+D.nDados || 0, foraDoCockpit:+D.foraDoCockpit || 0,
-                    abas:D.abas || {}, arquivo:D.arquivo || '', atualizadoEm:D.atualizadoEm || '' };
-      }
-      if (docs[4] && docs[4].exists) {
-        var H = docs[4].data() || {};
-        _rjHist = { dias:H.dias || {}, atualizadoEm:H.atualizadoEm || '' };
-      }
-      if (docs[5] && docs[5].exists) {
-        var Lg = docs[5].data() || {};
-        _rjl = { itens:Lg.itens || {}, upload:Lg.upload || { f:'', s:'' },
-                 atualizadoEm:Lg.atualizadoEm || '', atualizadoPor:Lg.atualizadoPor || '' };
-      }
-    }
+  ]);
+  if (docs[0] && docs[0].exists) {
+    var R = docs[0].data() || {};
+    _gpRej = { itens:R.itens || [], arquivo:R.arquivo || '', aba:R.aba || '',
+               lidas:+R.lidas || 0, fora:+R.fora || 0, grupos:R.grupos || {},
+               atualizadoEm:R.atualizadoEm || '', atualizadoPor:R.atualizadoPor || '' };
+  }
+  if (docs[1] && docs[1].exists) _rjsMed = rjsDoDoc(docs[1].data() || {});
+  if (docs[2] && docs[2].exists) {
+    var S = docs[2].data() || {};
+    _rjsSla = { itens:S.itens || {}, chaves:+S.chaves || 0, cortou:!!S.cortou,
+                arquivo:S.arquivo || '', atualizadoEm:S.atualizadoEm || '' };
+  }
+  if (docs[3] && docs[3].exists) {
+    var D = docs[3].data() || {};
+    _rjsRod = { cockpit:D.cockpit || {}, motivos:D.motivos || {},
+                nCockpit:+D.nCockpit || 0, nMotivos:+D.nMotivos || 0,
+                nDados:+D.nDados || 0, foraDoCockpit:+D.foraDoCockpit || 0,
+                abas:D.abas || {}, arquivo:D.arquivo || '', atualizadoEm:D.atualizadoEm || '' };
+  }
+  if (docs[4] && docs[4].exists) {
+    var H = docs[4].data() || {};
+    _rjHist = { dias:H.dias || {}, atualizadoEm:H.atualizadoEm || '' };
+  }
+  if (docs[5] && docs[5].exists) {
+    var Lg = docs[5].data() || {};
+    _rjl = { itens:Lg.itens || {}, upload:Lg.upload || { f:'', s:'' },
+             atualizadoEm:Lg.atualizadoEm || '', atualizadoPor:Lg.atualizadoPor || '' };
+  }
+  return true;
+}
+
+async function arjAbrir(){
+  var av = document.getElementById('arj-aviso');
+  if (av) av.innerHTML = '⏳ Carregando as bases...';
+  try {
+    await arjCarregarBases(getDB());
   } catch (e) { console.warn('arjAbrir:', e); }
   var dt = document.getElementById('arj-data');
   if (dt && !dt.value) dt.value = cpHojeISO();
@@ -18476,7 +18514,11 @@ var RJS_CULPA = {
   '18':'level', '19':'level', '24':'level', '25':'level', '26':'level',
   // Motivo Petrobras — preço excessivo (menos o 1.1) e data de parada
   '1.2':'petro', '1.3':'petro', '1.4':'petro', '1.5':'petro', '1.6':'petro',
-  '9':'petro', '17':'petro'
+  '9':'petro', '17':'petro',
+  // 19/10: apareceram sem classificação na apresentação; o André
+  // classificou os dois como Petrobras.
+  // 20 - Devolver para complemento de informações · 22 - Proposta inexequível
+  '20':'petro', '22':'petro'
 };
 var RJS_CULPA_NOME = { level:'Motivo Level', petro:'Motivo Petrobras', sem:'Sem classificação' };
 
@@ -60438,6 +60480,7 @@ function rdTab(aba, btn){
   // a leitura da base do PATEC é cara e é de outro projeto: só acontece
   // quando a aba é aberta, não a cada vez que se entra na frente
   if (aba === 'detpatec' && typeof dpAbrir === 'function') dpAbrir();
+  if (aba === 'rejeite' && typeof rvjAbrir === 'function') rvjAbrir();
   if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
 }
 
@@ -61397,6 +61440,201 @@ async function dpRecarregar(){
   _dpRadar = null; _dpErro = null; _dpAutOk = false; _dpTentouAut = false;
   await dpAbrir();
 }
+
+// ══════════════════════════════════════════════════════════════════
+// REJEITE DE PEDIDOS — a aba que lê a base do módulo de Pedidos
+//
+// O cálculo é o MESMO da Apresentação de lá (arjDados): a regra do
+// rejeite não pode ter duas versões. O que muda é de onde as quatro
+// bases vêm — aqui, do projeto patec-pedidos, por leitura cruzada,
+// e do jeito que o André sobe: upload lá, aparece aqui.
+// ══════════════════════════════════════════════════════════════════
+var _rvjPronto = false, _rvjLendo = false, _rvjErro = null, _rvjTentouAut = false;
+var _rvjAutOk = false;
+
+function _rvjDB(){
+  try { if (typeof getDBModulo === 'function') return getDBModulo('pedidos'); }
+  catch (e) { console.warn('_rvjDB:', e); }
+  return null;
+}
+async function _rvjAutenticar(){
+  if (_rvjAutOk) return true;
+  try {
+    var r = (typeof _autenticarModulo === 'function')
+          ? await _autenticarModulo('pedidos') : { ok:true };
+    _rvjAutOk = !!(r && r.ok);
+  } catch (e) { _rvjAutOk = false; console.warn('_rvjAutenticar:', e); }
+  return _rvjAutOk;
+}
+
+async function rvjAbrir(){
+  if (!_dpNaReuniao()) return;
+  if (_rvjLendo) return;
+  if (_rvjPronto || _rvjErro) { rvjDesenhar(); return; }
+  _rvjLendo = true;
+  rvjDesenhar();
+  _rvjErro = null;
+  try {
+    await arjCarregarBases(_rvjDB());
+    _rvjPronto = true;
+  } catch (e) {
+    if (_dpEhPermissao(e) && !_rvjTentouAut) {
+      _rvjTentouAut = true;
+      if (await _rvjAutenticar()) {
+        try { await arjCarregarBases(_rvjDB()); _rvjPronto = true; }
+        catch (e2) { _rvjErro = e2; }
+      } else {
+        _rvjErro = { semSessao:true };
+      }
+    } else { _rvjErro = e; }
+  }
+  _rvjLendo = false;
+  rvjDesenhar();
+}
+
+async function rvjRecarregar(){
+  _rvjPronto = false; _rvjErro = null; _rvjAutOk = false; _rvjTentouAut = false;
+  await rvjAbrir();
+}
+
+function rvjPor(id, html){
+  var el = document.getElementById(id);
+  if (el) el.innerHTML = html;
+}
+
+function rvjDesenhar(){
+  var av = document.getElementById('rj-aviso');
+  var limpar = function(){
+    ['rj-kpi-topo','rj-kpi-sup','rj-kpi-forn','rj-sem-classe'].forEach(function(i){ rvjPor(i, ''); });
+    ['rj-tb-sup','rj-tb-forn','rj-tb-sla'].forEach(function(i){ rvjPor(i, ''); });
+    var f = document.getElementById('rj-fonte'); if (f) f.textContent = '—';
+  };
+  if (_rvjErro) {
+    limpar();
+    if (av) av.innerHTML = _rvjErro.semSessao
+      ? '<div class="dp-msg dp-msg-erro"><b>Não consegui abrir a base de Pedidos a '
+        + 'partir daqui.</b><br>Saia e entre de novo no GTO — a sessão de Pedidos expirou.</div>'
+      : '<div class="dp-msg dp-msg-erro"><b>A base de Pedidos recusou a leitura.</b><br>'
+        + 'Verifique se o seu acesso a Pedidos continua valendo.<br>código: '
+        + cpEsc((_rvjErro && (_rvjErro.code || _rvjErro.message)) || '—') + '</div>';
+    return;
+  }
+  if (!_rvjPronto) {
+    limpar();
+    if (av) av.innerHTML = '<div class="dp-msg dp-msg-ok">⏳ buscando as bases de Pedidos...</div>';
+    return;
+  }
+  if (av) av.innerHTML = '';
+
+  var d;
+  try { d = arjDados('', ''); }
+  catch (e) {
+    limpar();
+    if (av) av.innerHTML = '<div class="dp-msg dp-msg-erro"><b>Não consegui montar o '
+      + 'rejeite.</b><br>' + cpEsc(e.message || '') + '</div>';
+    return;
+  }
+
+  var br = function(iso){ return iso ? String(iso).split('-').reverse().join('/') : '—'; };
+  var fonte = document.getElementById('rj-fonte');
+  if (fonte) fonte.innerHTML = 'Base de Pedidos — fornecedor de <b>' + br(d.dataForn)
+    + '</b> · supervisor de <b>' + br(d.dataSup) + '</b>';
+
+  // ── o topo: os dois lados e o total ──
+  rvjPor('rj-kpi-topo',
+      raKpi({ l:'Total rejeitado', v: dpNum(d.total), darkGreen:true,
+              cap:'fornecedor + supervisor' })
+    + raKpi({ l:'Rejeite Fornecedor', v: dpNum(d.forn.length), small:true, purple:true,
+              cap: d.foraPrazo ? dpNum(d.foraPrazo) + ' fora do prazo' : '',
+              corte: d.forn.length
+                ? raCorte('rj_forn', 'Rejeite Fornecedor', d.forn, RVJ_FORN_COLS) : null })
+    + raKpi({ l:'Rejeite Supervisor', v: dpNum(d.sup.length), small:true, lightBlue:true,
+              cap: d.conta ? dpNum(d.conta.apontados || 0) + ' apontados pelo Rodrigo' : '',
+              corte: d.sup.length
+                ? raCorte('rj_sup', 'Rejeite Supervisor', d.sup, RVJ_SUP_COLS) : null })
+    + raKpi({ l:'Média parada — fornecedor',
+              v: d.mediaForn == null ? '—' : String(d.mediaForn).replace('.', ','),
+              small:true, cap:'mediana ' + (d.medianaForn == null ? '—' : d.medianaForn) })
+    + raKpi({ l:'Média parada — supervisor',
+              v: d.mediaSup == null ? '—' : String(d.mediaSup).replace('.', ','),
+              small:true, cap:'mediana ' + (d.medianaSup == null ? '—' : d.medianaSup) }));
+
+  // ── supervisor: de quem é o motivo ──
+  var q = d.q || { level:0, petro:0, sem:0 };
+  var porLado = function(lado){
+    return d.sup.filter(function(l){ return rjsCulpa(l.padrao || '') === lado; });
+  };
+  rvjPor('rj-kpi-sup',
+      raKpi({ l:'Motivo Level', v: dpNum(q.level), small:true, purple:true,
+              cap:'motivo que nasce do nosso lado',
+              corte: q.level ? raCorte('rj_level', 'Motivo Level', porLado('level'), RVJ_SUP_COLS) : null })
+    + raKpi({ l:'Motivo Petrobras', v: dpNum(q.petro), small:true, lightBlue:true,
+              cap:'preço excessivo e data de parada',
+              corte: q.petro ? raCorte('rj_petro', 'Motivo Petrobras', porLado('petro'), RVJ_SUP_COLS) : null })
+    + raKpi({ l:'Sem classificação', v: dpNum(q.sem), small:true,
+              cap: q.sem ? 'código novo — classifique no módulo de Pedidos' : 'tudo classificado',
+              corte: q.sem ? raCorte('rj_sem', 'Sem classificação', porLado('sem'), RVJ_SUP_COLS) : null }));
+
+  // os códigos que ninguém classificou ainda: dizer QUAIS são, para o
+  // número não virar um mistério na reunião
+  var sem = q.codigosSem || {};
+  var chavesSem = Object.keys(sem).sort(function(a, b){ return sem[b] - sem[a]; });
+  rvjPor('rj-sem-classe', chavesSem.length
+    ? '<div class="dp-msg dp-msg-ok" style="border-color:#F5D898;background:#FDF8EC">'
+      + '⚠ <b>' + chavesSem.length + ' padrão(ões) sem lado definido</b> — entre no módulo '
+      + 'de Pedidos e diga de quem é cada um: '
+      + chavesSem.map(function(c){
+          return '<b>' + dpNum(sem[c]) + '×</b> ' + cpEsc(c); }).join(' · ')
+      + '</div>'
+    : '');
+
+  var linhas = function(pares, total, comLado){
+    if (!pares || !pares.length) return '<tr><td colspan="' + (comLado ? 4 : 3)
+      + '" style="padding:1.4rem;text-align:center;color:var(--tx2)">—</td></tr>';
+    return pares.map(function(p){
+      var nome = p[0], n = p[1];
+      return '<tr><td style="font-weight:600">' + cpEsc(nome) + '</td>'
+        + (comLado ? '<td>' + RJS_CULPA_NOME[rjsCulpa(nome)] + '</td>' : '')
+        + '<td>' + dpNum(n) + '</td><td>' + dpPct(n, total) + '%</td></tr>';
+    }).join('');
+  };
+  rvjPor('rj-tb-sup', linhas(d.padroesSup, d.sup.length, true));
+
+  // ── fornecedor: motivos ──
+  var topo = (d.motivosForn || []).slice(0, 4);
+  rvjPor('rj-kpi-forn', topo.length ? topo.map(function(p, i){
+    var o = { l:p[0], v: dpNum(p[1]), small:true,
+              cap: dpPct(p[1], d.forn.length) + '% do fornecedor',
+              corte: raCorte('rj_mf' + i, 'Fornecedor · ' + p[0],
+                d.forn.filter(function(x){ return (x.motivo || '(sem motivo)') === p[0]; }),
+                RVJ_FORN_COLS) };
+    if (i === 0) o.purple = true;
+    return raKpi(o);
+  }).join('') : '');
+  rvjPor('rj-tb-forn', linhas(d.motivosForn, d.forn.length, false));
+
+  // ── tempo parado, lado a lado ──
+  rvjPor('rj-tb-sla', (d.ordemSla || []).map(function(f){
+    return '<tr><td style="font-weight:600">' + cpEsc(f) + '</td>'
+      + '<td>' + dpNum(d.slaSup[f] || 0) + '</td>'
+      + '<td>' + dpNum(d.slaForn[f] || 0) + '</td></tr>';
+  }).join(''));
+
+  if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
+}
+
+// as colunas de cada lado — são bases diferentes, com campos diferentes
+var RVJ_SUP_COLS = [
+  { k:'rc', t:'RC' }, { k:'itemRc', t:'Item da RC' }, { k:'pedido', t:'Pedido' },
+  { k:'comprador', t:'Comprador' }, { k:'padrao', t:'Padrão de rejeite' },
+  { k:'justificativa', t:'Justificativa' }, { k:'slaHoje', t:'Dias parados' }
+];
+var RVJ_FORN_COLS = [
+  { k:'pedido', t:'Pedido' }, { k:'forn', t:'Fornecedor' }, { k:'grupo', t:'Grupo' },
+  { k:'motivo', t:'Motivo' }, { k:'dataRej', t:'Data da rejeição' },
+  { k:'diasHoje', t:'Dias parados' }, { k:'prazo', t:'Prazo' },
+  { k:'envios', t:'Envios' }
+];
 
 
 // ── A pele do Radar FAST: reescreve os cards no desenho do painel ──
