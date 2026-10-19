@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/10 20:15';
+var GTO_BUILD = '19/10 20:45';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -61182,15 +61182,31 @@ function dpGovernanca(){
 }
 
 // ── os dois gráficos, da série do mapa diário ─────────────────────
+// Preencher SÓ uma das duas datas tem de valer. Antes a tela exigia as
+// duas: quem trocava o "De" e deixava o "até" em branco via o gráfico
+// parado, como se a data não tivesse pegado.
 function dpPeriodo(){
   var ini = (document.getElementById('dp-ini') || {}).value || '';
   var fim = (document.getElementById('dp-fim') || {}).value || '';
-  if (ini && fim) return { ini:ini, fim:fim };
-  // sem escolha, os últimos 20 dias com lançamento
+  if (ini && fim) return (ini <= fim) ? { ini:ini, fim:fim } : { ini:fim, fim:ini };
   var dias = _dpMapa.map(function(r){ return r.data; }).sort();
-  if (!dias.length) return null;
+  if (!dias.length) return (ini || fim) ? { ini: ini || fim, fim: fim || ini } : null;
+  // uma ponta só: a outra vem do que existe lançado
+  if (ini) return { ini: ini, fim: dias[dias.length - 1] };
+  if (fim) return { ini: dias[0], fim: fim };
+  // nenhuma: os últimos 20 dias com lançamento
   var corte = dias.slice(-20);
   return { ini: corte[0], fim: corte[corte.length - 1] };
+}
+
+// os campos nascem preenchidos com o período que está na tela: assim
+// dá para ver o que está sendo mostrado e trocar só uma das pontas
+function dpPrefixarDatas(){
+  var a = document.getElementById('dp-ini'), b = document.getElementById('dp-fim');
+  if (!a || !b || a.value || b.value) return;
+  var p = dpPeriodo();
+  if (!p) return;
+  a.value = p.ini; b.value = p.fim;
 }
 
 // O dia do upload do Radar que está carregado. O Ag. Tratamento de HOJE
@@ -61299,6 +61315,7 @@ function dpDesenharTendencia(){
 
 function dpDesenharGraficos(){
   if (!_dpRadar) return;
+  dpPrefixarDatas();
   dpDesenharTendencia();
   var serie = dpSerie();
   var rot = serie.map(function(p){
