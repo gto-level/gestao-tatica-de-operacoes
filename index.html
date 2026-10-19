@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/10 01:50';
+var GTO_BUILD = '19/10 15:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -411,6 +411,28 @@ body{
 #rd-root .pa-vazio{
   padding:2.2rem; text-align:center; color:#5C7370; font-size:12.5px;
 }
+
+/* o Detalhamento Patec */
+#rd-root .dp-topo{
+  display:flex; align-items:center; justify-content:space-between;
+  gap:12px; flex-wrap:wrap; margin-bottom:12px;
+}
+#rd-root .dp-fonte{ font-size:11px; color:#5C7370; }
+#rd-root .dp-fonte b{ color:#0E2B28; font-weight:650; }
+#rd-root .dp-acoes{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+#rd-root .dp-dt{ font-size:11px; color:#5C7370; display:flex; align-items:center; gap:5px; }
+#rd-root .dp-dt input{
+  font:inherit; font-size:11.5px; color:#0E2B28; background:#fff;
+  border:1px solid #E4EDEB; border-radius:8px; padding:5px 8px;
+  backdrop-filter:none; cursor:pointer;
+}
+#rd-root .dp-msg{
+  border-radius:10px; padding:11px 14px; font-size:12px; line-height:1.55;
+  margin-bottom:14px;
+}
+#rd-root .dp-msg-erro{ background:#FDEAEA; border:1px solid #F5BABA; color:#8E1F1F; }
+#rd-root .dp-msg-ok{ background:#F7FAF9; border:1px solid #E4EDEB; color:#5C7370; }
+#rd-root .dp-msg b{ font-weight:700; }
 
 /* ── A margem da página do Radar ───────────────────────────────
    As telas do Status Carteira moram dentro do .ct, que tem 24px de
@@ -1301,11 +1323,51 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 módulo de Pedidos.</div>
             </div>
 
+            <!-- ── Detalhamento Patec ─────────────────────────────────
+                 Lê a base do PATEC do ADLV ao vivo (projeto patec-dashboard),
+                 só para ler. Os nove números do resumo do mapa são recontados
+                 a partir dos itens — é isso que permite abrir as RCs de cada
+                 um no ⊕. -->
             <div class="rd-pane" id="rd-pane-detpatec" style="display:none">
-              <div class="extra-head">Detalhamento Patec</div>
-              <div class="rd-apronto">Resumo do mapa, saúde da carteira, detalhamento da
-                governança, indicadores críticos e os dois gráficos — com as RCs por trás de
-                cada número.</div>
+              <div class="dp-topo">
+                <div class="dp-fonte" id="dp-fonte">—</div>
+                <div class="dp-acoes">
+                  <label class="dp-dt">De <input type="date" id="dp-ini"
+                         onchange="dpDesenharGraficos()"></label>
+                  <label class="dp-dt">até <input type="date" id="dp-fim"
+                         onchange="dpDesenharGraficos()"></label>
+                  <button class="pa-btn" onclick="dpRecarregar()">↻ Buscar de novo</button>
+                </div>
+              </div>
+              <div id="dp-aviso"></div>
+
+              <div class="extra-head">Resumo do mapa</div>
+              <div class="kpi-grid" id="dp-kpi-mapa" style="margin-bottom:18px"></div>
+
+              <div class="extra-head">Saúde da carteira</div>
+              <div class="kpi-grid status3" id="dp-kpi-saude" style="margin-bottom:18px"></div>
+
+              <div class="extra-head">Detalhamento da governança — em tratativa</div>
+              <div class="kpi-grid" id="dp-kpi-gov" style="margin-bottom:10px"></div>
+              <div class="detail-table-wrap" style="margin-bottom:18px">
+                <table class="items-table">
+                  <thead><tr><th>Fila</th><th>Itens</th><th>% do bloco</th></tr></thead>
+                  <tbody id="dp-tb-gov"></tbody>
+                </table>
+              </div>
+
+              <div class="extra-head">Indicadores críticos</div>
+              <div class="kpi-grid" id="dp-kpi-crit" style="margin-bottom:18px"></div>
+
+              <div class="extra-head">Monitoramento do PATEC</div>
+              <div style="height:300px;position:relative;margin-bottom:18px">
+                <canvas id="dp-gr-mon"></canvas>
+              </div>
+
+              <div class="extra-head">Total PATEC × Total Abrir PATEC</div>
+              <div style="height:300px;position:relative;margin-bottom:18px">
+                <canvas id="dp-gr-barra"></canvas>
+              </div>
             </div>
 
             <div class="rd-pane" id="rd-pane-rejeite" style="display:none">
@@ -59873,8 +59935,10 @@ function raKpi(it){
     + (it.cap ? '<div class="cap">' + cpEsc(it.cap) + '</div>' : '')
     + '</div>';
 }
-function raCorte(chave, titulo, itens){
-  RA_CORTES[chave] = { titulo: titulo, itens: itens };
+// cols é opcional: quem passa um recorte de outra base (o Detalhamento
+// Patec, por exemplo) manda junto as colunas daquela base
+function raCorte(chave, titulo, itens, cols){
+  RA_CORTES[chave] = { titulo: titulo, itens: itens, cols: cols || null };
   return chave;
 }
 
@@ -59973,21 +60037,26 @@ function raDetAbrir(chave){
   if (typeof _rfDet !== 'undefined') _rfDet = null;
   _raDet = c;
   var itens = c.itens || [];
+  // o recorte pode trazer as colunas dele: os itens do Levelbord usam
+  // nomes de coluna em MAIÚSCULAS, e os da base do PATEC, minúsculas.
+  // Sem isto a tabela sairia com todas as células vazias.
+  var cols = c.cols || RA_DET_COLS;
   document.getElementById('ra-det-titulo').textContent = c.titulo;
   document.getElementById('ra-det-sub').textContent =
     raNum(itens.length) + ' item(ns) nesse recorte';
 
-  var porStatus = raOrdenado(raContar(itens, 'STATUS_RC'));
+  // os cards por Status da RC só fazem sentido para o Levelbord
+  var porStatus = c.cols ? [] : raOrdenado(raContar(itens, 'STATUS_RC'));
   document.getElementById('ra-det-cards').innerHTML = porStatus.map(function(x){
     return raKpi({ l:'Status ' + x.nome, v: raNum(x.n), small:true });
   }).join('') || '';
 
   document.getElementById('ra-det-thead').innerHTML =
-    '<tr>' + RA_DET_COLS.map(function(c2){ return '<th>' + c2.t + '</th>'; }).join('') + '</tr>';
+    '<tr>' + cols.map(function(c2){ return '<th>' + c2.t + '</th>'; }).join('') + '</tr>';
   document.getElementById('ra-det-tbody').innerHTML =
     itens.slice(0, RA_DET_MAX).map(function(r){
-      return '<tr>' + RA_DET_COLS.map(function(c2){
-        return '<td>' + cpEsc(r[c2.k] || '') + '</td>'; }).join('') + '</tr>';
+      return '<tr>' + cols.map(function(c2){
+        return '<td>' + cpEsc(r[c2.k] == null ? '' : r[c2.k]) + '</td>'; }).join('') + '</tr>';
     }).join('');
   document.getElementById('ra-det-rodape').textContent = itens.length > RA_DET_MAX
     ? ('mostrando os ' + raNum(RA_DET_MAX) + ' primeiros de ' + raNum(itens.length)
@@ -60009,9 +60078,10 @@ function rvDetExportar(){
 }
 function raDetExportar(){
   if (!_raDet || typeof XLSX === 'undefined') return;
+  var colsEx = _raDet.cols || RA_DET_COLS;
   var linhas = (_raDet.itens || []).map(function(r){
     var o = {};
-    RA_DET_COLS.forEach(function(c){ o[c.t] = r[c.k] || ''; });
+    colsEx.forEach(function(c){ o[c.t] = (r[c.k] == null) ? '' : r[c.k]; });
     return o;
   });
   if (!linhas.length) return;
@@ -60104,6 +60174,9 @@ function raDesenhar(){
   raDesenharStatusCarteira();
   raDesenharRadar();
   raDesenharUpload();
+  // o Status Carteira zera RA_CORTES, então os recortes do Detalhamento
+  // Patec precisam ser registrados de novo depois dele
+  if (typeof dpDesenhar === 'function' && _dpRadar) dpDesenhar();
 }
 
 // ── Firebase: a base é a da própria frente (ADLV · Reunião) ───────
@@ -60295,6 +60368,9 @@ function rdTab(aba, btn){
     if (b) b.classList.toggle('rd-on', a === aba);
   });
   if (btn) btn.classList.add('rd-on');
+  // a leitura da base do PATEC é cara e é de outro projeto: só acontece
+  // quando a aba é aberta, não a cada vez que se entra na frente
+  if (aba === 'detpatec' && typeof dpAbrir === 'function') dpAbrir();
   if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
 }
 
@@ -60523,6 +60599,460 @@ function paCrescer(el){
   el.style.minHeight = '0px';
   var h = Math.max(38, el.scrollHeight + 2);
   el.style.minHeight = h + 'px';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DETALHAMENTO PATEC — a aba que lê a base do PATEC do ADLV
+//
+// Quem está nesta tela entrou pela frente ADLV · Reunião (projeto
+// patec-gto-frentes), mas os dados são os do PATEC do ADLV (projeto
+// patec-dashboard). Então aqui NUNCA se usa getDB(): ele devolveria a
+// base da Reunião, que não tem nenhuma dessas coleções, e a tela
+// apareceria vazia sem dizer por quê. É o mesmo arranjo do Radar FAST,
+// e vale a mesma regra: só leitura. Nada é gravado do lado do PATEC.
+//
+// Os nove números do resumo do mapa são RECONTADOS a partir dos itens,
+// e não lidos do lançamento diário. O lançamento guarda só os totais;
+// recontando, cada número tem as RCs por trás e abre no ⊕. Em troca,
+// pode divergir do que foi lançado à mão — e é por isso que a tela diz
+// de onde cada bloco veio.
+// ══════════════════════════════════════════════════════════════════
+var DP_CICLO_INI = '2026-05-26';     // mesmo corte do mapa diário
+var DP_FILAS_AG  = ['patec', 'análise de oportunidade'];
+var DP_FILAS_EM  = ['item em parada', 'mdg'];
+var DP_XGL_EXCLUIR = ['concluído', 'concluido', 'finalizado',
+                      'saiu do dpv', 'patec finalizado'];
+// as colunas da base do PATEC (minúsculas) — a janela de detalhe é a
+// mesma do Levelbord, que usa MAIÚSCULAS, por isso o recorte leva as
+// suas próprias colunas
+var DP_DET_COLS = [
+  { k:'rc', t:'RC' }, { k:'seq', t:'SEQ' }, { k:'item_rc', t:'Item da RC' },
+  { k:'num_oport', t:'Nº Oportunidade' }, { k:'item_op', t:'Item OP' },
+  { k:'analista', t:'Analista' }, { k:'fila', t:'Fila' },
+  { k:'analista_auto', t:'Status do mapa' }, { k:'sla', t:'SLA' },
+  { k:'prazo_c', t:'Prazo' }, { k:'centro', t:'Centro' },
+  { k:'status', t:'Status (GOV)' }
+];
+
+var _dpRadar = null;       // itens da base do PATEC
+var _dpMapa  = [];         // mapa_diario, para os gráficos
+var _dpXgl   = { itens: [], dados: {} };
+var _dpQuando = '';        // ts da base do Radar
+var _dpErro  = null;       // { titulo, detalhe, codigo }
+var _dpLendo = false;
+var _dpGrMon = null, _dpGrBarra = null;
+
+function _dpNaReuniao(){
+  return (typeof _moduloAtivo !== 'undefined') && _moduloAtivo === 'adlv_reuniao';
+}
+function _dpDB(){
+  try { if (typeof getDBModulo === 'function') return getDBModulo('adlv'); }
+  catch (e) { console.warn('_dpDB:', e); }
+  return null;
+}
+var _dpAutOk = false;
+async function _dpAutenticar(){
+  if (_dpAutOk) return true;
+  try {
+    var r = (typeof _autenticarModulo === 'function')
+          ? await _autenticarModulo('adlv') : { ok:true };
+    _dpAutOk = !!(r && r.ok);
+    if (!_dpAutOk) console.warn('Detalhamento Patec sem sessão no ADLV:', r && r.motivo);
+  } catch (e) { _dpAutOk = false; console.warn('_dpAutenticar:', e); }
+  return _dpAutOk;
+}
+
+function dpNum(n){ return (typeof raNum === 'function') ? raNum(n) : String(n); }
+function dpPct(n, t){ return t > 0 ? Math.round(n / t * 100) : 0; }
+function dpNormF(v){ return String(v == null ? '' : v).trim().toLowerCase(); }
+
+// ── a leitura ─────────────────────────────────────────────────────
+async function dpCarregar(){
+  _dpErro = null;
+  if (!(await _dpAutenticar())) {
+    _dpErro = { titulo:'Não consegui abrir a base do PATEC do ADLV a partir daqui.',
+                detalhe:'Entre uma vez na frente ADLV · PATEC nesta máquina e volte — '
+                      + 'cada projeto do Firebase tem a sua própria sessão.' };
+    return false;
+  }
+  var db = _dpDB();
+  if (!db) {
+    _dpErro = { titulo:'Firebase do PATEC indisponível.',
+                detalhe:'Atualize a página (F5) e tente de novo.' };
+    return false;
+  }
+  try {
+    var itens = await dpLerRadar(db);
+    if (!itens.length) {
+      _dpErro = { titulo:'A base do Radar do PATEC está vazia.',
+                  detalhe:'Suba o Radar no PATEC do ADLV — enquanto não subir, '
+                        + 'esta aba não tem o que mostrar.' };
+      return false;
+    }
+    _dpRadar = itens;
+    // o mapa e o XGL são complemento: se falharem, os cards principais
+    // continuam de pé e a tela avisa o que ficou de fora
+    try { _dpMapa = await dpLerMapa(db); } catch (e) { _dpMapa = []; }
+    try { _dpXgl = await dpLerXgl(db); } catch (e) { _dpXgl = { itens:[], dados:{} }; }
+    return true;
+  } catch (e) {
+    console.warn('dpCarregar:', e);
+    _dpErro = { titulo:'A base do PATEC do ADLV recusou a leitura.',
+                detalhe:'Verifique se o seu acesso ao PATEC continua valendo.',
+                codigo: (e && (e.code || e.message)) || '' };
+    return false;
+  }
+}
+
+// o Radar é gravado em pedaços: um doc de meta e N docs com as linhas
+async function dpLerRadar(db){
+  var col = db.collection('config');
+  var meta = await col.doc('radar_dados').get();
+  if (!meta || !meta.exists) return [];
+  var m = meta.data() || {};
+  _dpQuando = m.ts || '';
+  if (m.nChunks > 0) {
+    var leituras = [];
+    for (var i = 0; i < m.nChunks; i++) leituras.push(col.doc('radar_dados_' + i).get());
+    var docs = await Promise.all(leituras);
+    var out = [];
+    docs.forEach(function(d){
+      if (d && d.exists) out = out.concat((d.data() || {}).rows || []);
+    });
+    return out;
+  }
+  return m.rows || [];
+}
+
+async function dpLerMapa(db){
+  var snap = await db.collection('mapa_diario')
+    .where('data', '>=', DP_CICLO_INI).orderBy('data').get();
+  var out = [];
+  snap.forEach(function(d){ out.push(d.data()); });
+  return out;
+}
+
+// o XGL é a base embutida do ADLV mais o que foi subido, menos os que
+// foram editados — a mesma mistura que a Governança faz
+async function dpLerXgl(db){
+  var col = db.collection('config');
+  var doc = await col.doc('xgl_itens').get();
+  var d = (doc && doc.exists) ? (doc.data() || {}) : {};
+  var itens = Array.isArray(d.itens) ? d.itens.slice() : [];
+  var removidos = Array.isArray(d.removidos) ? d.removidos : [];
+  var chave = function(r){
+    return (typeof xglChave === 'function')
+      ? xglChave(r.rc, r.item, r.oport || '', r.itemop || '')
+      : [r.rc, r.item].join('|');
+  };
+  var vistos = {};
+  itens.forEach(function(r){ vistos[chave(r)] = 1; });
+  if (typeof _XGL_BASE_ITENS !== 'undefined') {
+    _XGL_BASE_ITENS.forEach(function(r){
+      var k = chave(r);
+      if (vistos[k] || removidos.indexOf(k) >= 0) return;
+      vistos[k] = 1; itens.push(r);
+    });
+  }
+  var dados = {};
+  var snap = await db.collection('gov_xgl').get();
+  snap.forEach(function(x){
+    var v = x.data() || {};
+    if (v.chave) dados[v.chave] = v;
+  });
+  if (typeof _XGL_BASE_DADOS !== 'undefined') {
+    Object.keys(_XGL_BASE_DADOS).forEach(function(k){
+      if (!dados[k]) dados[k] = _XGL_BASE_DADOS[k];
+    });
+  }
+  return { itens: itens, dados: dados };
+}
+
+// ── as contas ─────────────────────────────────────────────────────
+// Os seis status do mapa saem do campo analista_auto, comparado com as
+// strings de PNR_PATEC/PNR_ABRIR — o mesmo registro que o Panorama usa.
+function dpPorStatus(status){
+  var alvo = (typeof cpNormCab === 'function') ? cpNormCab(status)
+           : String(status).trim().toUpperCase();
+  return (_dpRadar || []).filter(function(r){
+    var v = (typeof cpNormCab === 'function') ? cpNormCab(r.analista_auto || '')
+          : String(r.analista_auto || '').trim().toUpperCase();
+    return v === alvo;
+  });
+}
+function dpGovItens(){
+  return (_dpRadar || []).filter(function(r){
+    return (typeof _classificarStatusMapa === 'function')
+      && _classificarStatusMapa(r.analista_auto) === 'Finalizado';
+  });
+}
+function dpXglPendentes(){
+  var dados = _dpXgl.dados || {};
+  return (_dpXgl.itens || []).filter(function(r){
+    var ch = (typeof xglChave === 'function')
+      ? xglChave(r.rc, r.item, r.oport, r.itemop) : r.rc;
+    var m = dados[ch] || {};
+    if (m.finalizado) return false;
+    return DP_XGL_EXCLUIR.indexOf(String(m.status || '').toLowerCase()) === -1;
+  });
+}
+
+// ── a tela ────────────────────────────────────────────────────────
+function dpPor(id, html){
+  var el = document.getElementById(id);
+  if (el) el.innerHTML = html;
+}
+function dpLimpar(){
+  ['dp-kpi-mapa','dp-kpi-saude','dp-kpi-gov','dp-kpi-crit'].forEach(function(id){
+    dpPor(id, '');
+  });
+  dpPor('dp-tb-gov', '');
+}
+
+function dpDesenhar(){
+  var av = document.getElementById('dp-aviso');
+  if (_dpErro) {
+    dpLimpar();
+    if (av) av.innerHTML = '<div class="dp-msg dp-msg-erro"><b>'
+      + cpEsc(_dpErro.titulo) + '</b><br>' + cpEsc(_dpErro.detalhe)
+      + (_dpErro.codigo ? '<br>código: ' + cpEsc(_dpErro.codigo) : '') + '</div>';
+    var f0 = document.getElementById('dp-fonte');
+    if (f0) f0.textContent = '—';
+    return;
+  }
+  if (!_dpRadar) {
+    dpLimpar();
+    if (av) av.innerHTML = '<div class="dp-msg dp-msg-ok">⏳ buscando a base do PATEC...</div>';
+    return;
+  }
+  if (av) av.innerHTML = '';
+
+  var fonte = document.getElementById('dp-fonte');
+  if (fonte) {
+    fonte.innerHTML = 'Base do PATEC · ADLV — <b>' + dpNum(_dpRadar.length)
+      + '</b> itens'
+      + (_dpQuando ? ' · subida em <b>' + cpEsc(new Date(_dpQuando).toLocaleString('pt-BR')) + '</b>' : '')
+      + (_dpMapa.length ? ' · mapa diário com <b>' + _dpMapa.length + '</b> dia(s)'
+                        : ' · <b>sem o mapa diário</b> (os gráficos ficam vazios)');
+  }
+
+  dpResumoMapa();
+  dpSaude();
+  dpGovernanca();
+  dpCriticos();
+  dpDesenharGraficos();
+  if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
+}
+
+function dpResumoMapa(){
+  var grupos = (typeof PNR_PATEC !== 'undefined' ? PNR_PATEC : [])
+    .concat(typeof PNR_ABRIR !== 'undefined' ? PNR_ABRIR : []);
+  var porChave = {}, h = '';
+  grupos.forEach(function(g){ porChave[g.chave] = dpPorStatus(g.status); });
+  var soma = function(chaves){
+    var out = [];
+    chaves.forEach(function(k){ out = out.concat(porChave[k] || []); });
+    return out;
+  };
+  var patec = soma(['fin','agfin','reprov','canc']);
+  var abrir = soma(['iden','gm']);
+  var geral = patec.concat(abrir);
+
+  var card = function(nome, itens, chave, op){
+    op = op || {};
+    var o = { l:nome, v: dpNum(itens.length), small:!op.grande,
+              cap: op.cap, corte: raCorte('dp_' + chave, nome, itens, DP_DET_COLS) };
+    if (op.darkGreen) o.darkGreen = true;
+    if (op.lightGreen) o.lightGreen = true;
+    if (op.lightBlue) o.lightBlue = true;
+    if (op.purple) o.purple = true;
+    return raKpi(o);
+  };
+  h += card('Total Geral', geral, 'geral', { grande:true, darkGreen:true,
+        cap:'os seis status do mapa' });
+  h += card('Total PATEC', patec, 'totpatec', { grande:true, lightGreen:true,
+        cap:'finalizado + ag. finalizar + 100% reprovado + cancelado' });
+  h += card('Total Abrir PATEC', abrir, 'totabrir', { grande:true, lightBlue:true,
+        cap:'ID não + grupo de mercadoria obrigatório' });
+  (typeof PNR_PATEC !== 'undefined' ? PNR_PATEC : []).forEach(function(g){
+    h += card(g.nome, porChave[g.chave] || [], g.chave, {});
+  });
+  (typeof PNR_ABRIR !== 'undefined' ? PNR_ABRIR : []).forEach(function(g){
+    h += card(g.nome, porChave[g.chave] || [], g.chave, { purple:true });
+  });
+  dpPor('dp-kpi-mapa', h);
+}
+
+function dpFaixasPrazo(rows){
+  var venc = [], prox = [], dentro = [];
+  (rows || []).forEach(function(r){
+    var v = Number(r.prazo_c || 0);
+    if (v >= 91) venc.push(r);
+    else if (v >= 60) prox.push(r);
+    else dentro.push(r);
+  });
+  return { venc:venc, prox:prox, dentro:dentro,
+           total: venc.length + prox.length + dentro.length };
+}
+
+function dpSaude(){
+  var f = dpFaixasPrazo(_dpRadar);
+  var cx = function(nome, itens, chave, cor){
+    var o = { l:nome, v: dpNum(itens.length), corte: raCorte('dp_' + chave, nome, itens, DP_DET_COLS),
+              cap: dpPct(itens.length, f.total) + '% da carteira' };
+    o[cor] = true;
+    return raKpi(o);
+  };
+  dpPor('dp-kpi-saude',
+      cx('Dentro do prazo', f.dentro, 'sd_dentro', 'lightGreen')
+    + cx('Próximo do vencimento', f.prox, 'sd_prox', 'lightBlue')
+    + cx('Vencidos', f.venc, 'sd_venc', 'purple'));
+}
+
+function dpGovernanca(){
+  var itens = dpGovItens();
+  var porFila = {};
+  itens.forEach(function(r){
+    var f = String(r.fila || '—').trim() || '—';
+    (porFila[f] = porFila[f] || []).push(r);
+  });
+  var filas = Object.keys(porFila).sort(function(a, b){
+    return porFila[b].length - porFila[a].length;
+  });
+  var xgl = dpXglPendentes();
+  var total = itens.length + xgl.length;
+
+  dpPor('dp-kpi-gov',
+      raKpi({ l:'Em tratativa', v: dpNum(total), darkGreen:true,
+              cap:'governança + XGL pendente' })
+    + raKpi({ l:'Na governança', v: dpNum(itens.length), small:true,
+              cap:'PATEC finalizado, 100% reprovado e cancelado',
+              corte: raCorte('dp_gov', 'Em tratativa na governança', itens, DP_DET_COLS) })
+    + raKpi({ l:'XGL pendente', v: dpNum(xgl.length), small:true, purple:true,
+              cap: _dpXgl.itens.length ? 'de ' + dpNum(_dpXgl.itens.length) + ' no XGL'
+                                       : 'XGL não carregado' }));
+
+  dpPor('dp-tb-gov', filas.length ? filas.map(function(f){
+    var n = porFila[f].length;
+    return '<tr><td style="font-weight:600">' + cpEsc(f) + '</td>'
+      + '<td>' + dpNum(n) + '</td>'
+      + '<td>' + dpPct(n, itens.length) + '%</td></tr>';
+  }).join('') : '<tr><td colspan="3" style="padding:1.4rem;text-align:center;'
+    + 'color:var(--tx2)">—</td></tr>');
+}
+
+function dpCriticos(){
+  var gov = dpGovItens();
+  var f = dpFaixasPrazo(gov);
+  var agTrat = (_dpRadar || []).filter(function(r){
+    return String(r.analista_auto || '').trim() === 'Analisar PATEC Finalizado'
+        && DP_FILAS_AG.indexOf(dpNormF(r.fila)) >= 0;
+  });
+  var emTrat = gov.filter(function(r){ return DP_FILAS_EM.indexOf(dpNormF(r.fila)) >= 0; });
+  var maior = gov.length ? gov.reduce(function(mx, r){
+    return Number(r.sla || 0) > Number(mx.sla || 0) ? r : mx; }, gov[0]) : null;
+
+  dpPor('dp-kpi-crit',
+      raKpi({ l:'Maior SLA', v: maior ? dpNum(Number(maior.sla || 0)) : '—', small:true,
+              cap: maior ? ('fila ' + (maior.fila || '—')) : '' })
+    + raKpi({ l:'PATEC Finalizado', v: dpNum(gov.length), small:true,
+              corte: raCorte('dp_cr_gov', 'PATEC Finalizado', gov, DP_DET_COLS) })
+    + raKpi({ l:'Ag. Tratamento', v: dpNum(agTrat.length), small:true,
+              cap:'filas PATEC e Análise de Oportunidade',
+              corte: raCorte('dp_cr_ag', 'Ag. Tratamento', agTrat, DP_DET_COLS) })
+    + raKpi({ l:'Em Tratamento', v: dpNum(emTrat.length), small:true,
+              cap:'filas Item em Parada e MDG',
+              corte: raCorte('dp_cr_em', 'Em Tratamento', emTrat, DP_DET_COLS) })
+    + raKpi({ l:'Próx. vencimento', v: dpNum(f.prox.length), small:true, lightBlue:true,
+              cap: dpPct(f.prox.length, f.total) + '% da governança',
+              corte: raCorte('dp_cr_prox', 'Próximo do vencimento', f.prox, DP_DET_COLS) })
+    + raKpi({ l:'Vencidos', v: dpNum(f.venc.length), small:true, purple:true,
+              cap: dpPct(f.venc.length, f.total) + '% da governança',
+              corte: raCorte('dp_cr_venc', 'Vencidos', f.venc, DP_DET_COLS) }));
+}
+
+// ── os dois gráficos, da série do mapa diário ─────────────────────
+function dpPeriodo(){
+  var ini = (document.getElementById('dp-ini') || {}).value || '';
+  var fim = (document.getElementById('dp-fim') || {}).value || '';
+  if (ini && fim) return { ini:ini, fim:fim };
+  // sem escolha, os últimos 20 dias com lançamento
+  var dias = _dpMapa.map(function(r){ return r.data; }).sort();
+  if (!dias.length) return null;
+  var corte = dias.slice(-20);
+  return { ini: corte[0], fim: corte[corte.length - 1] };
+}
+
+function dpSerie(){
+  var p = dpPeriodo();
+  if (!p) return [];
+  var dias = (typeof paDiasUteis === 'function') ? paDiasUteis(p.ini, p.fim) : [];
+  if (!dias.length) dias = _dpMapa.map(function(r){ return r.data; })
+    .filter(function(d){ return d >= p.ini && d <= p.fim; });
+  var porDia = {};
+  _dpMapa.forEach(function(r){ porDia[r.data] = r; });
+  return dias.map(function(d){
+    var m = porDia[d];
+    var n = function(k){ return m ? Number(m[k] || 0) : null; };
+    return { data: d,
+             totalPatec: m ? n('l3') + n('l4') + n('l5') + n('l6') : null,
+             totalAbrir: m ? n('l7') + n('l8') : null,
+             fin: n('l3'), agfin: n('l4') };
+  });
+}
+
+function dpDesenharGraficos(){
+  if (!_dpRadar) return;
+  var serie = dpSerie();
+  var rot = serie.map(function(p){
+    return p.data.slice(8, 10) + '/' + p.data.slice(5, 7);
+  });
+  var linha = function(nome, chave, cor){
+    return { label:nome, data: serie.map(function(p){ return p[chave]; }),
+             borderColor:cor, backgroundColor:cor, tension:.3, spanGaps:true,
+             pointRadius:3, borderWidth:2 };
+  };
+  dpGrafico('dp-gr-mon', '_dpGrMon', {
+    type:'line',
+    data:{ labels:rot, datasets:[ linha('Total PATEC', 'totalPatec', '#1A4A8A'),
+                                  linha('PATEC Finalizado', 'fin', '#0E9E6A'),
+                                  linha('Ag. PATEC Finalizar', 'agfin', '#C07A12') ] }
+  });
+  dpGrafico('dp-gr-barra', '_dpGrBarra', {
+    type:'bar',
+    data:{ labels:rot, datasets:[
+      { label:'Total PATEC', data: serie.map(function(p){ return p.totalPatec; }),
+        backgroundColor:'#1A4A8A' },
+      { label:'Total Abrir PATEC', data: serie.map(function(p){ return p.totalAbrir; }),
+        backgroundColor:'#C07A12' } ] }
+  });
+}
+
+function dpGrafico(id, slot, cfg){
+  var cv = document.getElementById(id);
+  if (!cv || typeof Chart === 'undefined') return;
+  try { if (window[slot]) window[slot].destroy(); } catch (e) {}
+  cfg.options = { responsive:true, maintainAspectRatio:false,
+                  plugins:{ legend:{ position:'bottom' } },
+                  scales:{ y:{ beginAtZero:true } } };
+  window[slot] = new Chart(cv.getContext ? cv.getContext('2d') : cv, cfg);
+}
+
+// ── entrada e recarga ─────────────────────────────────────────────
+async function dpAbrir(){
+  if (!_dpNaReuniao()) return;
+  if (_dpLendo) return;
+  if (_dpRadar || _dpErro) { dpDesenhar(); return; }
+  _dpLendo = true;
+  dpDesenhar();                 // mostra o "buscando..."
+  await dpCarregar();
+  _dpLendo = false;
+  dpDesenhar();
+}
+
+async function dpRecarregar(){
+  _dpRadar = null; _dpErro = null; _dpAutOk = false;
+  await dpAbrir();
 }
 
 
