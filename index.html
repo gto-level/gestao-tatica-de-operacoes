@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/10 20:45';
+var GTO_BUILD = '19/10 21:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -60700,6 +60700,18 @@ var DP_DET_COLS = [
   { k:'prazo_c', t:'Prazo' }, { k:'centro', t:'Centro' },
   { k:'status', t:'Status (GOV)' }
 ];
+// o XGL e o Status B não são itens do Radar: têm campos próprios, e por
+// isso o ⊕ deles leva as colunas deles
+var DP_XGL_COLS = [
+  { k:'rc', t:'RC' }, { k:'item', t:'Item' }, { k:'oport', t:'Oportunidade' },
+  { k:'itemop', t:'Item OP' }, { k:'analista', t:'Analista' },
+  { k:'status', t:'Status' }, { k:'envio', t:'Envio' }
+];
+var DP_SB_COLS = [
+  { k:'rc', t:'RC' }, { k:'seq', t:'SEQ' }, { k:'op', t:'Oportunidade' },
+  { k:'item', t:'Item' }, { k:'status', t:'Status' }, { k:'envio', t:'Envio' },
+  { k:'comentario', t:'Comentário' }
+];
 
 var _dpRadar = null;       // itens da base do PATEC
 var _dpMapa  = [];         // mapa_diario, para os gráficos
@@ -60937,25 +60949,37 @@ function dpGovItens(){
       && _classificarStatusMapa(r.analista_auto) === 'Finalizado';
   });
 }
+// os pendentes já saem com o status e o envio do manual juntos: é o
+// que a janela do ⊕ mostra
 function dpXglPendentes(){
   var dados = _dpXgl.dados || {};
-  return (_dpXgl.itens || []).filter(function(r){
+  var out = [];
+  (_dpXgl.itens || []).forEach(function(r){
     var ch = (typeof xglChave === 'function')
       ? xglChave(r.rc, r.item, r.oport, r.itemop) : r.rc;
     var m = dados[ch] || {};
-    if (m.finalizado) return false;
-    return DP_XGL_EXCLUIR.indexOf(String(m.status || '').toLowerCase()) === -1;
+    if (m.finalizado) return;
+    if (DP_XGL_EXCLUIR.indexOf(String(m.status || '').toLowerCase()) >= 0) return;
+    out.push({ rc:r.rc, item:r.item, oport:r.oport || '', itemop:r.itemop || '',
+               analista:r.analista || '', status:m.status || '', envio:m.envio || '' });
   });
+  return out;
 }
 // o Status B em aberto é o que ainda não foi finalizado — a mesma
 // regra do card do painel da Governança
 function dpSbPendentes(){
   var dados = _dpSb.dados || {};
-  return (_dpSb.itens || []).filter(function(r){
+  var out = [];
+  (_dpSb.itens || []).forEach(function(r){
     var ch = (typeof sbChave === 'function') ? sbChave(r.rc, r.seq, r.op, r.item)
       : [r.rc, r.seq, r.op, r.item].join('|');
-    return !((dados[ch] || {}).finalizado);
+    var m = dados[ch] || {};
+    if (m.finalizado) return;
+    out.push({ rc:r.rc, seq:r.seq || '', op:r.op || '', item:r.item || '',
+               status:m.status || '', envio:m.envio || '',
+               comentario:m.comentario || '' });
   });
+  return out;
 }
 // Só os seis status do mapa — a base do Radar traz outras linhas, e
 // contá-las na saúde da carteira inflava o denominador.
@@ -61151,10 +61175,12 @@ function dpGovernanca(){
               corte: raCorte('dp_gov', 'Em tratativa na governança', itens, DP_DET_COLS) })
     + raKpi({ l:'XGL pendente', v: dpNum(xgl.length), small:true, purple:true,
               cap: _dpXgl.itens.length ? 'de ' + dpNum(_dpXgl.itens.length) + ' no XGL'
-                                       : 'XGL não carregado' })
+                                       : 'XGL não carregado',
+              corte: xgl.length ? raCorte('dp_xgl', 'XGL pendente', xgl, DP_XGL_COLS) : null })
     + raKpi({ l:'Status B pendente', v: dpNum(sb.length), small:true, lightBlue:true,
               cap: _dpSb.itens.length ? 'de ' + dpNum(_dpSb.itens.length) + ' no Status B'
-                                      : 'Status B não carregado' })
+                                      : 'Status B não carregado',
+              corte: sb.length ? raCorte('dp_sb', 'Status B pendente', sb, DP_SB_COLS) : null })
     + (function(){
         var m = dpMaiorSla();
         return raKpi({ l:'Maior SLA da carteira', v: m ? dpNum(Number(m.sla || 0)) : '—',
