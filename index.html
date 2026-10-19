@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/10 16:20';
+var GTO_BUILD = '19/10 18:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -433,6 +433,61 @@ body{
 #rd-root .dp-msg-erro{ background:#FDEAEA; border:1px solid #F5BABA; color:#8E1F1F; }
 #rd-root .dp-msg-ok{ background:#F7FAF9; border:1px solid #E4EDEB; color:#5C7370; }
 #rd-root .dp-msg b{ font-weight:700; }
+
+/* O resumo do mapa, no desenho da apresentação do ADM: cartão centrado,
+   rótulo em cima, número grande no tom do grupo e a variação embaixo.
+   O Total Geral ocupa a coluna da direita nas duas linhas. */
+#rd-root .dp-mapa{
+  display:grid; grid-template-columns:repeat(5, 1fr) 1.15fr; gap:10px;
+}
+#rd-root .dp-mc{
+  grid-column:span 1; background:#fff; border:1px solid #E4EDEB;
+  border-radius:12px; padding:12px 10px 11px; text-align:center;
+  position:relative; box-shadow:0 1px 2px rgba(14,43,40,.04), 0 1px 3px rgba(14,43,40,.06);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+}
+#rd-root .dp-mc-lbl{
+  font-size:10.5px; font-weight:700; color:#5C7370; line-height:1.25;
+}
+#rd-root .dp-mc-val{ font-size:26px; font-weight:800; line-height:1.05; color:#1A4A8A; }
+#rd-root .dp-mc-var{ font-size:10px; font-weight:650; color:#5C7370; }
+#rd-root .dp-mc-var.sobe{ color:#B02020; }
+#rd-root .dp-mc-var.desce{ color:#0A7A51; }
+#rd-root .dp-mc.verde .dp-mc-val{ color:#0A7A51; }
+#rd-root .dp-mc.laranja .dp-mc-val{ color:#B4700F; }
+#rd-root .dp-mc.total{
+  grid-column:6; grid-row:1 / span 2; border:2px solid #1A4A8A; background:#F7FAFF;
+}
+#rd-root .dp-mc.total .dp-mc-val{ font-size:38px; }
+#rd-root .dp-mc .kpi-expand-btn{
+  position:absolute; top:7px; right:7px; width:18px; height:18px; border-radius:50%;
+  border:1.5px solid #007D77; background:#fff; color:#007D77; font-size:11px;
+  font-weight:700; line-height:1; cursor:pointer; padding:0;
+  display:flex; align-items:center; justify-content:center;
+}
+#rd-root .dp-mc .kpi-expand-btn:hover{ background:#007D77; color:#fff; }
+@media (max-width:1100px){
+  #rd-root .dp-mapa{ grid-template-columns:repeat(3, 1fr); }
+  #rd-root .dp-mc.total{ grid-column:auto; grid-row:auto; }
+}
+
+/* o período e os dois gráficos lado a lado */
+#rd-root .dp-periodo{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;
+}
+#rd-root .dp-dica{ font-size:11px; color:#5C7370; }
+#rd-root .dp-grafs{
+  display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:18px;
+}
+@media (max-width:980px){ #rd-root .dp-grafs{ grid-template-columns:1fr; } }
+#rd-root .dp-graf{
+  background:#fff; border:1px solid #E4EDEB; border-radius:14px; padding:14px 14px 10px;
+  box-shadow:0 1px 2px rgba(14,43,40,.04), 0 1px 3px rgba(14,43,40,.06);
+}
+#rd-root .dp-graf-t{
+  font-size:12px; font-weight:700; color:#0E2B28; margin-bottom:10px;
+}
+#rd-root .dp-graf-c{ height:260px; position:relative; }
 
 /* ── A margem da página do Radar ───────────────────────────────
    As telas do Status Carteira moram dentro do .ct, que tem 24px de
@@ -1331,21 +1386,15 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
             <div class="rd-pane" id="rd-pane-detpatec" style="display:none">
               <div class="dp-topo">
                 <div class="dp-fonte" id="dp-fonte">—</div>
-                <div class="dp-acoes">
-                  <label class="dp-dt">De <input type="date" id="dp-ini"
-                         onchange="dpDesenharGraficos()"></label>
-                  <label class="dp-dt">até <input type="date" id="dp-fim"
-                         onchange="dpDesenharGraficos()"></label>
-                  <button class="pa-btn" onclick="dpRecarregar()">↻ Buscar de novo</button>
-                </div>
+                <button class="pa-btn" onclick="dpRecarregar()">↻ Buscar de novo</button>
               </div>
               <div id="dp-aviso"></div>
 
               <div class="extra-head">Resumo do mapa</div>
-              <div class="kpi-grid" id="dp-kpi-mapa" style="margin-bottom:18px"></div>
+              <div class="dp-mapa" id="dp-kpi-mapa" style="margin-bottom:18px"></div>
 
               <div class="extra-head">Saúde da carteira</div>
-              <div class="kpi-grid status3" id="dp-kpi-saude" style="margin-bottom:18px"></div>
+              <div class="kpi-grid" id="dp-kpi-saude" style="margin-bottom:18px"></div>
 
               <div class="extra-head">Detalhamento da governança — em tratativa</div>
               <div class="kpi-grid" id="dp-kpi-gov" style="margin-bottom:10px"></div>
@@ -1356,17 +1405,24 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 </table>
               </div>
 
-              <div class="extra-head">Indicadores críticos</div>
-              <div class="kpi-grid" id="dp-kpi-crit" style="margin-bottom:18px"></div>
-
-              <div class="extra-head">Monitoramento do PATEC</div>
-              <div style="height:300px;position:relative;margin-bottom:18px">
-                <canvas id="dp-gr-mon"></canvas>
+              <div class="extra-head">Evolução no período</div>
+              <div class="dp-periodo">
+                <label class="dp-dt">De <input type="date" id="dp-ini"
+                       onchange="dpDesenharGraficos()"></label>
+                <label class="dp-dt">até <input type="date" id="dp-fim"
+                       onchange="dpDesenharGraficos()"></label>
+                <span class="dp-dica" id="dp-periodo-dica"></span>
               </div>
-
-              <div class="extra-head">Total PATEC × Total Abrir PATEC</div>
-              <div style="height:300px;position:relative;margin-bottom:18px">
-                <canvas id="dp-gr-barra"></canvas>
+              <div class="kpi-grid" id="dp-kpi-tend" style="margin-bottom:14px"></div>
+              <div class="dp-grafs">
+                <div class="dp-graf">
+                  <div class="dp-graf-t">Monitoramento do PATEC</div>
+                  <div class="dp-graf-c"><canvas id="dp-gr-mon"></canvas></div>
+                </div>
+                <div class="dp-graf">
+                  <div class="dp-graf-t">Total PATEC × Total Abrir PATEC</div>
+                  <div class="dp-graf-c"><canvas id="dp-gr-barra"></canvas></div>
+                </div>
               </div>
             </div>
 
@@ -60637,6 +60693,7 @@ var DP_DET_COLS = [
 var _dpRadar = null;       // itens da base do PATEC
 var _dpMapa  = [];         // mapa_diario, para os gráficos
 var _dpXgl   = { itens: [], dados: {} };
+var _dpSb    = { itens: [], dados: {} };   // Status B, irmão do XGL
 var _dpQuando = '';        // ts da base do Radar
 var _dpErro  = null;       // { titulo, detalhe, codigo }
 var _dpLendo = false;
@@ -60735,6 +60792,7 @@ async function dpLerTudo(db){
   // continuam de pé e a tela avisa o que ficou de fora
   try { _dpMapa = await dpLerMapa(db); } catch (e) { _dpMapa = []; }
   try { _dpXgl = await dpLerXgl(db); } catch (e) { _dpXgl = { itens:[], dados:{} }; }
+  try { _dpSb  = await dpLerSb(db); }  catch (e) { _dpSb  = { itens:[], dados:{} }; }
   return true;
 }
 
@@ -60802,6 +60860,42 @@ async function dpLerXgl(db){
   return { itens: itens, dados: dados };
 }
 
+// o Status B segue o mesmo arranjo do XGL: lista em config/sb_itens,
+// base embutida do ADLV e os manuais em gov_sb
+async function dpLerSb(db){
+  var doc = await db.collection('config').doc('sb_itens').get();
+  var d = (doc && doc.exists) ? (doc.data() || {}) : {};
+  var chave = function(r){
+    return (typeof sbChave === 'function') ? sbChave(r.rc, r.seq, r.op, r.item)
+      : [r.rc, r.seq, r.op, r.item].join('|');
+  };
+  var itens = [], vistos = {};
+  (Array.isArray(d.itens) ? d.itens : []).forEach(function(r){
+    var k = chave(r);
+    if (vistos[k]) return;
+    vistos[k] = 1; itens.push(r);
+  });
+  if (typeof _SB_BASE_ITENS !== 'undefined') {
+    _SB_BASE_ITENS.forEach(function(r){
+      var k = chave(r);
+      if (vistos[k]) return;
+      vistos[k] = 1; itens.push(r);
+    });
+  }
+  var dados = {};
+  var snap = await db.collection('gov_sb').get();
+  snap.forEach(function(x){
+    var v = x.data() || {};
+    if (v.chave) dados[v.chave] = v;
+  });
+  if (typeof _SB_BASE_DADOS !== 'undefined') {
+    Object.keys(_SB_BASE_DADOS).forEach(function(k){
+      if (!dados[k]) dados[k] = _SB_BASE_DADOS[k];
+    });
+  }
+  return { itens: itens, dados: dados };
+}
+
 // ── as contas ─────────────────────────────────────────────────────
 // Os seis status do mapa saem do campo analista_auto, comparado com as
 // strings de PNR_PATEC/PNR_ABRIR — o mesmo registro que o Panorama usa.
@@ -60830,6 +60924,31 @@ function dpXglPendentes(){
     return DP_XGL_EXCLUIR.indexOf(String(m.status || '').toLowerCase()) === -1;
   });
 }
+// o Status B em aberto é o que ainda não foi finalizado — a mesma
+// regra do card do painel da Governança
+function dpSbPendentes(){
+  var dados = _dpSb.dados || {};
+  return (_dpSb.itens || []).filter(function(r){
+    var ch = (typeof sbChave === 'function') ? sbChave(r.rc, r.seq, r.op, r.item)
+      : [r.rc, r.seq, r.op, r.item].join('|');
+    return !((dados[ch] || {}).finalizado);
+  });
+}
+// Só os seis status do mapa — a base do Radar traz outras linhas, e
+// contá-las na saúde da carteira inflava o denominador.
+function dpItensDoMapa(){
+  var alvos = (typeof PNR_PATEC !== 'undefined' ? PNR_PATEC : [])
+    .concat(typeof PNR_ABRIR !== 'undefined' ? PNR_ABRIR : [])
+    .map(function(g){
+      return (typeof cpNormCab === 'function') ? cpNormCab(g.status)
+           : String(g.status).trim().toUpperCase();
+    });
+  return (_dpRadar || []).filter(function(r){
+    var v = (typeof cpNormCab === 'function') ? cpNormCab(r.analista_auto || '')
+          : String(r.analista_auto || '').trim().toUpperCase();
+    return alvos.indexOf(v) >= 0;
+  });
+}
 
 // ── a tela ────────────────────────────────────────────────────────
 function dpPor(id, html){
@@ -60837,7 +60956,7 @@ function dpPor(id, html){
   if (el) el.innerHTML = html;
 }
 function dpLimpar(){
-  ['dp-kpi-mapa','dp-kpi-saude','dp-kpi-gov','dp-kpi-crit'].forEach(function(id){
+  ['dp-kpi-mapa','dp-kpi-saude','dp-kpi-gov','dp-kpi-tend'].forEach(function(id){
     dpPor(id, '');
   });
   dpPor('dp-tb-gov', '');
@@ -60873,15 +60992,24 @@ function dpDesenhar(){
   dpResumoMapa();
   dpSaude();
   dpGovernanca();
-  dpCriticos();
   dpDesenharGraficos();
   if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
+}
+
+// o último dia lançado no mapa ANTES de hoje — é contra ele que a
+// variação de cada card é medida
+function dpDiaAnterior(){
+  var hoje = (typeof cpHojeISO === 'function') ? cpHojeISO()
+           : new Date().toISOString().slice(0, 10);
+  var antes = _dpMapa.filter(function(r){ return r.data < hoje; });
+  if (!antes.length) return null;
+  return antes.sort(function(a, b){ return a.data < b.data ? -1 : 1; })[antes.length - 1];
 }
 
 function dpResumoMapa(){
   var grupos = (typeof PNR_PATEC !== 'undefined' ? PNR_PATEC : [])
     .concat(typeof PNR_ABRIR !== 'undefined' ? PNR_ABRIR : []);
-  var porChave = {}, h = '';
+  var porChave = {};
   grupos.forEach(function(g){ porChave[g.chave] = dpPorStatus(g.status); });
   var soma = function(chaves){
     var out = [];
@@ -60892,28 +61020,49 @@ function dpResumoMapa(){
   var abrir = soma(['iden','gm']);
   var geral = patec.concat(abrir);
 
-  var card = function(nome, itens, chave, op){
-    op = op || {};
-    var o = { l:nome, v: dpNum(itens.length), small:!op.grande,
-              cap: op.cap, corte: raCorte('dp_' + chave, nome, itens, DP_DET_COLS) };
-    if (op.darkGreen) o.darkGreen = true;
-    if (op.lightGreen) o.lightGreen = true;
-    if (op.lightBlue) o.lightBlue = true;
-    if (op.purple) o.purple = true;
-    return raKpi(o);
+  var ant = dpDiaAnterior();
+  var LIN = { fin:'l3', agfin:'l4', reprov:'l5', canc:'l6', iden:'l7', gm:'l8' };
+  var antDe = function(chave){
+    if (!ant) return null;
+    if (chave === 'totpatec') return (ant.l3||0)+(ant.l4||0)+(ant.l5||0)+(ant.l6||0);
+    if (chave === 'totabrir') return (ant.l7||0)+(ant.l8||0);
+    if (chave === 'geral') return (ant.l3||0)+(ant.l4||0)+(ant.l5||0)+(ant.l6||0)
+                                + (ant.l7||0)+(ant.l8||0);
+    return LIN[chave] ? Number(ant[LIN[chave]] || 0) : null;
   };
-  h += card('Total Geral', geral, 'geral', { grande:true, darkGreen:true,
-        cap:'os seis status do mapa' });
-  h += card('Total PATEC', patec, 'totpatec', { grande:true, lightGreen:true,
-        cap:'finalizado + ag. finalizar + 100% reprovado + cancelado' });
-  h += card('Total Abrir PATEC', abrir, 'totabrir', { grande:true, lightBlue:true,
-        cap:'ID não + grupo de mercadoria obrigatório' });
+  var varHtml = function(chave, n){
+    var a = antDe(chave);
+    if (a === null || a === undefined) return '';
+    var d = n - a;
+    if (d === 0) return '<div class="dp-mc-var">— igual ao dia ant.</div>';
+    return '<div class="dp-mc-var ' + (d > 0 ? 'sobe' : 'desce') + '">'
+      + (d > 0 ? '▲ +' : '▼ ') + d + ' vs dia ant.</div>';
+  };
+
+  var card = function(nome, itens, chave, classe){
+    var q = 'dp_' + chave;
+    raCorte(q, nome, itens, DP_DET_COLS);
+    return '<div class="dp-mc ' + (classe || '') + '">'
+      + '<button class="kpi-expand-btn" type="button" title="Ver as RCs"'
+      + ' onclick="raDetAbrir(\'' + q + '\')">+</button>'
+      + '<div class="dp-mc-lbl">' + cpEsc(nome) + '</div>'
+      + '<div class="dp-mc-val">' + dpNum(itens.length) + '</div>'
+      + varHtml(chave, itens.length) + '</div>';
+  };
+
+  var h = '';
+  // 1ª linha: os quatro do PATEC e o total deles
   (typeof PNR_PATEC !== 'undefined' ? PNR_PATEC : []).forEach(function(g){
-    h += card(g.nome, porChave[g.chave] || [], g.chave, {});
+    h += card(g.nome, porChave[g.chave] || [], g.chave, g.cor ? 'verde' : '');
   });
+  h += card('Total PATEC', patec, 'totpatec', '');
+  // o Total Geral ocupa a coluna da direita, nas duas linhas
+  h += card('Total Geral', geral, 'geral', 'total');
+  // 2ª linha: os dois de Abrir PATEC e o total deles
   (typeof PNR_ABRIR !== 'undefined' ? PNR_ABRIR : []).forEach(function(g){
-    h += card(g.nome, porChave[g.chave] || [], g.chave, { purple:true });
+    h += card(g.nome, porChave[g.chave] || [], g.chave, 'laranja');
   });
+  h += card('Total Abrir PATEC', abrir, 'totabrir', 'laranja');
   dpPor('dp-kpi-mapa', h);
 }
 
@@ -60929,18 +61078,26 @@ function dpFaixasPrazo(rows){
            total: venc.length + prox.length + dentro.length };
 }
 
+// A saúde olha SÓ os itens dos seis status do mapa: é a carteira de que
+// a reunião fala. O maior SLA mora aqui, ao lado das faixas de prazo.
 function dpSaude(){
-  var f = dpFaixasPrazo(_dpRadar);
+  var base = dpItensDoMapa();
+  var f = dpFaixasPrazo(base);
   var cx = function(nome, itens, chave, cor){
     var o = { l:nome, v: dpNum(itens.length), corte: raCorte('dp_' + chave, nome, itens, DP_DET_COLS),
               cap: dpPct(itens.length, f.total) + '% da carteira' };
     o[cor] = true;
     return raKpi(o);
   };
+  var maior = base.length ? base.reduce(function(mx, r){
+    return Number(r.sla || 0) > Number(mx.sla || 0) ? r : mx; }, base[0]) : null;
   dpPor('dp-kpi-saude',
       cx('Dentro do prazo', f.dentro, 'sd_dentro', 'lightGreen')
     + cx('Próximo do vencimento', f.prox, 'sd_prox', 'lightBlue')
-    + cx('Vencidos', f.venc, 'sd_venc', 'purple'));
+    + cx('Vencidos', f.venc, 'sd_venc', 'purple')
+    + raKpi({ l:'Maior SLA', v: maior ? dpNum(Number(maior.sla || 0)) : '—',
+              cap: maior ? ('RC ' + (maior.rc || '—') + ' · fila ' + (maior.fila || '—')) : '',
+              corte: maior ? raCorte('dp_sd_sla', 'Maior SLA', [maior], DP_DET_COLS) : null }));
 }
 
 function dpGovernanca(){
@@ -60954,55 +61111,38 @@ function dpGovernanca(){
     return porFila[b].length - porFila[a].length;
   });
   var xgl = dpXglPendentes();
-  var total = itens.length + xgl.length;
+  var sb  = dpSbPendentes();
+  var total = itens.length + xgl.length + sb.length;
 
   dpPor('dp-kpi-gov',
-      raKpi({ l:'Em tratativa', v: dpNum(total), darkGreen:true,
-              cap:'governança + XGL pendente' })
+      raKpi({ l:'Total de itens para tratamento', v: dpNum(total), darkGreen:true,
+              cap:'governança + XGL + Status B' })
     + raKpi({ l:'Na governança', v: dpNum(itens.length), small:true,
               cap:'PATEC finalizado, 100% reprovado e cancelado',
               corte: raCorte('dp_gov', 'Em tratativa na governança', itens, DP_DET_COLS) })
     + raKpi({ l:'XGL pendente', v: dpNum(xgl.length), small:true, purple:true,
               cap: _dpXgl.itens.length ? 'de ' + dpNum(_dpXgl.itens.length) + ' no XGL'
-                                       : 'XGL não carregado' }));
+                                       : 'XGL não carregado' })
+    + raKpi({ l:'Status B pendente', v: dpNum(sb.length), small:true, lightBlue:true,
+              cap: _dpSb.itens.length ? 'de ' + dpNum(_dpSb.itens.length) + ' no Status B'
+                                      : 'Status B não carregado' }));
 
-  dpPor('dp-tb-gov', filas.length ? filas.map(function(f){
-    var n = porFila[f].length;
-    return '<tr><td style="font-weight:600">' + cpEsc(f) + '</td>'
-      + '<td>' + dpNum(n) + '</td>'
-      + '<td>' + dpPct(n, itens.length) + '%</td></tr>';
+  // as duas linhas de fora da governança entram na tabela junto com as
+  // filas: é a conta inteira do que está para tratar
+  var linhas = filas.map(function(f){
+    return { nome:f, n: porFila[f].length };
+  });
+  linhas.push({ nome:'XGL', n: xgl.length, fora:true });
+  linhas.push({ nome:'Status B', n: sb.length, fora:true });
+
+  dpPor('dp-tb-gov', linhas.length ? linhas.map(function(l){
+    return '<tr><td style="font-weight:600">' + cpEsc(l.nome)
+      + (l.fora ? ' <span style="font-weight:400;color:var(--tx2);font-size:10.5px">'
+                  + '(fora da governança)</span>' : '') + '</td>'
+      + '<td>' + dpNum(l.n) + '</td>'
+      + '<td>' + dpPct(l.n, total) + '%</td></tr>';
   }).join('') : '<tr><td colspan="3" style="padding:1.4rem;text-align:center;'
     + 'color:var(--tx2)">—</td></tr>');
-}
-
-function dpCriticos(){
-  var gov = dpGovItens();
-  var f = dpFaixasPrazo(gov);
-  var agTrat = (_dpRadar || []).filter(function(r){
-    return String(r.analista_auto || '').trim() === 'Analisar PATEC Finalizado'
-        && DP_FILAS_AG.indexOf(dpNormF(r.fila)) >= 0;
-  });
-  var emTrat = gov.filter(function(r){ return DP_FILAS_EM.indexOf(dpNormF(r.fila)) >= 0; });
-  var maior = gov.length ? gov.reduce(function(mx, r){
-    return Number(r.sla || 0) > Number(mx.sla || 0) ? r : mx; }, gov[0]) : null;
-
-  dpPor('dp-kpi-crit',
-      raKpi({ l:'Maior SLA', v: maior ? dpNum(Number(maior.sla || 0)) : '—', small:true,
-              cap: maior ? ('fila ' + (maior.fila || '—')) : '' })
-    + raKpi({ l:'PATEC Finalizado', v: dpNum(gov.length), small:true,
-              corte: raCorte('dp_cr_gov', 'PATEC Finalizado', gov, DP_DET_COLS) })
-    + raKpi({ l:'Ag. Tratamento', v: dpNum(agTrat.length), small:true,
-              cap:'filas PATEC e Análise de Oportunidade',
-              corte: raCorte('dp_cr_ag', 'Ag. Tratamento', agTrat, DP_DET_COLS) })
-    + raKpi({ l:'Em Tratamento', v: dpNum(emTrat.length), small:true,
-              cap:'filas Item em Parada e MDG',
-              corte: raCorte('dp_cr_em', 'Em Tratamento', emTrat, DP_DET_COLS) })
-    + raKpi({ l:'Próx. vencimento', v: dpNum(f.prox.length), small:true, lightBlue:true,
-              cap: dpPct(f.prox.length, f.total) + '% da governança',
-              corte: raCorte('dp_cr_prox', 'Próximo do vencimento', f.prox, DP_DET_COLS) })
-    + raKpi({ l:'Vencidos', v: dpNum(f.venc.length), small:true, purple:true,
-              cap: dpPct(f.venc.length, f.total) + '% da governança',
-              corte: raCorte('dp_cr_venc', 'Vencidos', f.venc, DP_DET_COLS) }));
 }
 
 // ── os dois gráficos, da série do mapa diário ─────────────────────
@@ -61031,12 +61171,60 @@ function dpSerie(){
     return { data: d,
              totalPatec: m ? n('l3') + n('l4') + n('l5') + n('l6') : null,
              totalAbrir: m ? n('l7') + n('l8') : null,
+             totalGeral: m ? n('l3') + n('l4') + n('l5') + n('l6') + n('l7') + n('l8') : null,
              fin: n('l3'), agfin: n('l4') };
   });
 }
 
+// Cresceu ou reduziu no período escolhido? Compara o primeiro e o
+// último dia COM lançamento dentro do período — dia sem mapa não conta,
+// senão um feriado no meio viraria "queda".
+function dpTendencia(){
+  var serie = dpSerie().filter(function(p){ return p.totalGeral !== null; });
+  if (serie.length < 2) return null;
+  var a = serie[0], b = serie[serie.length - 1];
+  return { de: a.data, ate: b.data, ini: a.totalGeral, fim: b.totalGeral,
+           dias: serie.length, delta: b.totalGeral - a.totalGeral,
+           patec: b.totalPatec - a.totalPatec,
+           abrir: b.totalAbrir - a.totalAbrir };
+}
+
+function dpDesenharTendencia(){
+  var t = dpTendencia();
+  var dica = document.getElementById('dp-periodo-dica');
+  if (!t) {
+    dpPor('dp-kpi-tend', '');
+    if (dica) dica.textContent = _dpMapa.length
+      ? 'escolha duas datas com lançamento no mapa para ver se o backlog cresceu ou caiu'
+      : 'sem o mapa diário não dá para medir a evolução';
+    return;
+  }
+  var br = function(d){ return d.slice(8,10) + '/' + d.slice(5,7); };
+  if (dica) dica.textContent = 'comparando ' + br(t.de) + ' com ' + br(t.ate)
+    + ' · ' + t.dias + ' dia(s) com lançamento';
+  var subiu = t.delta > 0, igual = t.delta === 0;
+  var rotulo = igual ? 'Backlog estável' : (subiu ? 'Backlog crescendo' : 'Backlog reduzindo');
+  var sinal = igual ? '' : (subiu ? '+' : '');
+  var pct = t.ini > 0 ? Math.round(Math.abs(t.delta) / t.ini * 100) : 0;
+  var porDia = t.dias > 1 ? (t.delta / (t.dias - 1)) : 0;
+  var um = function(n){ return (n > 0 ? '+' : '') + n; };
+  dpPor('dp-kpi-tend',
+      raKpi({ l:rotulo, v: sinal + dpNum(t.delta),
+              darkGreen: !subiu, purple: subiu,
+              cap: dpNum(t.ini) + ' → ' + dpNum(t.fim)
+                 + (igual ? '' : ' · ' + pct + '%') })
+    + raKpi({ l:'Por dia no período', v: (porDia > 0 ? '+' : '')
+                + (Math.round(porDia * 10) / 10).toString().replace('.', ','),
+              small:true, cap: t.dias + ' dia(s) com lançamento' })
+    + raKpi({ l:'Total PATEC no período', v: um(t.patec), small:true,
+              cap:'do primeiro ao último dia' })
+    + raKpi({ l:'Total Abrir PATEC no período', v: um(t.abrir), small:true, lightBlue:true,
+              cap:'do primeiro ao último dia' }));
+}
+
 function dpDesenharGraficos(){
   if (!_dpRadar) return;
+  dpDesenharTendencia();
   var serie = dpSerie();
   var rot = serie.map(function(p){
     return p.data.slice(8, 10) + '/' + p.data.slice(5, 7);
