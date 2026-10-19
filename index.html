@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '20/10 00:05';
+var GTO_BUILD = '20/10 00:50';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -526,6 +526,22 @@ body{
   width:82px; flex:0 0 82px; text-align:right; font-weight:700; color:#0E2B28;
 }
 #rd-root .rj-num i{ font-style:normal; font-weight:600; color:#5C7370; }
+#rd-root .rj-lado .extra-head{ margin-top:0; }
+/* dois cards por lado, em meia largura: com auto-fit eles ficavam
+   estreitos e o rótulo quebrava em quatro linhas */
+#rd-root .rj-lado .kpi-grid{ grid-template-columns:1fr 1fr; }
+#rd-root .rj-lado .kpi{ cursor:pointer; }
+/* o card escolhido: fundo escuro, como o filtro ligado das outras telas */
+#rd-root .rj-lado .kpi.rj-sel{
+  background:linear-gradient(135deg,#0B4F49 0%, #0A6B63 100%);
+  border-left-color:#0AAD8F; box-shadow:0 8px 22px rgba(11,79,73,.26);
+}
+#rd-root .rj-lado .kpi.rj-sel .lbl,
+#rd-root .rj-lado .kpi.rj-sel .cap{ color:rgba(255,255,255,.82); }
+#rd-root .rj-lado .kpi.rj-sel .val{ color:#fff; }
+#rd-root .rj-lado-dica{
+  font-size:10.5px; color:#5C7370; margin:0 0 8px;
+}
 
 /* ── A margem da página do Radar ───────────────────────────────
    As telas do Status Carteira moram dentro do .ct, que tem 24px de
@@ -1496,23 +1512,32 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 </div>
               </div>
 
-              <div class="extra-head">Rejeite Supervisor — de quem é o motivo</div>
-              <div class="kpi-grid" id="rj-kpi-sup" style="margin-bottom:10px"></div>
-              <div id="rj-sem-classe"></div>
-              <div class="detail-table-wrap" style="margin-bottom:18px">
-                <table class="items-table">
-                  <thead><tr><th>Padrão de rejeite</th><th>Lado</th><th>Itens</th><th>%</th></tr></thead>
-                  <tbody id="rj-tb-sup"></tbody>
-                </table>
-              </div>
-
-              <div class="extra-head">Rejeite Fornecedor — motivos</div>
-              <div class="kpi-grid" id="rj-kpi-forn" style="margin-bottom:10px"></div>
-              <div class="detail-table-wrap" style="margin-bottom:18px">
-                <table class="items-table">
-                  <thead><tr><th>Motivo</th><th>Itens</th><th>%</th></tr></thead>
-                  <tbody id="rj-tb-forn"></tbody>
-                </table>
+              <!-- os dois lados lado a lado, no mesmo alinhamento do
+                   bloco de prazos acima. Os cards não têm ⊕: clicar no
+                   card é que escolhe, e a tabela daquele lado passa a
+                   contar só o que está dentro dele. -->
+              <div class="rj-prazos">
+                <div class="rj-lado">
+                  <div class="extra-head">Rejeite Supervisor — de quem é o motivo</div>
+                  <div class="kpi-grid" id="rj-kpi-sup" style="margin-bottom:10px"></div>
+                  <div id="rj-sem-classe"></div>
+                  <div class="detail-table-wrap">
+                    <table class="items-table">
+                      <thead><tr><th>Padrão de rejeite</th><th>Itens</th><th>%</th></tr></thead>
+                      <tbody id="rj-tb-sup"></tbody>
+                    </table>
+                  </div>
+                </div>
+                <div class="rj-lado">
+                  <div class="extra-head">Rejeite Fornecedor — motivos</div>
+                  <div class="kpi-grid" id="rj-kpi-forn" style="margin-bottom:10px"></div>
+                  <div class="detail-table-wrap">
+                    <table class="items-table">
+                      <thead><tr><th>Motivo</th><th>Itens</th><th>%</th></tr></thead>
+                      <tbody id="rj-tb-forn"></tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
 
             </div>
@@ -61680,59 +61705,10 @@ function rvjDesenhar(){
               corte: fornVelhos.length
                 ? raCorte('rj_60f', 'Fornecedor acima de 60 dias', fornVelhos, RVJ_FORN_COLS, caixasForn) : null }));
 
-  // ── supervisor: de quem é o motivo ──
-  var q = d.q || { level:0, petro:0, sem:0 };
-  var porLado = function(lado){
-    return d.sup.filter(function(l){ return rjsCulpa(l.padrao || '') === lado; });
-  };
-  rvjPor('rj-kpi-sup',
-      raKpi({ l:'Motivo Level', v: dpNum(q.level), small:true, purple:true,
-              cap:'motivo que nasce do nosso lado',
-              corte: q.level ? raCorte('rj_level', 'Motivo Level', porLado('level'), RVJ_SUP_COLS) : null })
-    + raKpi({ l:'Motivo Petrobras', v: dpNum(q.petro), small:true, lightBlue:true,
-              cap:'preço excessivo e data de parada',
-              corte: q.petro ? raCorte('rj_petro', 'Motivo Petrobras', porLado('petro'), RVJ_SUP_COLS) : null })
-    + raKpi({ l:'Sem classificação', v: dpNum(q.sem), small:true,
-              cap: q.sem ? 'código novo — classifique no módulo de Pedidos' : 'tudo classificado',
-              corte: q.sem ? raCorte('rj_sem', 'Sem classificação', porLado('sem'), RVJ_SUP_COLS) : null }));
-
-  // os códigos que ninguém classificou ainda: dizer QUAIS são, para o
-  // número não virar um mistério na reunião
-  var sem = q.codigosSem || {};
-  var chavesSem = Object.keys(sem).sort(function(a, b){ return sem[b] - sem[a]; });
-  rvjPor('rj-sem-classe', chavesSem.length
-    ? '<div class="dp-msg dp-msg-ok" style="border-color:#F5D898;background:#FDF8EC">'
-      + '⚠ <b>' + chavesSem.length + ' padrão(ões) sem lado definido</b> — entre no módulo '
-      + 'de Pedidos e diga de quem é cada um: '
-      + chavesSem.map(function(c){
-          return '<b>' + dpNum(sem[c]) + '×</b> ' + cpEsc(c); }).join(' · ')
-      + '</div>'
-    : '');
-
-  var linhas = function(pares, total, comLado){
-    if (!pares || !pares.length) return '<tr><td colspan="' + (comLado ? 4 : 3)
-      + '" style="padding:1.4rem;text-align:center;color:var(--tx2)">—</td></tr>';
-    return pares.map(function(p){
-      var nome = p[0], n = p[1];
-      return '<tr><td style="font-weight:600">' + cpEsc(nome) + '</td>'
-        + (comLado ? '<td>' + RJS_CULPA_NOME[rjsCulpa(nome)] + '</td>' : '')
-        + '<td>' + dpNum(n) + '</td><td>' + dpPct(n, total) + '%</td></tr>';
-    }).join('');
-  };
-  rvjPor('rj-tb-sup', linhas(d.padroesSup, d.sup.length, true));
-
-  // ── fornecedor: motivos ──
-  var topo = (d.motivosForn || []).slice(0, 4);
-  rvjPor('rj-kpi-forn', topo.length ? topo.map(function(p, i){
-    var o = { l:p[0], v: dpNum(p[1]), small:true,
-              cap: dpPct(p[1], d.forn.length) + '% do fornecedor',
-              corte: raCorte('rj_mf' + i, 'Fornecedor · ' + p[0],
-                d.forn.filter(function(x){ return (x.motivo || '(sem motivo)') === p[0]; }),
-                RVJ_FORN_COLS) };
-    if (i === 0) o.purple = true;
-    return raKpi(o);
-  }).join('') : '');
-  rvjPor('rj-tb-forn', linhas(d.motivosForn, d.forn.length, false));
+  // ── os dois lados: card escolhido manda na tabela de baixo ──
+  _rvjD = d;
+  rvjLadoSup();
+  rvjLadoForn();
 
   // ── tempo parado, em barras, um lado em cada coluna ──
   var barras = function(mapa, total, classe){
@@ -61751,6 +61727,99 @@ function rvjDesenhar(){
   rvjPor('rj-barras-forn', barras(d.slaForn, d.forn.length, 'rj-b-forn'));
 
   if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
+}
+
+// ── os dois lados, cada um com os seus cards e a sua tabela ──────
+// Não há ⊕ aqui: escolher o card É o filtro, e a tabela do mesmo lado
+// passa a contar só o que está dentro dele. Clicar de novo solta.
+var _rvjD = null;            // o último arjDados desenhado
+var _rvjSelSup = null;       // null | 'level' | 'petro'
+var _rvjSelForn = null;      // null | 'ok' | 'fora'
+
+function rvjCard(rot, n, cap, classe, ligado, fn, valor){
+  return '<div class="kpi small ' + (classe || '') + (ligado ? ' rj-sel' : '') + '"'
+    + ' onclick="' + fn + '(' + (valor === null ? 'null' : "'" + valor + "'") + ')"'
+    + ' title="Clique para ver só estes na tabela abaixo">'
+    + '<div class="lbl">' + cpEsc(rot) + '</div>'
+    + '<div class="val">' + dpNum(n) + '</div>'
+    + (cap ? '<div class="cap">' + cpEsc(cap) + '</div>' : '') + '</div>';
+}
+function rvjTabela(pares, total, vazio){
+  if (!pares || !pares.length) return '<tr><td colspan="3" style="padding:1.4rem;'
+    + 'text-align:center;color:var(--tx2)">' + (vazio || '—') + '</td></tr>';
+  return pares.map(function(p){
+    return '<tr><td style="font-weight:600">' + cpEsc(p[0]) + '</td>'
+      + '<td>' + dpNum(p[1]) + '</td><td>' + dpPct(p[1], total) + '%</td></tr>';
+  }).join('');
+}
+function rvjAgrupar(itens, campo, padrao){
+  var m = {};
+  itens.forEach(function(i){
+    var k = i[campo] || padrao;
+    m[k] = (m[k] || 0) + 1;
+  });
+  return Object.keys(m).map(function(k){ return [k, m[k]]; })
+    .sort(function(a, b){ return b[1] - a[1]; });
+}
+
+function rvjSelecionarSup(v){
+  _rvjSelSup = (_rvjSelSup === v) ? null : v;
+  rvjLadoSup();
+}
+function rvjLadoSup(){
+  var d = _rvjD;
+  if (!d) return;
+  var q = d.q || { level:0, petro:0, sem:0 };
+  var porLado = function(lado){
+    return d.sup.filter(function(l){ return rjsCulpa(l.padrao || '') === lado; });
+  };
+  rvjPor('rj-kpi-sup',
+      rvjCard('Motivo Level', q.level, 'motivo que nasce do nosso lado',
+              'purple', _rvjSelSup === 'level', 'rvjSelecionarSup', 'level')
+    + rvjCard('Motivo Petrobras', q.petro, 'preço excessivo e data de parada',
+              'light-blue', _rvjSelSup === 'petro', 'rvjSelecionarSup', 'petro'));
+
+  // os códigos que ninguém classificou ainda: o card saiu, mas o aviso
+  // fica — e diz QUAIS são, para o número não virar mistério na reunião
+  var sem = q.codigosSem || {};
+  var chavesSem = Object.keys(sem).sort(function(a, b){ return sem[b] - sem[a]; });
+  rvjPor('rj-sem-classe', chavesSem.length
+    ? '<div class="dp-msg dp-msg-ok" style="border-color:#F5D898;background:#FDF8EC">'
+      + '⚠ <b>' + chavesSem.length + ' padrão(ões) sem lado definido</b> — entre no módulo '
+      + 'de Pedidos e diga de quem é cada um: '
+      + chavesSem.map(function(c){
+          return '<b>' + dpNum(sem[c]) + '×</b> ' + cpEsc(c); }).join(' · ')
+      + '</div>'
+    : '');
+
+  var base = _rvjSelSup ? porLado(_rvjSelSup) : d.sup;
+  rvjPor('rj-tb-sup', rvjTabela(
+    rvjAgrupar(base, 'padrao', '(sem padrão na planilha)'), base.length,
+    'Nenhum item nesse card.'));
+}
+
+function rvjSelecionarForn(v){
+  _rvjSelForn = (_rvjSelForn === v) ? null : v;
+  rvjLadoForn();
+}
+function rvjLadoForn(){
+  var d = _rvjD;
+  if (!d) return;
+  // Do lado do fornecedor não existe Level × Petrobras — aquela planilha
+  // não traz essa classificação. A divisão que existe lá é o prazo, e é
+  // ela que vira card; a tabela continua sendo a dos motivos.
+  var fora = d.forn.filter(function(i){ return /FORA/i.test(i.prazo || ''); });
+  var noPrazo = d.forn.filter(function(i){ return !/FORA/i.test(i.prazo || ''); });
+  rvjPor('rj-kpi-forn',
+      rvjCard('No prazo', noPrazo.length, 'dentro do prazo da planilha',
+              'light-green', _rvjSelForn === 'ok', 'rvjSelecionarForn', 'ok')
+    + rvjCard('Fora do prazo', fora.length, 'estourou o prazo',
+              'purple', _rvjSelForn === 'fora', 'rvjSelecionarForn', 'fora'));
+
+  var base = _rvjSelForn === 'fora' ? fora : (_rvjSelForn === 'ok' ? noPrazo : d.forn);
+  rvjPor('rj-tb-forn', rvjTabela(
+    rvjAgrupar(base, 'motivo', '(sem motivo)'), base.length,
+    'Nenhum item nesse card.'));
 }
 
 // as colunas de cada lado — são bases diferentes, com campos diferentes
