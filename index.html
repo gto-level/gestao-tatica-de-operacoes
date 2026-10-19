@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/10 18:10';
+var GTO_BUILD = '19/10 19:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -476,6 +476,11 @@ body{
   display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px;
 }
 #rd-root .dp-dica{ font-size:11px; color:#5C7370; }
+#rd-root .dp-nota{
+  font-size:11.5px; color:#5C7370; line-height:1.6; margin:-4px 0 12px;
+  background:#F7FAF9; border:1px solid #E4EDEB; border-radius:10px; padding:9px 12px;
+}
+#rd-root .dp-nota b{ color:#0E2B28; font-weight:650; }
 #rd-root .dp-grafs{
   display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:18px;
 }
@@ -1406,6 +1411,12 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               </div>
 
               <div class="extra-head">Evolução no período</div>
+              <div class="dp-nota">
+                Este bloco vem do <b>mapa diário</b> — o que foi lançado em cada dia —
+                e não da contagem de hoje lá de cima. Por isso os números daqui podem não
+                bater com o Resumo do mapa. <b>Backlog</b>, aqui, é o Total Geral:
+                PATEC + Abrir PATEC.
+              </div>
               <div class="dp-periodo">
                 <label class="dp-dt">De <input type="date" id="dp-ini"
                        onchange="dpDesenharGraficos()"></label>
@@ -61089,15 +61100,21 @@ function dpSaude(){
     o[cor] = true;
     return raKpi(o);
   };
-  var maior = base.length ? base.reduce(function(mx, r){
-    return Number(r.sla || 0) > Number(mx.sla || 0) ? r : mx; }, base[0]) : null;
   dpPor('dp-kpi-saude',
       cx('Dentro do prazo', f.dentro, 'sd_dentro', 'lightGreen')
     + cx('Próximo do vencimento', f.prox, 'sd_prox', 'lightBlue')
-    + cx('Vencidos', f.venc, 'sd_venc', 'purple')
-    + raKpi({ l:'Maior SLA', v: maior ? dpNum(Number(maior.sla || 0)) : '—',
-              cap: maior ? ('RC ' + (maior.rc || '—') + ' · fila ' + (maior.fila || '—')) : '',
-              corte: maior ? raCorte('dp_sd_sla', 'Maior SLA', [maior], DP_DET_COLS) : null }));
+    + cx('Vencidos', f.venc, 'sd_venc', 'purple'));
+}
+
+// o item mais antigo da carteira do mapa — mora no Detalhamento da
+// governança, mas a base continua sendo a mesma da saúde: os seis
+// status do mapa. O rótulo diz isso, para ninguém ler como se fosse
+// só da governança.
+function dpMaiorSla(){
+  var base = dpItensDoMapa();
+  if (!base.length) return null;
+  return base.reduce(function(mx, r){
+    return Number(r.sla || 0) > Number(mx.sla || 0) ? r : mx; }, base[0]);
 }
 
 function dpGovernanca(){
@@ -61125,7 +61142,14 @@ function dpGovernanca(){
                                        : 'XGL não carregado' })
     + raKpi({ l:'Status B pendente', v: dpNum(sb.length), small:true, lightBlue:true,
               cap: _dpSb.itens.length ? 'de ' + dpNum(_dpSb.itens.length) + ' no Status B'
-                                      : 'Status B não carregado' }));
+                                      : 'Status B não carregado' })
+    + (function(){
+        var m = dpMaiorSla();
+        return raKpi({ l:'Maior SLA da carteira', v: m ? dpNum(Number(m.sla || 0)) : '—',
+          small:true,
+          cap: m ? ('RC ' + (m.rc || '—') + ' · fila ' + (m.fila || '—')) : '',
+          corte: m ? raCorte('dp_sd_sla', 'Maior SLA da carteira', [m], DP_DET_COLS) : null });
+      })());
 
   // as duas linhas de fora da governança entram na tabela junto com as
   // filas: é a conta inteira do que está para tratar
@@ -61207,19 +61231,20 @@ function dpDesenharTendencia(){
   var sinal = igual ? '' : (subiu ? '+' : '');
   var pct = t.ini > 0 ? Math.round(Math.abs(t.delta) / t.ini * 100) : 0;
   var porDia = t.dias > 1 ? (t.delta / (t.dias - 1)) : 0;
-  var um = function(n){ return (n > 0 ? '+' : '') + n; };
+  var um = function(n){ return (n > 0 ? '+' : '') + dpNum(n); };
   dpPor('dp-kpi-tend',
       raKpi({ l:rotulo, v: sinal + dpNum(t.delta),
               darkGreen: !subiu, purple: subiu,
-              cap: dpNum(t.ini) + ' → ' + dpNum(t.fim)
-                 + (igual ? '' : ' · ' + pct + '%') })
-    + raKpi({ l:'Por dia no período', v: (porDia > 0 ? '+' : '')
+              cap: dpNum(t.ini) + ' em ' + br(t.de) + ' → ' + dpNum(t.fim)
+                 + ' em ' + br(t.ate) + (igual ? '' : ' · ' + pct + '%') })
+    + raKpi({ l:'Média por dia', v: (porDia > 0 ? '+' : '')
                 + (Math.round(porDia * 10) / 10).toString().replace('.', ','),
-              small:true, cap: t.dias + ' dia(s) com lançamento' })
-    + raKpi({ l:'Total PATEC no período', v: um(t.patec), small:true,
-              cap:'do primeiro ao último dia' })
-    + raKpi({ l:'Total Abrir PATEC no período', v: um(t.abrir), small:true, lightBlue:true,
-              cap:'do primeiro ao último dia' }));
+              small:true,
+              cap:'quanto o backlog muda a cada dia com lançamento' })
+    + raKpi({ l:'Parte do PATEC', v: um(t.patec), small:true,
+              cap:'quanto do movimento veio do Total PATEC' })
+    + raKpi({ l:'Parte do Abrir PATEC', v: um(t.abrir), small:true, lightBlue:true,
+              cap:'quanto veio do Total Abrir PATEC · as duas somam ' + um(t.delta) }));
 }
 
 function dpDesenharGraficos(){
