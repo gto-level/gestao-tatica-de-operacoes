@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '20/10 01:40';
+var GTO_BUILD = '20/10 02:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -59566,9 +59566,12 @@ function pfAlinhar(){
     if (!pg) return;
     por(document.getElementById(par[1]), medir(pg));
   });
-  // a janela de detalhe das telas do ADLV fica fora das páginas: ela se
-  // alinha pela que estiver aberta
-  var aberta = ['p-reuniao-adlv', 'p-reuniao-adlv-radar']
+  // A janela de detalhe das telas do ADLV fica fora das páginas: ela se
+  // alinha pela que estiver aberta. A Governança entrou na lista em
+  // 20/10, quando o Detalhamento do Patec passou a existir lá também —
+  // sem ela a janela ficava presa na medida antiga e começava atrás do
+  // menu, cortando a coluna da RC.
+  var aberta = ['p-reuniao-adlv', 'p-reuniao-adlv-radar', 'p-governanca']
     .map(function(id){ return document.getElementById(id); })
     .filter(function(e){ return e && e.classList.contains('active'); })[0];
   if (aberta) por(document.getElementById('rv-ov'), medir(aberta));
