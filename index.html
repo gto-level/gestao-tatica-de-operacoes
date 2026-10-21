@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '21/10 18:15';
+var GTO_BUILD = '21/10 18:35';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -59714,7 +59714,8 @@ function pfAlinhar(){
     raiz.style.setProperty('--pf-dir', m[1] + 'px');
   };
   [['p-reuniao-fast', 'pf-root'], ['p-reuniao-adlv', 'ra-root'],
-   ['p-reuniao-adlv-radar', 'rd-root']].forEach(function(par){
+   ['p-reuniao-adlv-radar', 'rd-root'],
+   ['p-dev-controle', 'dv-root']].forEach(function(par){
     var pg = document.getElementById(par[0]);
     if (!pg) return;
     por(document.getElementById(par[1]), medir(pg));
@@ -59724,7 +59725,8 @@ function pfAlinhar(){
   // 20/10, quando o Detalhamento do Patec passou a existir lá também —
   // sem ela a janela ficava presa na medida antiga e começava atrás do
   // menu, cortando a coluna da RC.
-  var aberta = ['p-reuniao-adlv', 'p-reuniao-adlv-radar', 'p-governanca']
+  var aberta = ['p-reuniao-adlv', 'p-reuniao-adlv-radar', 'p-governanca',
+                'p-dev-controle']
     .map(function(id){ return document.getElementById(id); })
     .filter(function(e){ return e && e.classList.contains('active'); })[0];
   if (aberta) por(document.getElementById('rv-ov'), medir(aberta));
@@ -60794,6 +60796,9 @@ function dvLerAba(wb, pedaco, campos, rotulo){
       o[c.k] = (c.k === 'dtMod') ? dvData(v)
              : String(v == null ? '' : v).trim();
     });
+    // a data fica guardada em ISO, que é o que ordena e agrupa; o que
+    // aparece na tela é a versão brasileira
+    o.dtBR = o.dtMod ? cpDataBR(o.dtMod) : '';
     ch = dvChave(o);
     if (vistos[ch]) { repetidos++; continue; }
     vistos[ch] = 1;
@@ -60907,6 +60912,12 @@ async function dvCarregar(){
       try { return txt[k] ? JSON.parse(txt[k]) : []; } catch (e) { return []; }
     };
     _dvResg = val('resg'); _dvRec = val('rec');
+    // base gravada por uma versão anterior não tem a data em pt-BR
+    [_dvResg, _dvRec].forEach(function(lista){
+      lista.forEach(function(r){
+        if (r.dtBR == null) r.dtBR = r.dtMod ? cpDataBR(r.dtMod) : '';
+      });
+    });
     return true;
   } catch (e) {
     console.warn('dvCarregar:', e);
@@ -60916,8 +60927,15 @@ async function dvCarregar(){
 }
 
 // ── as telas ──────────────────────────────────────────────────────
-var DV_COLS_RESG = DV_CAMPOS_RESG.map(function(c){ return { k:c.k, t:c.t }; });
-var DV_COLS_REC  = DV_CAMPOS_REC.map(function(c){ return { k:c.k, t:c.t }; });
+// as colunas da janela de detalhe: as mesmas da leitura, só que a data
+// sai no formato brasileiro
+function dvCols(campos){
+  return campos.map(function(c){
+    return { k: (c.k === 'dtMod') ? 'dtBR' : c.k, t: c.t };
+  });
+}
+var DV_COLS_RESG = dvCols(DV_CAMPOS_RESG);
+var DV_COLS_REC  = dvCols(DV_CAMPOS_REC);
 
 function dvTab(aba, btn){
   _dvAba = (aba === 'rec') ? 'rec' : 'resg';
