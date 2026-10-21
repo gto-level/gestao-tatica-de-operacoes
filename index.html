@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '21/10 14:20';
+var GTO_BUILD = '21/10 15:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1439,13 +1439,18 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               <div class="extra-head">Status da carteira</div>
               <div class="kpi-grid" id="dc-kpi-status" style="margin-bottom:18px"></div>
 
-              <div class="extra-head">O que o MAPA está dizendo hoje</div>
-              <div class="kpi-grid" id="dc-kpi-auto" style="margin-bottom:10px"></div>
-              <div class="detail-table-wrap" style="margin-bottom:18px">
-                <table class="items-table">
-                  <thead><tr><th>Analista automático</th><th>Itens</th><th>%</th></tr></thead>
-                  <tbody id="dc-tb-auto"></tbody>
-                </table>
+              <div class="extra-head">Detalhamento por analista automático</div>
+              <div class="dp-grafs">
+                <div class="dp-graf">
+                  <div class="dp-graf-t">Status A <span id="dc-gr-a-sub"
+                       style="font-weight:500;color:#5C7370"></span></div>
+                  <div class="dp-graf-c" style="height:320px"><canvas id="dc-gr-a"></canvas></div>
+                </div>
+                <div class="dp-graf">
+                  <div class="dp-graf-t">Status N <span id="dc-gr-n-sub"
+                       style="font-weight:500;color:#5C7370"></span></div>
+                  <div class="dp-graf-c" style="height:320px"><canvas id="dc-gr-n"></canvas></div>
+                </div>
               </div>
             </div>
 
@@ -60537,6 +60542,104 @@ var RA_MAPA_DET_COLS = [
   { k:'CENTRO', t:'Centro' }, { k:'FAMILIA', t:'Família' },
   { k:'TEXTO_BREVE', t:'Material' }
 ];
+// A chave do Detalhamento da Carteira: RC (coluna J) + SEQ (coluna K).
+// A mesma linha pode aparecer mais de uma vez no MAPA — por item de
+// oportunidade, por fornecedor —, e contar linha em vez de chave
+// inflaria o card. Hoje, no arquivo do André, dá no mesmo; no dia em que
+// não der, o número certo é o da chave.
+function raDcChave(r){
+  return raCampo(r.RC) + '|' + raCampo(r.SEQ);
+}
+function raDcUnicos(lista){
+  var visto = {}, out = [];
+  lista.forEach(function(r){
+    var k = raDcChave(r);
+    if (k === '|') return;              // linha sem RC e sem SEQ
+    if (visto[k]) return;
+    visto[k] = 1; out.push(r);
+  });
+  return out;
+}
+// As categorias do gráfico do Status A, na ordem que o André pediu.
+// A comparação é por nome normalizado: na planilha vem "Abrir PATEC
+// identico não", sem o acento do i e com o ã — bater string crua
+// perderia a categoria e a barra sairia zerada.
+var RA_DC_CATS_A = [
+  'Analisar PATEC Finalizado',
+  'Abrir PATEC Idêntico Não',
+  'Abrir PATEC Grupo de Mercadoria Obrigatório',
+  'Aguardar PATEC ser Finalizado',
+  'Emitir Pedido',
+  'Negociar Preço Excessivo',
+  'PATEC Finalizado sem fornecedores aprovados',
+  'Devolver, acima do limite DPV',
+  'Analisar PATEC Cancelado',
+  'Negociar, acima do limite DPV'
+];
+var RA_DC_CORES = ['#1A4A8A', '#0E9E6A', '#C07A12', '#7C5CBF', '#D94040',
+                   '#4FA3E3', '#0AAD8F', '#B4700F', '#6E4FB0', '#2E77B0'];
+function raDcNorm(v){
+  return (typeof cpNormCab === 'function') ? cpNormCab(v)
+    : String(v == null ? '' : v).trim().toUpperCase();
+}
+
+// Agrupa os itens de um status pelo analista automático. Com uma lista
+// fixa, ela manda na ordem e no que entra — e o que sobra é DITO, não
+// escondido. Sem lista, saem as categorias que existem, da maior para a
+// menor.
+function raDcPorAuto(itens, cats){
+  var porNorm = {};
+  itens.forEach(function(r){
+    var k = raDcNorm(r.ANALISTA_AUTOMATICO);
+    (porNorm[k] = porNorm[k] || { nome: raCampo(r.ANALISTA_AUTOMATICO) || '(em branco)',
+                                  itens: [] }).itens.push(r);
+  });
+  var usados = {}, barras = [];
+  if (cats && cats.length) {
+    cats.forEach(function(c){
+      var k = raDcNorm(c);
+      usados[k] = 1;
+      var g = porNorm[k];
+      barras.push({ nome: g ? g.nome : c, itens: g ? g.itens : [] });
+    });
+  } else {
+    Object.keys(porNorm).sort(function(a, b){
+      return porNorm[b].itens.length - porNorm[a].itens.length; })
+      .forEach(function(k){ usados[k] = 1; barras.push(porNorm[k]); });
+  }
+  var fora = [];
+  Object.keys(porNorm).forEach(function(k){
+    if (!usados[k]) fora = fora.concat(porNorm[k].itens);
+  });
+  return { barras: barras, fora: fora };
+}
+
+function raDcGrafico(id, slot, g, prefixo){
+  var cv = document.getElementById(id);
+  if (!cv || typeof Chart === 'undefined') return;
+  try { if (window[slot]) window[slot].destroy(); } catch (e) {}
+  var rot = g.barras.map(function(b){ return b.nome; });
+  var val = g.barras.map(function(b){ return b.itens.length; });
+  var cores = g.barras.map(function(b, i){ return RA_DC_CORES[i % RA_DC_CORES.length]; });
+  // cada barra guarda o seu recorte: clicar nela abre as RCs
+  g.barras.forEach(function(b, i){
+    raCorte(prefixo + i, b.nome, b.itens, RA_MAPA_DET_COLS);
+  });
+  window[slot] = new Chart(cv.getContext ? cv.getContext('2d') : cv, {
+    type: 'bar',
+    data: { labels: rot,
+            datasets: [{ label:'Itens (RC + SEQ)', data: val, backgroundColor: cores }] },
+    options: {
+      responsive:true, maintainAspectRatio:false, indexAxis:'y',
+      plugins:{ legend:{ display:false } },
+      scales:{ x:{ beginAtZero:true }, y:{ ticks:{ font:{ size:10 } } } },
+      onClick: function(ev, els){
+        if (els && els.length) raDetAbrir(prefixo + els[0].index);
+      }
+    }
+  });
+}
+
 function raDesenharDetCarteira(){
   var n = (_raMapa || []).length;
   raPor('dc-fonte', n
@@ -60548,19 +60651,21 @@ function raDesenharDetCarteira(){
   if (!n) {
     raPor('dc-aviso', '<div class="dp-msg dp-msg-ok">Nenhum MAPA subido ainda — '
       + 'suba a planilha no tópico <b>Upload</b> desta frente e esta aba se monta sozinha.</div>');
-    ['dc-kpi-status', 'dc-kpi-auto'].forEach(function(i){ raPor(i, ''); });
-    raPor('dc-tb-auto', '');
+    raPor('dc-kpi-status', '');
+    ['dc-gr-a-sub', 'dc-gr-n-sub'].forEach(function(i){ raPor(i, ''); });
     return;
   }
   raPor('dc-aviso', '');
 
-  // Status A / E / N saem da coluna STATUS_RC. O Status B não está nesta
-  // planilha: ele vem da regra do módulo de Pedidos e entra depois.
+  // Status A / E / N saem da coluna STATUS_RC, contando CHAVES — o
+  // Status B não está nesta planilha: vem da regra do módulo de Pedidos.
   var porSt = {};
   _raMapa.forEach(function(r){
-    var v = String(r.STATUS_RC || '').trim() || '(sem status)';
+    var v = raCampo(r.STATUS_RC) || '(sem status)';
     (porSt[v] = porSt[v] || []).push(r);
   });
+  Object.keys(porSt).forEach(function(k){ porSt[k] = raDcUnicos(porSt[k]); });
+  var total = raDcUnicos(_raMapa).length;
   var ordem = ['A', 'B', 'E', 'N'];
   Object.keys(porSt).forEach(function(k){ if (ordem.indexOf(k) === -1) ordem.push(k); });
   var classe = { A:'darkGreen', B:'purple', E:'lightBlue', N:'lightGreen' };
@@ -60568,34 +60673,31 @@ function raDesenharDetCarteira(){
     var itens = porSt[k] || [];
     var o = { l:'Status ' + k, v: raNum(itens.length),
               cap: k === 'B' ? 'vem da regra do módulo de Pedidos'
-                             : (raDec(100 * itens.length / n) + '% da carteira'),
+                             : (raDec(100 * itens.length / total) + '% da carteira'),
               corte: itens.length
                 ? raCorte('dc_st_' + k, 'Status ' + k, itens, RA_MAPA_DET_COLS) : null };
     if (classe[k]) o[classe[k]] = true;
     return raKpi(o);
   }).join(''));
 
-  // e o que o analista automático está mandando fazer
-  var porAuto = {};
-  _raMapa.forEach(function(r){
-    var v = String(r.ANALISTA_AUTOMATICO || '').trim() || '(em branco)';
-    (porAuto[v] = porAuto[v] || []).push(r);
-  });
-  var autos = Object.keys(porAuto).sort(function(a, b){
-    return porAuto[b].length - porAuto[a].length; });
-  raPor('dc-kpi-auto', autos.slice(0, 4).map(function(k, i){
-    var o = { l:k, v: raNum(porAuto[k].length), small:true,
-              cap: raDec(100 * porAuto[k].length / n) + '% do MAPA',
-              corte: raCorte('dc_au_' + i, k, porAuto[k], RA_MAPA_DET_COLS) };
-    if (i === 0) o.purple = true;
-    return raKpi(o);
-  }).join(''));
-  raPor('dc-tb-auto', autos.map(function(k){
-    var q = porAuto[k].length;
-    return '<tr><td style="font-weight:600">' + cpEsc(k) + '</td>'
-      + '<td>' + raNum(q) + '</td>'
-      + '<td>' + raDec(100 * q / n) + '%</td></tr>';
-  }).join(''));
+  // ── os dois gráficos, pela mesma chave ──
+  var legenda = function(g, itens){
+    var somaBarras = g.barras.reduce(function(s, b){ return s + b.itens.length; }, 0);
+    return '· ' + raNum(somaBarras) + ' de ' + raNum(itens.length)
+      + (g.fora.length ? ' · ' + raNum(g.fora.length) + ' fora da lista' : '')
+      + ' · clique na barra para ver as RCs';
+  };
+  var itensA = porSt['A'] || [];
+  var gA = raDcPorAuto(itensA, RA_DC_CATS_A);
+  raPor('dc-gr-a-sub', legenda(gA, itensA));
+  raDcGrafico('dc-gr-a', '_raGrA', gA, 'dc_ga_');
+
+  // o Status N ainda não tem lista própria: saem as categorias que
+  // aparecem nele, da maior para a menor
+  var itensN = porSt['N'] || [];
+  var gN = raDcPorAuto(itensN, null);
+  raPor('dc-gr-n-sub', legenda(gN, itensN));
+  raDcGrafico('dc-gr-n', '_raGrN', gN, 'dc_gn_');
 }
 
 function raDesenhar(){
