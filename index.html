@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '21/10 09:10';
+var GTO_BUILD = '21/10 14:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1425,11 +1425,28 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               </div>
             </div>
 
+            <!-- ── Detalhamento da Carteira ───────────────────────────
+                 Sai do upload do MAPA, no tópico Upload desta frente. Os
+                 cards de Status são a coluna STATUS_RC; as regras finas
+                 do A, do E e do N ainda vêm. -->
             <div class="rd-pane" id="rd-pane-detcart" style="display:none">
-              <div class="extra-head">Detalhamento da Carteira</div>
-              <div class="rd-apronto">Os quatro cards (Status A, B, E e N) e os dois gráficos
-                entram aqui. Faltam as regras do A, do E e do N — o B sai da mesma regra do
-                módulo de Pedidos.</div>
+              <div class="dp-topo">
+                <div class="dp-fonte" id="dc-fonte">—</div>
+                <button class="pa-btn" onclick="go('reuniao-adlv-upload')">⬆ Subir o MAPA</button>
+              </div>
+              <div id="dc-aviso"></div>
+
+              <div class="extra-head">Status da carteira</div>
+              <div class="kpi-grid" id="dc-kpi-status" style="margin-bottom:18px"></div>
+
+              <div class="extra-head">O que o MAPA está dizendo hoje</div>
+              <div class="kpi-grid" id="dc-kpi-auto" style="margin-bottom:10px"></div>
+              <div class="detail-table-wrap" style="margin-bottom:18px">
+                <table class="items-table">
+                  <thead><tr><th>Analista automático</th><th>Itens</th><th>%</th></tr></thead>
+                  <tbody id="dc-tb-auto"></tbody>
+                </table>
+              </div>
             </div>
 
             <!-- ── Detalhamento Patec ─────────────────────────────────
@@ -1550,7 +1567,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
       <div class="cd" style="margin-bottom:1rem;border-top:3px solid var(--azm)">
         <div class="cd-t" style="margin:0">⬆️ Upload — Reunião ADLV</div>
         <div style="font-size:11px;color:var(--tx2);margin-top:4px;line-height:1.5">
-          Os três são independentes: suba só o que mudou. Cada arquivo recalcula as telas
+          Os quatro são independentes: suba só o que mudou. Cada arquivo recalcula as telas
           e grava na base da frente, para quem abrir depois ver os mesmos números.
         </div>
         <div style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px">
@@ -1568,6 +1585,11 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
             <span style="font-size:10.5px;font-weight:700;color:var(--az)">3 · Liberados E&amp;P</span>
             <span style="font-size:10px;color:var(--tx2)">Requisições EP_BENS, aba Export</span>
             <input type="file" id="raFileEP" accept=".xlsx,.xlsb,.xls" style="font-size:11px" />
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;background:var(--cin);border:1px solid var(--brd);border-radius:9px;padding:9px 12px">
+            <span style="font-size:10.5px;font-weight:700;color:var(--az)">4 · MAPA</span>
+            <span style="font-size:10px;color:var(--tx2)">aba MAPA · alimenta o Detalhamento da Carteira</span>
+            <input type="file" id="raFileMA" accept=".xlsb,.xlsx,.xls" style="font-size:11px" />
           </label>
         </div>
         <div id="raStatus" style="font-size:11.5px;color:var(--tx2);margin-top:10px"></div>
@@ -59949,6 +59971,7 @@ var RA_COLS = ['RC','SEQ','RC_ITEM','STATUS_RC','FASE','Status_Desc','MODALIDADE
                'MOTIVO_PARADA','TEXTO_BREVE','VALOR_TOTAL_RC'];
 
 var _raLevel = [];     // itens da carteira Level
+var _raMapa  = [];     // linhas da aba MAPA (Detalhamento da Carteira)
 var _raEp    = [];     // { chave, status, tipo }
 var _raBu    = null;   // { linhas, status:{} }
 var _raMeta  = {};
@@ -60043,6 +60066,52 @@ function raLerEp(wb){
              status: String(r[cSt] == null ? '' : r[cSt]).trim(),
              tipo:   String(r[cTp] == null ? '' : r[cTp]).trim() };
   });
+}
+
+// ── o MAPA ────────────────────────────────────────────────────────
+// A planilha tem 57 colunas e ~2,4 mil linhas. Guardar tudo encheria a
+// base à toa: ficam só as que as telas usam, pelo nome exato do
+// cabeçalho. Coluna que mudar de nome na origem some aqui — e é melhor
+// assim do que gravar lixo achando que é a coluna certa.
+var RA_MAPA_COLS = [
+  'ANALISTA_AUTOMATICO', 'SLA_DIAS', 'URGENCIA_NECESSIDADE', 'RESPONSAVEL',
+  'FAMILIA', 'TIPO_FAMILIA', 'RC', 'SEQ', 'RC_ITEM', 'NUMERO_OPORTUNIDADE',
+  'ITEM_OPORTUNIDADE', 'STATUS', 'STATUS_RC', 'STATUS_PATEC',
+  'PATEC_QTD_FORNECEDORES_APROVADOS', 'TEXTO_BREVE', 'NM_MATERIAL', 'QTD',
+  'UN_MEDIDA', 'VALOR_TOTAL_RC', 'NOME_FORNECEDOR', 'CENTRO',
+  'GRUPO_MERCADORIAS', 'GRUPO_COMPRADORES', 'MATERIAL_IDENTICO',
+  'TIPO_AVALIACAO', 'PRAZO_ENTREGA_DATA', 'DATA_MODIFICACAO_RC', 'Prazo', 'Q18'
+];
+function raLerMapa(wb){
+  var nome = (wb.SheetNames || []).filter(function(n){
+    return String(n).toUpperCase().trim() === 'MAPA'; })[0];
+  if (!nome) throw new Error('não achei a aba "MAPA" nesta planilha');
+  var aoa = XLSX.utils.sheet_to_json(wb.Sheets[nome], { header:1, raw:true, defval:null });
+  if (aoa.length < 2) throw new Error('a aba MAPA veio vazia');
+  var cab = (aoa[0] || []).map(function(c){ return String(c == null ? '' : c).trim(); });
+  var idx = {}, faltando = [];
+  RA_MAPA_COLS.forEach(function(c){
+    var i = cab.indexOf(c);
+    if (i === -1) faltando.push(c); else idx[c] = i;
+  });
+  if (!('STATUS_RC' in idx) && !('ANALISTA_AUTOMATICO' in idx)) {
+    throw new Error('não achei STATUS_RC nem ANALISTA_AUTOMATICO na aba MAPA');
+  }
+  var out = [], i2, l, o, vazia;
+  for (i2 = 1; i2 < aoa.length; i2++) {
+    l = aoa[i2] || [];
+    o = {}; vazia = true;
+    RA_MAPA_COLS.forEach(function(c){
+      if (!(c in idx)) return;
+      var v = l[idx[c]];
+      o[c] = raCampo(v);
+      if (o[c] !== '') vazia = false;
+    });
+    if (!vazia) out.push(o);
+  }
+  if (!out.length) throw new Error('a aba MAPA não tem nenhuma linha preenchida');
+  out.__faltando = faltando;
+  return out;
 }
 
 function raLerBu(wb){
@@ -60446,7 +60515,8 @@ function raDesenharUpload(){
   var linhas = [
     { nome:'BU', n: _raBu ? _raBu.linhas : 0, q: _raMeta.buEm, p: _raMeta.buPor },
     { nome:'Levelbord', n: _raLevel.length, q: _raMeta.lbEm, p: _raMeta.lbPor },
-    { nome:'Liberados E&P', n: _raEp.length, q: _raMeta.epEm, p: _raMeta.epPor }
+    { nome:'Liberados E&P', n: _raEp.length, q: _raMeta.epEm, p: _raMeta.epPor },
+    { nome:'MAPA', n: (_raMapa || []).length, q: _raMeta.maEm, p: _raMeta.maPor }
   ];
   raPor('ra-up-tb', linhas.map(function(l){
     return '<tr><td style="font-weight:600">' + l.nome + '</td>'
@@ -60455,11 +60525,85 @@ function raDesenharUpload(){
       + '<td style="color:var(--tx2)">' + cpEsc(l.p || '—') + '</td></tr>';
   }).join(''));
 }
+// ── Detalhamento da Carteira, do upload do MAPA ──────────────────
+// As colunas da janela do ⊕: são linhas do MAPA, não do Levelbord.
+var RA_MAPA_DET_COLS = [
+  { k:'RC', t:'RC' }, { k:'SEQ', t:'SEQ' }, { k:'RC_ITEM', t:'Item da RC' },
+  { k:'NUMERO_OPORTUNIDADE', t:'Nº Oportunidade' },
+  { k:'ITEM_OPORTUNIDADE', t:'Item OP' },
+  { k:'ANALISTA_AUTOMATICO', t:'Analista automático' },
+  { k:'STATUS_RC', t:'Status RC' }, { k:'STATUS_PATEC', t:'Status Patec' },
+  { k:'SLA_DIAS', t:'SLA (dias)' }, { k:'RESPONSAVEL', t:'Responsável' },
+  { k:'CENTRO', t:'Centro' }, { k:'FAMILIA', t:'Família' },
+  { k:'TEXTO_BREVE', t:'Material' }
+];
+function raDesenharDetCarteira(){
+  var n = (_raMapa || []).length;
+  raPor('dc-fonte', n
+    ? 'MAPA — <b>' + raNum(n) + '</b> linhas'
+      + (_raMeta.maEm ? ' · subido em <b>'
+          + cpEsc(new Date(_raMeta.maEm).toLocaleString('pt-BR')) + '</b>' : '')
+      + (_raMeta.maPor ? ' por <b>' + cpEsc(_raMeta.maPor) + '</b>' : '')
+    : '—');
+  if (!n) {
+    raPor('dc-aviso', '<div class="dp-msg dp-msg-ok">Nenhum MAPA subido ainda — '
+      + 'suba a planilha no tópico <b>Upload</b> desta frente e esta aba se monta sozinha.</div>');
+    ['dc-kpi-status', 'dc-kpi-auto'].forEach(function(i){ raPor(i, ''); });
+    raPor('dc-tb-auto', '');
+    return;
+  }
+  raPor('dc-aviso', '');
+
+  // Status A / E / N saem da coluna STATUS_RC. O Status B não está nesta
+  // planilha: ele vem da regra do módulo de Pedidos e entra depois.
+  var porSt = {};
+  _raMapa.forEach(function(r){
+    var v = String(r.STATUS_RC || '').trim() || '(sem status)';
+    (porSt[v] = porSt[v] || []).push(r);
+  });
+  var ordem = ['A', 'B', 'E', 'N'];
+  Object.keys(porSt).forEach(function(k){ if (ordem.indexOf(k) === -1) ordem.push(k); });
+  var classe = { A:'darkGreen', B:'purple', E:'lightBlue', N:'lightGreen' };
+  raPor('dc-kpi-status', ordem.map(function(k){
+    var itens = porSt[k] || [];
+    var o = { l:'Status ' + k, v: raNum(itens.length),
+              cap: k === 'B' ? 'vem da regra do módulo de Pedidos'
+                             : (raDec(100 * itens.length / n) + '% da carteira'),
+              corte: itens.length
+                ? raCorte('dc_st_' + k, 'Status ' + k, itens, RA_MAPA_DET_COLS) : null };
+    if (classe[k]) o[classe[k]] = true;
+    return raKpi(o);
+  }).join(''));
+
+  // e o que o analista automático está mandando fazer
+  var porAuto = {};
+  _raMapa.forEach(function(r){
+    var v = String(r.ANALISTA_AUTOMATICO || '').trim() || '(em branco)';
+    (porAuto[v] = porAuto[v] || []).push(r);
+  });
+  var autos = Object.keys(porAuto).sort(function(a, b){
+    return porAuto[b].length - porAuto[a].length; });
+  raPor('dc-kpi-auto', autos.slice(0, 4).map(function(k, i){
+    var o = { l:k, v: raNum(porAuto[k].length), small:true,
+              cap: raDec(100 * porAuto[k].length / n) + '% do MAPA',
+              corte: raCorte('dc_au_' + i, k, porAuto[k], RA_MAPA_DET_COLS) };
+    if (i === 0) o.purple = true;
+    return raKpi(o);
+  }).join(''));
+  raPor('dc-tb-auto', autos.map(function(k){
+    var q = porAuto[k].length;
+    return '<tr><td style="font-weight:600">' + cpEsc(k) + '</td>'
+      + '<td>' + raNum(q) + '</td>'
+      + '<td>' + raDec(100 * q / n) + '%</td></tr>';
+  }).join(''));
+}
+
 function raDesenhar(){
   // a ordem importa: o Status Carteira zera RA_CORTES e o Radar
   // acrescenta os cortes dele em seguida, para os dois ⊕ funcionarem
   raDesenharStatusCarteira();
   raDesenharRadar();
+  raDesenharDetCarteira();
   raDesenharUpload();
   // o Status Carteira zera RA_CORTES, então os recortes do Detalhamento
   // Patec precisam ser registrados de novo depois dele
@@ -60476,7 +60620,7 @@ async function raGravar(){
   var db = (typeof getDB === 'function') ? getDB() : null;
   if (!db) return false;
   var col = db.collection(RA_COL);
-  var blocos = { level: _raLevel, ep: _raEp, bu: _raBu || {} };
+  var blocos = { level: _raLevel, ep: _raEp, bu: _raBu || {}, mapa: _raMapa || [] };
   var partes = {}, escritas = [];
   Object.keys(blocos).forEach(function(k){
     var ps = raPartes(JSON.stringify(blocos[k]));
@@ -60492,7 +60636,9 @@ async function raGravar(){
     buEm: _raMeta.buEm || '', buPor: _raMeta.buPor || '',
     lbEm: _raMeta.lbEm || '', lbPor: _raMeta.lbPor || '',
     epEm: _raMeta.epEm || '', epPor: _raMeta.epPor || '',
-    nLevel: _raLevel.length, nEp: _raEp.length, nBu: _raBu ? _raBu.linhas : 0
+    maEm: _raMeta.maEm || '', maPor: _raMeta.maPor || '',
+    nLevel: _raLevel.length, nEp: _raEp.length, nBu: _raBu ? _raBu.linhas : 0,
+    nMapa: (_raMapa || []).length
   });
   return true;
 }
@@ -60521,6 +60667,7 @@ async function raCarregar(){
     };
     _raLevel = val('level', []);
     _raEp    = val('ep', []);
+    _raMapa  = val('mapa', []);
     var bu   = val('bu', null);
     _raBu    = (bu && bu.linhas) ? bu : null;
     return true;
@@ -60535,7 +60682,8 @@ async function raCarregar(){
 function raIrUpload(){ go('reuniao-adlv-upload'); }
 
 function raLigarUpload(){
-  [['raFileBU','bu'], ['raFileLB','lb'], ['raFileEP','ep']].forEach(function(par){
+  [['raFileBU','bu'], ['raFileLB','lb'], ['raFileEP','ep'],
+   ['raFileMA','ma']].forEach(function(par){
     var inp = document.getElementById(par[0]);
     if (!inp || inp.__ligado) return;
     inp.__ligado = true;
@@ -60546,7 +60694,7 @@ function raLigarUpload(){
 async function raSubir(qual, inp){
   var f = inp.files && inp.files[0];
   if (!f) return;
-  var nomes = { bu:'BU', lb:'Levelbord', ep:'Liberados E&P' };
+  var nomes = { bu:'BU', lb:'Levelbord', ep:'Liberados E&P', ma:'MAPA' };
   if (typeof XLSX === 'undefined' && qual !== 'lb') {
     raMsg('❌ Biblioteca XLSX não carregada — atualize a página (F5).', 'var(--vm)');
     inp.value = ''; return;
@@ -60574,6 +60722,22 @@ async function raSubir(qual, inp){
       resumo = raNum(_raEp.length) + ' linhas do EP_BENS'
              + (_raLevel.length ? (' · ' + raNum(raLiberadosNaCarteira())
                  + ' na carteira Level') : '');
+    } else if (qual === 'ma') {
+      var wbM = XLSX.read(new Uint8Array(buf), { type:'array' });
+      _raMapa = raLerMapa(wbM);
+      _raMeta.maEm = agora; _raMeta.maPor = quem;
+      var porSt = {};
+      _raMapa.forEach(function(r){
+        var v = String(r.STATUS_RC || '').trim() || '(sem status)';
+        porSt[v] = (porSt[v] || 0) + 1;
+      });
+      var ordem = Object.keys(porSt).sort(function(a, b){ return porSt[b] - porSt[a]; });
+      resumo = raNum(_raMapa.length) + ' linhas da aba MAPA'
+             + (ordem.length ? ' · ' + ordem.map(function(k){
+                 return 'Status ' + k + ': ' + raNum(porSt[k]); }).join(' · ') : '');
+      if (_raMapa.__faltando && _raMapa.__faltando.length) {
+        resumo += ' · ⚠ sem a(s) coluna(s): ' + _raMapa.__faltando.join(', ');
+      }
     } else {
       var wbB = XLSX.read(new Uint8Array(buf), { type:'array' });
       _raBu = raLerBu(wbB);
