@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '20/10 02:05';
+var GTO_BUILD = '21/10 09:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -30825,7 +30825,10 @@ function _govUrgPainelSync(){
 // _cobManualLabel, _cobManualColab da Cobrança por Status; govAddDiasUteis,
 // com a lista de feriados, e govBuscarRC da Governança). Apagar o código
 // quebraria a aba nova. No ADLV nada muda.
-var GOV_ABAS_OCULTAS_FAST = ['gov', 'pc', 'sla', 'prazo', 'cobranca'];
+// O Detalhamento do Patec entrou nesta lista em 21/10: ele é do PATEC do
+// ADLV (lê o mapa diário e o Radar daquele projeto) e no FAST abriria
+// vazio, parecendo tela quebrada em vez de tela que não é de lá.
+var GOV_ABAS_OCULTAS_FAST = ['gov', 'pc', 'sla', 'prazo', 'cobranca', 'detpatec'];
 
 // Abas cujo BOTÃO fica escondido em qualquer módulo. As telas continuam
 // inteiras e continuam sendo o destino do botão "abrir a tela" dos cards
