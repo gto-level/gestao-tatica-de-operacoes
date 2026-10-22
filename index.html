@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '22/10 11:35';
+var GTO_BUILD = '22/10 12:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -32157,51 +32157,102 @@ function _agrIdx(){
   return ix;
 }
 
-// Uma linha da lista: o que foi digitado + o que a carteira respondeu
-function agrLinha(it, ix){
+// Índice do Status B por RC + item da RC, que é a chave daquele card.
+// A base do Status B guarda rc|seq|op|item, mas o André procura por
+// RC + item: quando houver mais de uma linha, vale a que ainda está
+// aberta — é ela que interessa a quem está cobrando retorno.
+function _agrSbIdx(){
+  var ix = {};
+  try {
+    (typeof _sbItens !== 'undefined' ? (_sbItens || []) : []).forEach(function(r){
+      var k = _agrN(r.rc) + '|' + _agrN(r.seq);
+      if (!k.replace('|', '')) return;
+      var ch = sbChave(r.rc, r.seq, r.op, r.item);
+      var m = (typeof _sbDados !== 'undefined' ? (_sbDados[ch] || {}) : {});
+      var aberto = !m.finalizado;
+      if (!ix[k] || (aberto && !ix[k].aberto)) ix[k] = { r:r, m:m, aberto:aberto };
+    });
+  } catch (e) {}
+  return ix;
+}
+
+// Uma linha da lista: o que foi digitado + o que a base respondeu.
+//
+// Onde procurar depende do que foi digitado, e foi o André quem deu a
+// regra: com oportunidade e item da OP, o item é da CARTEIRA (PATEC em
+// Andamento ou Finalizado) e a chave são as quatro partes. Sem
+// oportunidade, o item é do STATUS B, cuja chave é só RC + item da RC.
+function agrLinha(it, ix, sbIx){
+  sbIx = sbIx || _agrSbIdx();
   var ch = agrChave(it.rc, it.itemRc, it.oport, it.itemOp);
-  var r = ix[ch]
-       || ix[[_agrN(it.rc), _agrN(it.itemRc), _agrN(it.oport)].join('|')]
-       || ix[[_agrN(it.rc), _agrN(it.itemRc)].join('|')];
+  var rc = _agrN(it.rc), itemRc = _agrN(it.itemRc), oport = _agrN(it.oport);
   var o = { __ch: ch,
-            rc: _agrN(it.rc) || '—', itemRc: _agrN(it.itemRc) || '—',
-            oport: _agrN(it.oport) || '—', itemOp: _agrN(it.itemOp) || '—',
+            rc: rc || '—', itemRc: itemRc || '—',
+            oport: oport || '—', itemOp: _agrN(it.itemOp) || '—',
             tipoContato: _agrN(it.tipoContato), pessoa: _agrN(it.pessoa),
-            trat: '—', prazo: '—', status: '—', concluidoEm: '' };
+            trat: '—', prazo: '—', status: '—', concluidoEm: '', origem: '' };
+
+  // ── sem oportunidade: Status B ──
+  if (!oport) {
+    var sb = sbIx[rc + '|' + itemRc];
+    if (sb) {
+      o.origem = 'Status B';
+      o.__achou = true;
+      return _agrPreencher(o, sb.m, sb.m.status || '', null);
+    }
+  }
+
+  // ── com oportunidade (ou sem achar no Status B): a carteira ──
+  var r = ix[ch]
+       || ix[[rc, itemRc, oport].join('|')]
+       || ix[[rc, itemRc].join('|')];
   o.__achou = !!r;
   if (!r) {
     o.concluidoEm = 'fora';
-    o.__motivo = 'Não achei esta chave na carteira — confira RC, item, '
-      + 'oportunidade e item da OP. Fora da conta do card.';
+    o.__motivo = oport
+      ? 'Não achei esta chave na carteira — confira RC, item da RC, '
+        + 'oportunidade e item da OP. Fora da conta do card.'
+      : 'Não achei RC + item da RC nem no Status B nem na carteira. '
+        + 'Fora da conta do card.';
     o.status = 'FORA DA CARTEIRA';
     return o;
   }
+  o.origem = 'Carteira';
   var m = {};
   try { m = _govDados[govChave(r)] || {}; } catch (e) {}
   var trat = '';
   try { trat = govTratDe(r, m); } catch (e) { trat = m.status || ''; }
+  return _agrPreencher(o, m, trat, r);
+}
+
+// O miolo comum: a fila dá o prazo, o prazo dá o status, e o que já
+// está concluído (ou saiu da carteira) fica fora da conta do card.
+function _agrPreencher(o, m, trat, r){
   var prazo = null;
   try { prazo = govCalcPrazo(trat, m.envio || ''); } catch (e) {}
-  o.trat   = trat || '—';
-  o.prazo  = prazo ? String(prazo).split('-').reverse().join('/') : '—';
+  o.trat  = trat || '—';
+  o.prazo = prazo ? String(prazo).split('-').reverse().join('/') : '—';
   try { o.status = govCalcStatus(prazo, m.finalizado || '') || '—'; } catch (e) {}
-  // só sai da conta do card quem já está concluído ou saiu da carteira
-  var cls = '';
-  try { cls = _classificarStatusMapa(r.analista_auto); } catch (e) {}
   if (m.finalizado) {
     o.concluidoEm = String(m.finalizado).split('-').reverse().join('/');
     o.__motivo = 'Já concluído em ' + o.concluidoEm + ' — fora da conta do card.';
-  } else if (cls !== 'Finalizado' && cls !== 'Andamento') {
-    o.concluidoEm = 'fora';
-    o.__motivo = 'Não está mais em PATEC em Andamento nem Finalizado — '
-      + 'fora da conta do card.';
+    return o;
+  }
+  if (r) {
+    var cls = '';
+    try { cls = _classificarStatusMapa(r.analista_auto); } catch (e) {}
+    if (cls !== 'Finalizado' && cls !== 'Andamento') {
+      o.concluidoEm = 'fora';
+      o.__motivo = 'Não está mais em PATEC em Andamento nem Finalizado — '
+        + 'fora da conta do card.';
+    }
   }
   return o;
 }
 
 function agrLista(){
-  var ix = _agrIdx();
-  return _agrItens.map(function(it){ return agrLinha(it, ix); });
+  var ix = _agrIdx(), sbIx = _agrSbIdx();
+  return _agrItens.map(function(it){ return agrLinha(it, ix, sbIx); });
 }
 // o número do card: só o que está em tratamento
 function agrQtd(){
@@ -32259,14 +32310,18 @@ function agrAdicionar(){
         return agrChave(x.rc, x.itemRc, x.oport, x.itemOp) === ch; })) {
     _agrAviso('Essa chave já está na lista.', 'var(--am)'); return;
   }
-  // avisa na hora se a chave não existe na carteira — melhor descobrir
-  // agora do que na reunião
-  var achou = agrLinha(it, _agrIdx()).__achou;
+  // avisa na hora onde o item foi achado — ou que não foi. Melhor
+  // descobrir agora do que na reunião.
+  var l = agrLinha(it, _agrIdx());
+  var onde = l.__achou
+    ? (l.origem === 'Status B' ? 'Incluída — achei no Status B.'
+                               : 'Incluída — achei na carteira.')
+    : (it.oport ? 'Incluída — mas não achei essa chave na carteira.'
+                : 'Incluída — mas não achei RC + item da RC no Status B nem na carteira.');
   _agrItens.push(it);
   agrGravar().then(function(ok){
-    _agrAviso(ok ? (achou ? 'Incluída.' : 'Incluída — mas não achei essa chave na carteira.')
-                 : '⚠ não consegui gravar: vale só nesta aba.',
-              ok ? (achou ? 'var(--vd)' : 'var(--am)') : 'var(--vm)');
+    _agrAviso(ok ? onde : '⚠ não consegui gravar: vale só nesta aba.',
+              ok ? (l.__achou ? 'var(--vd)' : 'var(--am)') : 'var(--vm)');
   });
   govPainelRender();
 }
@@ -32308,7 +32363,15 @@ var AGR_COLS = [
     html:function(x){ return _agrInput(x, 'tipoContato', 'Teams, e-mail…', true); } },
   { t:'Pessoa de contato',  k:'pessoa',
     html:function(x){ return _agrInput(x, 'pessoa', 'para quem retornar'); } },
-  { t:'Status Tratamento',  k:'trat' },
+  // o tratamento vem da carteira ou do Status B conforme o que foi
+  // digitado; a etiqueta diz de onde, senão não dá para conferir
+  { t:'Status Tratamento',  k:'trat',
+    html:function(x){
+      var e = _govPainelEsc;
+      return e(x.trat) + (x.origem === 'Status B'
+        ? ' <span style="font-size:9px;font-weight:700;color:#0f766e;'
+          + 'background:#ccfbf1;border-radius:4px;padding:1px 5px;'
+          + 'margin-left:4px;white-space:nowrap">Status B</span>' : ''); } },
   { t:'Prazo de retorno',   k:'prazo', st:'text-align:center' },
   { t:'Status',             k:'status', st:function(x){
       return (typeof govCorStatus === 'function') ? govCorStatus(x.status)
