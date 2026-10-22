@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '22/10 12:10';
+var GTO_BUILD = '22/10 12:45';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -32107,6 +32107,10 @@ function _govDetDefs(){
       // aqui "fora da conta" junta concluído e saiu-da-carteira: dizer
       // só "concluído" mentiria para quem errou a chave
       rotuloFora:'fora da conta (concluído ou fora da carteira)',
+      // a chave na linha: é por ela que a conferência acha e acende a
+      // linha repetida enquanto o André digita
+      linhaAttr:function(x){
+        return 'data-agr-ch="' + _govPainelEsc(x.__ch) + '"'; },
       lista: agrLista,
       vazio:'Nenhum acionamento na lista — inclua a primeira RC aí em cima.'
     }
@@ -32297,6 +32301,49 @@ function _agrAviso(txt, cor){
   if (el) { el.textContent = txt || ''; el.style.color = cor || 'var(--tx2)'; }
 }
 
+// ── não deixar entrar duas vezes ─────────────────────────────────
+// A identidade de um acionamento é a RC + o item da RC: a mesma RC não
+// é cobrada duas vezes por ter sido digitada ora com oportunidade, ora
+// sem. Por isso a conferência é por essas duas, não pela chave inteira.
+function agrDuplicada(rc, itemRc){
+  var a = _agrN(rc), b = _agrN(itemRc);
+  if (!a) return null;
+  return _agrItens.filter(function(x){
+    return _agrN(x.rc) === a && _agrN(x.itemRc) === b; })[0] || null;
+}
+
+// Roda a cada tecla nos campos RC e Item da RC: se já estiver na lista,
+// acende a linha, diz por quê e tranca o botão. Mexe só no que precisa
+// (sem redesenhar o painel), senão o campo perderia o foco.
+function agrConferir(){
+  var v = function(id){
+    var e = document.getElementById(id); return e ? _agrN(e.value) : '';
+  };
+  var btn = document.getElementById('agr-incluir');
+  var ja = agrDuplicada(v('agr-rc'), v('agr-item'));
+  try {
+    [].forEach.call(document.querySelectorAll('[data-agr-ch]'), function(tr){
+      tr.style.outline = ''; tr.style.background = '';
+    });
+  } catch (e) {}
+  if (!ja) {
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.style.cursor = ''; }
+    _agrAviso('');
+    return false;
+  }
+  if (btn) { btn.disabled = true; btn.style.opacity = '.5'; btn.style.cursor = 'not-allowed'; }
+  var ch = agrChave(ja.rc, ja.itemRc, ja.oport, ja.itemOp);
+  var tr = document.querySelector('[data-agr-ch="' + ch.replace(/"/g, '') + '"]');
+  if (tr) {
+    tr.style.outline = '2px solid var(--am)';
+    tr.style.background = 'var(--amc)';
+    try { tr.scrollIntoView({ block:'nearest' }); } catch (e) {}
+  }
+  _agrAviso('RC ' + _agrN(ja.rc) + ' item ' + (_agrN(ja.itemRc) || '—')
+    + ' já está na lista — veja a linha acesa.', 'var(--am)');
+  return true;
+}
+
 // ── mexer na lista ───────────────────────────────────────────────
 function agrAdicionar(){
   var v = function(id){
@@ -32305,11 +32352,9 @@ function agrAdicionar(){
   var it = { rc: v('agr-rc'), itemRc: v('agr-item'), oport: v('agr-op'),
              itemOp: v('agr-itemop'), tipoContato: '', pessoa: '' };
   if (!it.rc) { _agrAviso('Falta a RC.', 'var(--vm)'); return; }
-  var ch = agrChave(it.rc, it.itemRc, it.oport, it.itemOp);
-  if (_agrItens.some(function(x){
-        return agrChave(x.rc, x.itemRc, x.oport, x.itemOp) === ch; })) {
-    _agrAviso('Essa chave já está na lista.', 'var(--am)'); return;
-  }
+  // a trava final: o botão já fica cinza enquanto se digita, mas quem
+  // chegar aqui por Enter ou por outro caminho também não passa
+  if (agrConferir()) return;
   // avisa na hora onde o item foi achado — ou que não foi. Melhor
   // descobrir agora do que na reunião.
   var l = agrLinha(it, _agrIdx());
@@ -32385,21 +32430,24 @@ var AGR_COLS = [
 ];
 
 function agrTopo(){
-  var campo = function(id, rot, larg){
+  // RC e Item da RC conferem a cada tecla: é o par que identifica o
+  // acionamento, e é ele que não pode entrar duas vezes
+  var campo = function(id, rot, larg, confere){
     return '<label style="display:flex;flex-direction:column;gap:2px;font-size:9.5px;'
       + 'font-weight:700;color:var(--tx2);text-transform:uppercase;letter-spacing:.3px">' + rot
       + '<input id="' + id + '" style="width:' + larg + ';font-size:11px;padding:3px 7px;'
       + 'border:1px solid var(--brd);border-radius:5px;background:var(--card);color:var(--tx)"'
+      + (confere ? ' oninput="agrConferir()"' : '')
       + ' onkeydown="if(event.key===\'Enter\')agrAdicionar()"></label>';
   };
   return '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;'
     + 'background:var(--cin);border:1px solid var(--brd);border-radius:8px;'
     + 'padding:8px 10px;margin-bottom:10px">'
-    + campo('agr-rc', 'RC', '110px')
-    + campo('agr-item', 'Item da RC', '80px')
+    + campo('agr-rc', 'RC', '110px', true)
+    + campo('agr-item', 'Item da RC', '80px', true)
     + campo('agr-op', 'Oportunidade', '120px')
     + campo('agr-itemop', 'Item da OP', '80px')
-    + '<button class="btn btn-s" type="button" onclick="agrAdicionar()"'
+    + '<button class="btn btn-s" type="button" id="agr-incluir" onclick="agrAdicionar()"'
     + ' style="font-size:11px;padding:3px 12px">+ incluir</button>'
     + '<span id="agr-aviso" style="font-size:10.5px;color:var(--tx2)"></span>'
     + '<datalist id="agr-tipos">'
@@ -32432,7 +32480,10 @@ function _govPainelDetalheHTML(){
   var corpo = linhas.length
     ? linhas.map(function(x){
         var fim = !!x.concluidoEm;
-        return '<tr' + (fim ? ' style="opacity:.62;background:var(--cin)" title="'
+        // um card pode marcar a linha (o Acionamentos sobre RCs põe aí a
+        // chave, para destacar a linha repetida enquanto se digita)
+        var attr = (typeof d.linhaAttr === 'function') ? (' ' + d.linhaAttr(x)) : '';
+        return '<tr' + attr + (fim ? ' style="opacity:.62;background:var(--cin)" title="'
                  + esc(x.__motivo || 'Já concluído — não entra na conta do card') + '"' : '') + '>'
           + cols.map(function(c){
               var st = (typeof c.st === 'function') ? c.st(x) : (c.st || '');
