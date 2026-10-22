@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '22/10 12:45';
+var GTO_BUILD = '22/10 13:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -32180,6 +32180,12 @@ function _agrSbIdx(){
   return ix;
 }
 
+// A base às vezes traz "#N/A" no analista — isso é ausência, não nome.
+function _agrAnalista(v){
+  var s = _agrN(v);
+  return (!s || s === '#N/A') ? '—' : s;
+}
+
 // Uma linha da lista: o que foi digitado + o que a base respondeu.
 //
 // Onde procurar depende do que foi digitado, e foi o André quem deu a
@@ -32194,6 +32200,7 @@ function agrLinha(it, ix, sbIx){
             rc: rc || '—', itemRc: itemRc || '—',
             oport: oport || '—', itemOp: _agrN(it.itemOp) || '—',
             tipoContato: _agrN(it.tipoContato), pessoa: _agrN(it.pessoa),
+            analista: '—',
             trat: '—', prazo: '—', status: '—', concluidoEm: '', origem: '' };
 
   // ── sem oportunidade: Status B ──
@@ -32202,6 +32209,7 @@ function agrLinha(it, ix, sbIx){
     if (sb) {
       o.origem = 'Status B';
       o.__achou = true;
+      o.analista = _agrAnalista(sb.r.analista);
       return _agrPreencher(o, sb.m, sb.m.status || '', null);
     }
   }
@@ -32222,6 +32230,7 @@ function agrLinha(it, ix, sbIx){
     return o;
   }
   o.origem = 'Carteira';
+  o.analista = _agrAnalista(r.analista);
   var m = {};
   try { m = _govDados[govChave(r)] || {}; } catch (e) {}
   var trat = '';
@@ -32390,38 +32399,44 @@ function agrCampo(ch, campo, valor){
 }
 
 // ── as células que se escrevem na mão ────────────────────────────
-function _agrInput(x, campo, placeholder, lista){
+function _agrInput(x, campo, placeholder, lista, min){
   var e = _govPainelEsc;
   return '<input value="' + e(x[campo] || '') + '" placeholder="' + e(placeholder) + '"'
     + (lista ? ' list="agr-tipos"' : '')
     + ' onchange="agrCampo(\'' + e(x.__ch).replace(/'/g, "\\'") + '\', \'' + campo + '\', this.value)"'
-    + ' style="width:100%;min-width:96px;font-size:11px;padding:2px 6px;'
+    + ' style="width:100%;min-width:' + (min || 96) + 'px;font-size:11px;padding:2px 6px;'
     + 'border:1px solid var(--brd);border-radius:5px;background:var(--card);color:var(--tx)">';
 }
 
+// As larguras são fixas para a linha inteira caber na tela sem rolagem
+// lateral. Tipo de contato é estreita de propósito: ali só entra Teams
+// ou e-mail. Quem fica com a sobra é Pessoa de contato, que é a única
+// de texto livre de verdade.
 var AGR_COLS = [
-  { t:'RC',                 k:'rc',     st:'font-weight:700;color:var(--az)' },
-  { t:'Item da RC',         k:'itemRc' },
-  { t:'Oportunidade',       k:'oport' },
-  { t:'Item da OP',         k:'itemOp' },
-  { t:'Tipo de contato',    k:'tipoContato',
-    html:function(x){ return _agrInput(x, 'tipoContato', 'Teams, e-mail…', true); } },
+  { t:'RC',                 k:'rc', w:'88px', st:'font-weight:700;color:var(--az)' },
+  { t:'Item da RC',         k:'itemRc', w:'58px' },
+  { t:'Oportunidade',       k:'oport', w:'96px' },
+  { t:'Item da OP',         k:'itemOp', w:'58px' },
+  // quem responde pelo item — vem da carteira ou do Status B, não se digita
+  { t:'Analista',           k:'analista', w:'86px', st:'font-weight:600' },
+  { t:'Tipo',               k:'tipoContato', w:'76px',
+    html:function(x){ return _agrInput(x, 'tipoContato', 'Teams…', true, 60); } },
   { t:'Pessoa de contato',  k:'pessoa',
-    html:function(x){ return _agrInput(x, 'pessoa', 'para quem retornar'); } },
+    html:function(x){ return _agrInput(x, 'pessoa', 'para quem retornar', false, 110); } },
   // o tratamento vem da carteira ou do Status B conforme o que foi
   // digitado; a etiqueta diz de onde, senão não dá para conferir
-  { t:'Status Tratamento',  k:'trat',
+  { t:'Status Tratamento',  k:'trat', w:'144px',
     html:function(x){
       var e = _govPainelEsc;
       return e(x.trat) + (x.origem === 'Status B'
         ? ' <span style="font-size:9px;font-weight:700;color:#0f766e;'
           + 'background:#ccfbf1;border-radius:4px;padding:1px 5px;'
           + 'margin-left:4px;white-space:nowrap">Status B</span>' : ''); } },
-  { t:'Prazo de retorno',   k:'prazo', st:'text-align:center' },
-  { t:'Status',             k:'status', st:function(x){
+  { t:'Prazo',              k:'prazo', w:'78px', st:'text-align:center' },
+  { t:'Status',             k:'status', w:'106px', st:function(x){
       return (typeof govCorStatus === 'function') ? govCorStatus(x.status)
            : 'color:var(--tx2)'; } },
-  { t:'',                   k:'__x', st:'text-align:center',
+  { t:'',                   k:'__x', w:'26px', st:'text-align:center',
     html:function(x){
       return '<button type="button" title="Tirar da lista"'
         + ' onclick="agrRemover(\'' + _govPainelEsc(x.__ch).replace(/'/g, "\\'") + '\')"'
@@ -32472,8 +32487,10 @@ function _govPainelDetalheHTML(){
   var nConc = linhas.filter(function(x){ return !!x.concluidoEm; }).length;
 
   var cab = cols.map(function(c){
+    // c.w: largura fixa para a coluna caber sem rolagem lateral
     return '<th style="text-align:left;font-size:9.5px;text-transform:uppercase;letter-spacing:.3px;'
-      + 'color:var(--tx2);padding:4px 8px;border-bottom:1px solid var(--brd);white-space:nowrap">'
+      + 'color:var(--tx2);padding:4px 8px;border-bottom:1px solid var(--brd);white-space:nowrap'
+      + (c.w ? ';width:' + c.w + ';' : '') + '">'
       + esc(c.t) + '</th>';
   }).join('');
 
