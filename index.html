@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '21/10 18:35';
+var GTO_BUILD = '22/10 10:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -30983,6 +30983,23 @@ var GOV_ABAS_OCULTAS_FAST = ['gov', 'pc', 'sla', 'prazo', 'cobranca', 'detpatec'
 // navegação passou a ser pelo painel.
 var GOV_ABAS_SEMPRE_OCULTAS = ['cobranca', 'pc', 'sla', 'prazo'];
 
+// Para onde cada card do painel manda, em nome de aba da Governança.
+// Tudo que não for Urgência cai na Planilha Crítica; 'aa' não é aba da
+// Governança, é a tela Analista Automático da barra lateral.
+function _govAbaDestino(aba){
+  if (aba === 'prazo' || aba === 'sla') return aba;
+  return 'pc';
+}
+// O botão "abrir a tela" do card só faz sentido se a tela de destino
+// tiver um lugar visível na navegação. Se o botão da aba está escondido,
+// o usuário cai numa página sem aba marcada — era o que confundia.
+function _govDestinoVisivel(aba){
+  if (aba === 'aa') return true;        // tela da barra lateral, visível
+  var t = _govAbaDestino(aba);
+  if (GOV_ABAS_SEMPRE_OCULTAS.indexOf(t) !== -1) return false;
+  return !(_govFast() && GOV_ABAS_OCULTAS_FAST.indexOf(t) !== -1);
+}
+
 function _govFast(){
   try { return typeof _cobEhFast === 'function' ? _cobEhFast() : false; } catch (e) { return false; }
 }
@@ -32116,6 +32133,16 @@ function _govPainelDetalheHTML(){
     : (d.aba === 'aa'
         ? 'govIrAnalistaPedido(' + (_govPainelDet === 'mdg' ? 'true' : 'false') + ')'
         : 'govIrPlanilhaCritica(\'' + d.aba + '\')');
+  // Só mostra "abrir a tela" quando a tela de destino TEM lugar na
+  // navegação. A Planilha Crítica e as duas de Urgência perderam o botão
+  // no topo quando a navegação passou a ser por este painel: mandar o
+  // usuário para lá deixava ele numa página sem aba marcada e sem
+  // caminho de volta. Quem tem destino visível (Analista Automático,
+  // que é tela da barra lateral) continua com o botão.
+  var botaoAbrir = _govDestinoVisivel(d.aba)
+    ? '<button class="btn btn-s" style="font-size:10px;padding:1px 8px" onclick="' + atalho + '" '
+      + 'title="Sair daqui e abrir a tela cheia">abrir a tela</button>'
+    : '';
 
   return '<div style="margin-top:.875rem;background:var(--bg);border:1.5px solid var(--brd);border-radius:10px;padding:.75rem .875rem">'
     + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">'
@@ -32125,8 +32152,7 @@ function _govPainelDetalheHTML(){
     +   (nConc ? ' · <strong>' + (linhas.length - nConc) + '</strong> em aberto (o número do card) · '
                  + nConc + ' já concluído' + (nConc === 1 ? '' : 's') : '')
     +   '</span>'
-    +   '<button class="btn btn-s" style="font-size:10px;padding:1px 8px" onclick="' + atalho + '" '
-    +   'title="Sair daqui e abrir a tela cheia">abrir a tela</button>'
+    +   botaoAbrir
     +   '<button class="btn btn-s" style="font-size:10px;padding:1px 8px;margin-left:auto" onclick="govPainelDetalhe(\'\')">✕ fechar</button>'
     + '</div>'
     + '<div style="font-size:10.5px;color:var(--tx2);margin-bottom:8px">' + esc(d.sub) + '</div>'
