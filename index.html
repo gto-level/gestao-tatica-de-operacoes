@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '23/10 09:40';
+var GTO_BUILD = '23/10 10:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -53515,7 +53515,28 @@ var _FC_ESTADO = {};    // "chaveTabela" -> { "Coluna": [valores marcados] }
 var _FC_MENU = null;    // dropdown aberto
 var _FC_TIMER = null;
 
-function _fcTxt(el){ return String(el && el.textContent || '').trim(); }
+// O conteúdo de uma célula. Quando a célula é um campo de escrever (o
+// Tipo de contato e a Pessoa de contato dos Acionamentos sobre RCs, por
+// exemplo), o textContent é VAZIO — o que vale é o valor digitado.
+// Sem isto o filtro daquelas colunas só oferecia "(vazio)".
+function _fcTxt(el){
+  if (!el) return '';
+  var campo = el.querySelector && el.querySelector(
+    'select, textarea, input:not([type=checkbox]):not([type=radio]):not([type=button])');
+  if (campo) {
+    // num <select> o que o usuário lê é o texto da opção, não o value
+    if (campo.tagName === 'SELECT') {
+      var op = campo.options[campo.selectedIndex];
+      return String((op && op.textContent) || campo.value || '').trim();
+    }
+    return String(campo.value == null ? '' : campo.value).trim();
+  }
+  return String(el.textContent || '').trim();
+}
+
+// "Wanessa" e "wanessa" são a mesma pessoa: o filtro agrupa ignorando
+// maiúscula e acento, e mostra uma entrada só.
+function _fcGrupo(v){ return _cobNorm(v); }
 
 // chave estável da tabela: id do próprio elemento ou do ancestral com id
 function _fcChave(tab){
@@ -53607,7 +53628,8 @@ function _fcPassa(tr, cols, chave, exceto, mapa){
     if (!f) continue;
     j = mapa ? mapa[i] : i;
     if (j == null || j < 0) continue;
-    v = _fcTxt(tr.cells[j]);
+    // o estado guarda a chave agrupada, não o texto cru
+    v = _fcGrupo(_fcTxt(tr.cells[j]));
     if (f.indexOf(v) === -1) return false;
   }
   return true;
@@ -53685,18 +53707,29 @@ function _fcAbrir(tab, idx, botao){
   var jc = mapa ? mapa[idx] : idx;
   if (jc == null || jc < 0) return;          // coluna sem célula no corpo
 
-  // valores disponíveis considerando os filtros das OUTRAS colunas
-  var linhas = _fcLinhas(tab), cont = {}, i, v;
+  // valores disponíveis considerando os filtros das OUTRAS colunas.
+  // "Wanessa" e "wanessa" entram no mesmo grupo; o rótulo mostrado é a
+  // forma que mais aparece (empate: a primeira que apareceu).
+  var linhas = _fcLinhas(tab), cont = {}, formas = {}, i, v, g;
   for (i = 0; i < linhas.length; i++) {
     if (!_fcPassa(linhas[i], cols, chave, idx, mapa)) continue;
     v = _fcTxt(linhas[i].cells[jc]);
-    cont[v] = (cont[v] || 0) + 1;
+    g = _fcGrupo(v);
+    cont[g] = (cont[g] || 0) + 1;
+    if (!formas[g]) formas[g] = {};
+    formas[g][v] = (formas[g][v] || 0) + 1;
   }
+  var rotulo = {};
+  Object.keys(formas).forEach(function(k){
+    rotulo[k] = Object.keys(formas[k]).sort(function(a, b){
+      return formas[k][b] - formas[k][a]; })[0];
+  });
   var valores = Object.keys(cont).sort(function(a, b){
-    var na = parseFloat(String(a).replace(',', '.')), nb = parseFloat(String(b).replace(',', '.'));
-    var ehNum = !isNaN(na) && !isNaN(nb) && /^[\d.,\-]+$/.test(a) && /^[\d.,\-]+$/.test(b);
+    var ra = rotulo[a], rb = rotulo[b];
+    var na = parseFloat(String(ra).replace(',', '.')), nb = parseFloat(String(rb).replace(',', '.'));
+    var ehNum = !isNaN(na) && !isNaN(nb) && /^[\d.,\-]+$/.test(ra) && /^[\d.,\-]+$/.test(rb);
     if (ehNum) return na - nb;
-    return String(a).localeCompare(String(b), 'pt-BR');
+    return String(ra).localeCompare(String(rb), 'pt-BR');
   });
   var atual = _fcFiltro(chave, col);
   var marcado = {};
@@ -53728,11 +53761,11 @@ function _fcAbrir(tab, idx, botao){
     var t = _cobNorm(busca.value);
     var html = '';
     valores.forEach(function(x, j){
-      if (t && _cobNorm(x).indexOf(t) === -1) return;
+      if (t && x.indexOf(t) === -1) return;     // x já é a forma normalizada
       html += '<label style="display:flex;align-items:center;gap:7px;padding:3px 5px;cursor:pointer;border-radius:4px">'
         + '<input type="checkbox" data-fc-i="' + j + '"' + (marcado[x] ? ' checked' : '') + '>'
         + '<span style="flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
-        + _cobEsc(x === '' ? '(vazio)' : x) + '</span>'
+        + _cobEsc(x === '' ? '(vazio)' : rotulo[x]) + '</span>'
         + '<span style="color:var(--tx2);font-size:10.5px">(' + cont[x] + ')</span></label>';
     });
     lista.innerHTML = html || '<div style="padding:10px;color:var(--tx2);font-size:11px">Nada encontrado.</div>';
@@ -53745,7 +53778,7 @@ function _fcAbrir(tab, idx, botao){
 
   var visiveis = function(){
     var t = _cobNorm(busca.value);
-    return valores.filter(function(x){ return !t || _cobNorm(x).indexOf(t) !== -1; });
+    return valores.filter(function(x){ return !t || x.indexOf(t) !== -1; });
   };
   m.querySelector('[data-fc-todos]').onclick = function(){
     visiveis().forEach(function(x){ marcado[x] = true; }); desenhar();
