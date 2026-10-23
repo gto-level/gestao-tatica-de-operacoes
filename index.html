@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '23/10 10:30';
+var GTO_BUILD = '23/10 11:15';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -32104,15 +32104,16 @@ function _govDetDefs(){
         + 'vêm da carteira sozinhos. O card conta só o que está em tratamento.',
       cols: AGR_COLS,
       topo: agrTopo,
-      // aqui "fora da conta" junta concluído e saiu-da-carteira: dizer
-      // só "concluído" mentiria para quem errou a chave
-      rotuloFora:'fora da conta (concluído ou fora da carteira)',
+      // o que sobra fora da conta aqui é quem errou a chave: o concluído
+      // já não está na lista
+      rotuloFora:'fora da carteira (confira a chave)',
       // a chave na linha: é por ela que a conferência acha e acende a
       // linha repetida enquanto o André digita
       linhaAttr:function(x){
         return 'data-agr-ch="' + _govPainelEsc(x.__ch) + '"'; },
-      lista: agrLista,
-      vazio:'Nenhum acionamento na lista — inclua a primeira RC aí em cima.'
+      extraCab: agrCabExtra,
+      lista: agrListaVisivel,
+      vazio:'Nenhum acionamento em tratativa — inclua a primeira RC aí em cima.'
     }
   };
 }
@@ -32127,9 +32128,12 @@ function _govDetDefs(){
 // prazo de retorno e se está atrasado ou dentro do prazo — nada disso
 // se digita.
 //
-// O card conta só o que ainda está EM TRATAMENTO. Item concluído, ou
-// que não está mais na carteira, continua aparecendo na lista em cinza
-// (para não sumir o que foi digitado) mas fica fora da conta.
+// O card conta só o que ainda está EM TRATAMENTO, e a lista mostra só
+// isso: esta tela é para TOMAR AÇÃO, e item concluído não pede ação.
+// O concluído não é apagado — fica guardado e some da vista; o cabeçalho
+// diz quantos são e tem como ver e como limpar de vez.
+// Já a linha que não bate com base nenhuma CONTINUA aparecendo: essa
+// pede ação sim, a de corrigir a chave.
 // ══════════════════════════════════════════════════════════════════
 var AGR_DOC = 'ag_retorno';
 var _agrItens = [];          // [{rc, itemRc, oport, itemOp, tipoContato, pessoa}]
@@ -32314,6 +32318,48 @@ function agrQtd(){
   catch (e) { return 0; }
 }
 
+// Concluído de verdade (tem data de conclusão) — diferente de
+// "concluidoEm = 'fora'", que é a chave que não bateu com base nenhuma.
+function _agrConcluido(x){
+  return !!x.concluidoEm && x.concluidoEm !== 'fora';
+}
+var _agrVerConcluidos = false;   // por padrão, concluído não aparece
+
+function agrListaVisivel(){
+  var l = agrLista();
+  return _agrVerConcluidos ? l : l.filter(function(x){ return !_agrConcluido(x); });
+}
+function agrVerConcluidos(){
+  _agrVerConcluidos = !_agrVerConcluidos;
+  govPainelRender();
+}
+// Tirar de vez os concluídos da lista guardada. Só mexe no que o GTO
+// sabe que está concluído — chave errada e item em tratamento ficam.
+function agrLimparConcluidos(){
+  var fechadas = {};
+  agrLista().forEach(function(x){ if (_agrConcluido(x)) fechadas[x.__ch] = 1; });
+  var antes = _agrItens.length;
+  _agrItens = _agrItens.filter(function(it){
+    return !fechadas[agrChave(it.rc, it.itemRc, it.oport, it.itemOp)]; });
+  _agrVerConcluidos = false;
+  agrGravar();
+  govPainelRender();
+  _agrAviso((antes - _agrItens.length) + ' concluída(s) tirada(s) da lista.', 'var(--vd)');
+}
+
+function agrCabExtra(){
+  var n = agrLista().filter(_agrConcluido).length;
+  if (!n) return '';
+  var bt = function(acao, txt){
+    return '<button class="btn btn-s" type="button" onclick="' + acao + '"'
+      + ' style="font-size:10px;padding:1px 8px">' + txt + '</button>';
+  };
+  return '<span style="font-size:11px;color:var(--tx2)">· ' + n
+    + (n === 1 ? ' concluída escondida' : ' concluídas escondidas') + '</span>'
+    + bt('agrVerConcluidos()', _agrVerConcluidos ? '✕ esconder' : '👁 ver')
+    + (_agrVerConcluidos ? bt('agrLimparConcluidos()', '🗑 tirar da lista') : '');
+}
+
 // ── a base ───────────────────────────────────────────────────────
 // O painel é do ADLV. Dentro de uma frente do FAST o getDB() aponta
 // para outra base, e ler de lá criaria uma coleção que não é desta
@@ -32389,8 +32435,12 @@ function agrConferir(){
     tr.style.background = 'var(--amc)';
     try { tr.scrollIntoView({ block:'nearest' }); } catch (e) {}
   }
-  _agrAviso('RC ' + _agrN(ja.rc) + ' item ' + (_agrN(ja.itemRc) || '—')
-    + ' já está na lista — veja a linha acesa.', 'var(--am)');
+  var quem = 'RC ' + _agrN(ja.rc) + ' item ' + (_agrN(ja.itemRc) || '—');
+  // pode ser uma concluída, que está guardada mas não aparece: dizer
+  // "veja a linha acesa" sem linha nenhuma é que confundiria
+  _agrAviso(tr ? (quem + ' já está na lista — veja a linha acesa.')
+                : (quem + ' já está na lista, como concluída (escondida). '
+                   + 'Use "ver" no cabeçalho para enxergá-la.'), 'var(--am)');
   return true;
 }
 
@@ -32597,6 +32647,9 @@ function _govPainelDetalheHTML(){
     +   (nConc ? ' · <strong>' + (linhas.length - nConc) + '</strong> em aberto (o número do card) · '
                  + nConc + ' ' + (d.rotuloFora || ('já concluído' + (nConc === 1 ? '' : 's'))) : '')
     +   '</span>'
+    // um card pode acrescentar algo ao cabeçalho (o Acionamentos sobre
+    // RCs põe aí o "ver / tirar os concluídos")
+    +   (typeof d.extraCab === 'function' ? d.extraCab() : '')
     +   botaoAbrir
     +   '<button class="btn btn-s" style="font-size:10px;padding:1px 8px;margin-left:auto" onclick="govPainelDetalhe(\'\')">✕ fechar</button>'
     + '</div>'
