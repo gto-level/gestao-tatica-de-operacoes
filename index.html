@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '22/10 13:20';
+var GTO_BUILD = '23/10 09:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -32180,6 +32180,42 @@ function _agrSbIdx(){
   return ix;
 }
 
+// Índice do XGL por RC + item da RC — que é exatamente a chave daquele
+// card (xglChave ignora oportunidade e item da OP de propósito).
+function _agrXglIdx(){
+  var ix = {};
+  try {
+    (typeof _xglItens !== 'undefined' ? (_xglItens || []) : []).forEach(function(r){
+      var k = _agrN(r.rc) + '|' + _agrN(r.item);
+      if (!_agrN(r.rc)) return;
+      var ch = xglChave(r.rc, r.item, r.oport, r.itemop);
+      var m = (typeof _xglDados !== 'undefined' ? (_xglDados[ch] || {}) : {});
+      var aberto = !m.finalizado;
+      if (!ix[k] || (aberto && !ix[k].aberto)) ix[k] = { r:r, m:m, aberto:aberto };
+    });
+  } catch (e) {}
+  return ix;
+}
+
+// Sem oportunidade, a RC + item pode estar no XGL ou no Status B — as
+// duas bases usam essa mesma chave. Procura nas duas: vale a que ainda
+// está ABERTA, e se estiver nas duas a linha diz isso.
+var AGR_BASES = [
+  { nome:'XGL',      idx:_agrXglIdx },
+  { nome:'Status B', idx:_agrSbIdx }
+];
+function _agrOndeEsta(rc, itemRc, idxs){
+  var k = rc + '|' + itemRc, achados = [];
+  AGR_BASES.forEach(function(b){
+    var h = (idxs[b.nome] || {})[k];
+    if (h) achados.push({ nome:b.nome, r:h.r, m:h.m, aberto:h.aberto });
+  });
+  if (!achados.length) return null;
+  var usar = achados.filter(function(h){ return h.aberto; })[0] || achados[0];
+  usar.todos = achados.map(function(h){ return h.nome; });
+  return usar;
+}
+
 // A base às vezes traz "#N/A" no analista — isso é ausência, não nome.
 function _agrAnalista(v){
   var s = _agrN(v);
@@ -32191,9 +32227,11 @@ function _agrAnalista(v){
 // Onde procurar depende do que foi digitado, e foi o André quem deu a
 // regra: com oportunidade e item da OP, o item é da CARTEIRA (PATEC em
 // Andamento ou Finalizado) e a chave são as quatro partes. Sem
-// oportunidade, o item é do STATUS B, cuja chave é só RC + item da RC.
-function agrLinha(it, ix, sbIx){
-  sbIx = sbIx || _agrSbIdx();
+// oportunidade, a chave RC + item da RC é a do XGL e a do STATUS B —
+// as duas bases são consultadas, e a linha diz em qual delas o item
+// está.
+function agrLinha(it, ix, idxs){
+  idxs = idxs || { 'XGL': _agrXglIdx(), 'Status B': _agrSbIdx() };
   var ch = agrChave(it.rc, it.itemRc, it.oport, it.itemOp);
   var rc = _agrN(it.rc), itemRc = _agrN(it.itemRc), oport = _agrN(it.oport);
   var o = { __ch: ch,
@@ -32201,20 +32239,22 @@ function agrLinha(it, ix, sbIx){
             oport: oport || '—', itemOp: _agrN(it.itemOp) || '—',
             tipoContato: _agrN(it.tipoContato), pessoa: _agrN(it.pessoa),
             analista: '—',
-            trat: '—', prazo: '—', status: '—', concluidoEm: '', origem: '' };
+            trat: '—', prazo: '—', status: '—', concluidoEm: '',
+            origem: '', __tambem: [] };
 
-  // ── sem oportunidade: Status B ──
+  // ── sem oportunidade: XGL ou Status B ──
   if (!oport) {
-    var sb = sbIx[rc + '|' + itemRc];
-    if (sb) {
-      o.origem = 'Status B';
+    var onde = _agrOndeEsta(rc, itemRc, idxs);
+    if (onde) {
+      o.origem = onde.nome;
+      o.__tambem = onde.todos.filter(function(n){ return n !== onde.nome; });
       o.__achou = true;
-      o.analista = _agrAnalista(sb.r.analista);
-      return _agrPreencher(o, sb.m, sb.m.status || '', null);
+      o.analista = _agrAnalista(onde.r.analista);
+      return _agrPreencher(o, onde.m, onde.m.status || '', null);
     }
   }
 
-  // ── com oportunidade (ou sem achar no Status B): a carteira ──
+  // ── com oportunidade (ou sem achar nas duas bases): a carteira ──
   var r = ix[ch]
        || ix[[rc, itemRc, oport].join('|')]
        || ix[[rc, itemRc].join('|')];
@@ -32224,7 +32264,7 @@ function agrLinha(it, ix, sbIx){
     o.__motivo = oport
       ? 'Não achei esta chave na carteira — confira RC, item da RC, '
         + 'oportunidade e item da OP. Fora da conta do card.'
-      : 'Não achei RC + item da RC nem no Status B nem na carteira. '
+      : 'Não achei RC + item da RC no XGL, no Status B nem na carteira. '
         + 'Fora da conta do card.';
     o.status = 'FORA DA CARTEIRA';
     return o;
@@ -32264,8 +32304,9 @@ function _agrPreencher(o, m, trat, r){
 }
 
 function agrLista(){
-  var ix = _agrIdx(), sbIx = _agrSbIdx();
-  return _agrItens.map(function(it){ return agrLinha(it, ix, sbIx); });
+  var ix = _agrIdx();
+  var idxs = { 'XGL': _agrXglIdx(), 'Status B': _agrSbIdx() };
+  return _agrItens.map(function(it){ return agrLinha(it, ix, idxs); });
 }
 // o número do card: só o que está em tratamento
 function agrQtd(){
@@ -32367,11 +32408,16 @@ function agrAdicionar(){
   // avisa na hora onde o item foi achado — ou que não foi. Melhor
   // descobrir agora do que na reunião.
   var l = agrLinha(it, _agrIdx());
-  var onde = l.__achou
-    ? (l.origem === 'Status B' ? 'Incluída — achei no Status B.'
-                               : 'Incluída — achei na carteira.')
-    : (it.oport ? 'Incluída — mas não achei essa chave na carteira.'
-                : 'Incluída — mas não achei RC + item da RC no Status B nem na carteira.');
+  var onde;
+  if (l.__achou) {
+    onde = (l.origem === 'Carteira') ? 'Incluída — achei na carteira.'
+         : ('Incluída — achei no ' + l.origem
+            + (l.__tambem.length ? ' (também está em ' + l.__tambem.join(', ') + ')' : '')
+            + '.');
+  } else {
+    onde = it.oport ? 'Incluída — mas não achei essa chave na carteira.'
+      : 'Incluída — mas não achei RC + item da RC no XGL, no Status B nem na carteira.';
+  }
   _agrItens.push(it);
   agrGravar().then(function(ok){
     _agrAviso(ok ? onde : '⚠ não consegui gravar: vale só nesta aba.',
@@ -32408,6 +32454,26 @@ function _agrInput(x, campo, placeholder, lista, min){
     + 'border:1px solid var(--brd);border-radius:5px;background:var(--card);color:var(--tx)">';
 }
 
+// De onde veio o tratamento. A etiqueta só aparece quando NÃO é da
+// carteira: carteira é o caso normal, e marcar o normal vira ruído.
+// Se o item estiver nas duas bases, a etiqueta diz qual foi usada e o
+// passar do mouse conta a outra.
+var AGR_CORES = {
+  'XGL':      { tx:'#7c3aed', bg:'#ede9fe' },
+  'Status B': { tx:'#0f766e', bg:'#ccfbf1' }
+};
+function _agrEtiqueta(x){
+  var c = AGR_CORES[x.origem];
+  if (!c) return '';
+  var tambem = (x.__tambem && x.__tambem.length)
+    ? ' Esta RC + item também está em: ' + x.__tambem.join(', ') + '.' : '';
+  return ' <span title="Veio do card ' + x.origem + '.' + _govPainelEsc(tambem)
+    + '" style="font-size:9px;font-weight:700;color:' + c.tx
+    + ';background:' + c.bg + ';border-radius:4px;padding:1px 5px;'
+    + 'margin-left:4px;white-space:nowrap">' + _govPainelEsc(x.origem)
+    + (tambem ? ' +' : '') + '</span>';
+}
+
 // As larguras são fixas para a linha inteira caber na tela sem rolagem
 // lateral. Tipo de contato é estreita de propósito: ali só entra Teams
 // ou e-mail. Quem fica com a sobra é Pessoa de contato, que é a única
@@ -32425,13 +32491,8 @@ var AGR_COLS = [
     html:function(x){ return _agrInput(x, 'pessoa', 'para quem retornar', false, 110); } },
   // o tratamento vem da carteira ou do Status B conforme o que foi
   // digitado; a etiqueta diz de onde, senão não dá para conferir
-  { t:'Status Tratamento',  k:'trat', w:'144px',
-    html:function(x){
-      var e = _govPainelEsc;
-      return e(x.trat) + (x.origem === 'Status B'
-        ? ' <span style="font-size:9px;font-weight:700;color:#0f766e;'
-          + 'background:#ccfbf1;border-radius:4px;padding:1px 5px;'
-          + 'margin-left:4px;white-space:nowrap">Status B</span>' : ''); } },
+  { t:'Status Tratamento',  k:'trat', w:'158px',
+    html:function(x){ return _govPainelEsc(x.trat) + _agrEtiqueta(x); } },
   { t:'Prazo',              k:'prazo', w:'78px', st:'text-align:center' },
   { t:'Status',             k:'status', w:'106px', st:function(x){
       return (typeof govCorStatus === 'function') ? govCorStatus(x.status)
