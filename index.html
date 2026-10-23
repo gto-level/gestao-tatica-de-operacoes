@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '23/10 11:15';
+var GTO_BUILD = '23/10 12:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -53801,6 +53801,7 @@ function _fcAbrir(tab, idx, botao){
     + '<button class="btn btn-s" data-fc-nenhum style="font-size:10.5px;padding:2px 10px">Nenhum</button>'
     + '</div>'
     + '<div data-fc-lista style="max-height:210px;overflow-y:auto;border:1px solid var(--brd);border-radius:6px;padding:4px"></div>'
+    + '<div data-fc-dica style="font-size:10px;color:var(--azm);margin-top:6px;display:none"></div>'
     + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:9px">'
     + '<button class="btn btn-s" data-fc-limpar style="font-size:11px;padding:3px 12px">Limpar</button>'
     + '<button class="btn" data-fc-aplicar style="font-size:11px;padding:3px 14px;background:var(--vd);color:#fff;border:none">Aplicar</button>'
@@ -53826,13 +53827,30 @@ function _fcAbrir(tab, idx, botao){
       c.onchange = function(){ marcado[valores[+c.getAttribute('data-fc-i')]] = c.checked; };
     });
   };
-  desenhar();
-  busca.oninput = desenhar;
-
   var visiveis = function(){
     var t = _cobNorm(busca.value);
     return valores.filter(function(x){ return !t || x.indexOf(t) !== -1; });
   };
+
+  // A busca é um ATALHO de seleção, não só uma lupa. Antes ela apenas
+  // escondia as outras linhas da listinha, mas todas continuavam
+  // marcadas — então digitar a RC e clicar em Aplicar dava "tudo
+  // marcado = sem filtro", e nada acontecia. Agora, com texto na busca,
+  // Aplicar vale pelo que está aparecendo, e a dica diz isso.
+  var dica = m.querySelector('[data-fc-dica]');
+  var atualizarDica = function(){
+    var n = busca.value.trim() ? visiveis().length : 0;
+    dica.style.color = 'var(--azm)';
+    if (!busca.value.trim()) { dica.style.display = 'none'; return; }
+    dica.style.display = '';
+    dica.textContent = n
+      ? ('Aplicar vai filtrar pelo que está aparecendo (' + n + ') — Enter também aplica.')
+      : 'Nada bate com essa busca.';
+  };
+  desenhar();
+  atualizarDica();
+  busca.oninput = function(){ desenhar(); atualizarDica(); };
+
   m.querySelector('[data-fc-todos]').onclick = function(){
     visiveis().forEach(function(x){ marcado[x] = true; }); desenhar();
   };
@@ -53844,13 +53862,27 @@ function _fcAbrir(tab, idx, botao){
       if (!Object.keys(_FC_ESTADO[chave]).length) delete _FC_ESTADO[chave]; }
     _fcFechar(); _fcAplicar(tab);
   };
-  m.querySelector('[data-fc-aplicar]').onclick = function(){
-    var sel = valores.filter(function(x){ return marcado[x]; });
+  var aplicar = function(){
+    // com busca escrita, o universo é o que está aparecendo; sem busca,
+    // é a lista inteira — e aí tudo marcado quer dizer "sem filtro"
+    var base = busca.value.trim() ? visiveis() : valores;
+    var sel = base.filter(function(x){ return marcado[x]; });
+    if (!sel.length) {                       // filtro vazio esconderia tudo
+      dica.style.display = '';
+      dica.style.color = 'var(--vm)';
+      dica.textContent = 'Marque ao menos um valor — senão a tabela fica vazia.';
+      return;
+    }
     if (!_FC_ESTADO[chave]) _FC_ESTADO[chave] = {};
-    if (sel.length === valores.length) delete _FC_ESTADO[chave][col];   // tudo marcado = sem filtro
+    if (sel.length === valores.length) delete _FC_ESTADO[chave][col];   // tudo = sem filtro
     else _FC_ESTADO[chave][col] = sel;
     if (!Object.keys(_FC_ESTADO[chave]).length) delete _FC_ESTADO[chave];
     _fcFechar(); _fcAplicar(tab);
+  };
+  m.querySelector('[data-fc-aplicar]').onclick = aplicar;
+  busca.onkeydown = function(ev){
+    if (ev.key === 'Enter') { ev.preventDefault(); aplicar(); }
+    if (ev.key === 'Escape') { ev.preventDefault(); _fcFechar(); }
   };
 
   // posiciona logo abaixo do ▾, sem sair da tela
