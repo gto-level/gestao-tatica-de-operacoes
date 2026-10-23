@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '23/10 12:00';
+var GTO_BUILD = '23/10 12:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -32468,12 +32468,33 @@ function agrAdicionar(){
     onde = it.oport ? 'Incluída — mas não achei essa chave na carteira.'
       : 'Incluída — mas não achei RC + item da RC no XGL, no Status B nem na carteira.';
   }
-  _agrItens.push(it);
+  // entra no TOPO: é nele que o André vai escrever o tipo e a pessoa de
+  // contato logo em seguida, e procurar a linha no fim de uma lista
+  // longa era o trabalho chato de todo dia
+  _agrItens.unshift(it);
   agrGravar().then(function(ok){
     _agrAviso(ok ? onde : '⚠ não consegui gravar: vale só nesta aba.',
               ok ? (l.__achou ? 'var(--vd)' : 'var(--am)') : 'var(--vm)');
   });
   govPainelRender();
+  _agrAcenderNova(agrChave(it.rc, it.itemRc, it.oport, it.itemOp));
+}
+
+// Acende a linha recém-incluída por alguns segundos e põe o cursor no
+// Tipo dela: é o próximo passo natural de quem acabou de incluir.
+function _agrAcenderNova(ch){
+  try {
+    var tr = document.querySelector('[data-agr-ch="' + ch.replace(/"/g, '') + '"]');
+    if (!tr) return;
+    tr.style.outline = '2px solid var(--vd)';
+    tr.style.background = 'var(--vdc)';
+    try { tr.scrollIntoView({ block:'nearest' }); } catch (e) {}
+    var campo = tr.querySelector('input');
+    if (campo) campo.focus();
+    setTimeout(function(){
+      tr.style.outline = ''; tr.style.background = '';
+    }, 4000);
+  } catch (e) {}
 }
 function agrRemover(ch){
   _agrItens = _agrItens.filter(function(x){
