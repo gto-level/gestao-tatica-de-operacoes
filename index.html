@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '27/10 16:10';
+var GTO_BUILD = '27/10 17:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -5068,6 +5068,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 <div class="field-wrap" style="min-width:130px"><span class="field-label">De</span><input type="date" id="ce-dfd-adlv-de" style="width:100%;font-size:12px;padding:5px 10px"></div>
                 <div class="field-wrap" style="min-width:130px"><span class="field-label">Até</span><input type="date" id="ce-dfd-adlv-ate" style="width:100%;font-size:12px;padding:5px 10px"></div>
                 <button class="btn btn-s" style="font-size:11px" onclick="ceDesfechoFiltrar('adlv')">🔍 Filtrar</button>
+                <button class="btn btn-s" style="font-size:11px" onclick="ceDesfechoBaixar('adlv')" title="Baixa as RCs do período, com o motivo de cada conclusão">⬇ Relatório</button>
+                <button class="btn btn-s" style="font-size:11px" onclick="ceDesfechoCopiar('adlv')" title="Copia a lista agrupada por fluxo">📋 Copiar</button>
               </div>
               <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:.875rem" id="ce-dfd-adlv-cards"></div>
               <div class="tw" style="max-height:360px"><table>
@@ -5083,6 +5085,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 <div class="field-wrap" style="min-width:130px"><span class="field-label">De</span><input type="date" id="ce-dfd-fast-de" style="width:100%;font-size:12px;padding:5px 10px"></div>
                 <div class="field-wrap" style="min-width:130px"><span class="field-label">Até</span><input type="date" id="ce-dfd-fast-ate" style="width:100%;font-size:12px;padding:5px 10px"></div>
                 <button class="btn btn-s" style="font-size:11px" onclick="ceDesfechoFiltrar('fast')">🔍 Filtrar</button>
+                <button class="btn btn-s" style="font-size:11px" onclick="ceDesfechoBaixar('fast')" title="Baixa as RCs do período, com o motivo de cada conclusão">⬇ Relatório</button>
+                <button class="btn btn-s" style="font-size:11px" onclick="ceDesfechoCopiar('fast')" title="Copia a lista agrupada por fluxo">📋 Copiar</button>
               </div>
               <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:.875rem" id="ce-dfd-fast-cards"></div>
               <div class="tw" style="max-height:360px"><table>
@@ -49136,6 +49140,133 @@ function _ceDesfechoRange(mod){
   if(!ate){ ate=hoje; if(e2) e2.value=ate; }
   return { de, ate };
 }
+// ── Relatório dos desfechos: quais RCs, e por quê ────────────────
+//
+// A tabela de cima conta; isto nomeia. Cada ação de produção já guarda
+// a RC, o desfecho e o porquê — o que faltava era um jeito de tirar
+// isso da base. Os cinco fluxos são os mesmos da contagem, e o motivo
+// é lido onde cada fluxo o escreve: a devolução tem campo próprio
+// (motivo), os outros usam a observação; pedido e MDG ainda trazem o
+// que foi preenchido na hora (SAP, fornecedor, NM, chamado).
+var CE_DESFECHOS = {
+  'Pedido':'Pedido', 'Republicação':'Republicação', 'Republicacao':'Republicação',
+  'XGL':'XGL', 'Devolução':'Devolução', 'Devolucao':'Devolução',
+  'Nova Reserva':'Nova Reserva'
+};
+
+function ceDesfechoLinhas(mod){
+  var cache = _ceCache[mod];
+  if (!cache) return [];
+  var faixa = _ceDesfechoRange(mod);
+  var out = [];
+  (cache.acoes || []).forEach(function(a){
+    if (!a || !a.data || !a.conclusao) return;
+    if (a.data < faixa.de || a.data > faixa.ate) return;
+    var fluxo = CE_DESFECHOS[String(a.conclusao)];
+    if (!fluxo) return;
+    // a chave da Governança é rc|item|oportunidade — dá para abrir as
+    // três colunas sem pedir nada a mais
+    var p = String(a.rcChave || '').split('|');
+    var motivo = String(a.motivo || '').trim();
+    var obs    = String(a.obs || '').trim();
+    out.push({
+      data: a.data, fluxo: fluxo,
+      rc: String(a.rc || p[0] || '').trim(),
+      item: String(p[1] || '').trim(),
+      oport: String(p[2] || '').trim(),
+      // o "por quê": o campo próprio da devolução, ou a observação
+      porque: motivo || obs,
+      motivo: motivo, obs: obs,
+      quem: String(a.colab || '').trim(),
+      tipo: String(a.tipo || '').trim(),
+      tratamento: String(a.tratamento || '').trim(),
+      centro: String(a.centro || '').trim(),
+      chamadoMdg: String(a.chamado_mdg || '').trim(),
+      pedidoSap: String(a.pedido_id_sap || '').trim(),
+      fornecedor: String(a.pedido_fornecedor || '').trim(),
+      nm: String(a.pedido_nm || '').trim(),
+      negociacao: String(a.pedido_negociacao || '').trim(),
+      comentarioPedido: String(a.pedido_comentario || '').trim(),
+      ts: String(a.ts || '')
+    });
+  });
+  out.sort(function(x, y){
+    return x.data.localeCompare(y.data) || x.fluxo.localeCompare(y.fluxo)
+        || String(x.rc).localeCompare(String(y.rc));
+  });
+  return out;
+}
+
+var CE_DESF_COLS = [
+  ['Data', function(l){ return fmtDt(l.data); }],
+  ['Desfecho', 'fluxo'], ['RC', 'rc'], ['Item', 'item'], ['Oportunidade', 'oport'],
+  ['Motivo da conclusão', 'porque'],
+  ['Motivo (devolução)', 'motivo'], ['Observação', 'obs'],
+  ['Quem concluiu', 'quem'], ['Tipo de análise', 'tipo'],
+  ['Status de tratamento', 'tratamento'], ['Centro', 'centro'],
+  ['Chamado MDG', 'chamadoMdg'], ['Pedido SAP', 'pedidoSap'],
+  ['Fornecedor', 'fornecedor'], ['NM', 'nm'], ['Negociação', 'negociacao'],
+  ['Comentário do pedido', 'comentarioPedido']
+];
+
+function ceDesfechoBaixar(mod){
+  try {
+    var linhas = ceDesfechoLinhas(mod);
+    if (!linhas.length) {
+      alert('Nenhum desfecho no período selecionado — ajuste as datas e filtre de novo.');
+      return;
+    }
+    var faixa = _ceDesfechoRange(mod);
+    var cab = CE_DESF_COLS.map(function(c){ return c[0]; });
+    var linha = function(l){
+      return CE_DESF_COLS.map(function(c){
+        return (typeof c[1] === 'function') ? c[1](l) : (l[c[1]] || '');
+      });
+    };
+    var wb = XLSX.utils.book_new();
+    // uma aba com tudo e uma por fluxo: é assim que cada frente recebe
+    var aoa = [cab].concat(linhas.map(linha));
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = cab.map(function(c){ return { wch: Math.max(10, Math.min(34, c.length + 6)) }; });
+    XLSX.utils.book_append_sheet(wb, ws, 'Tudo');
+    ['Pedido','Republicação','XGL','Devolução','Nova Reserva'].forEach(function(f){
+      var sub = linhas.filter(function(l){ return l.fluxo === f; });
+      if (!sub.length) return;
+      var ws2 = XLSX.utils.aoa_to_sheet([cab].concat(sub.map(linha)));
+      ws2['!cols'] = ws['!cols'];
+      // o nome da aba do Excel não aceita acento em algumas versões
+      XLSX.utils.book_append_sheet(wb, ws2, f.normalize('NFD').replace(/[̀-ͯ]/g, ''));
+    });
+    XLSX.writeFile(wb, 'Desfechos_' + mod.toUpperCase() + '_'
+      + String(faixa.de).replace(/-/g, '') + '_a_'
+      + String(faixa.ate).replace(/-/g, '') + '.xlsx');
+  } catch (e) {
+    alert('Não consegui gerar o relatório: ' + e.message);
+  }
+}
+
+function ceDesfechoCopiar(mod){
+  var linhas = ceDesfechoLinhas(mod);
+  if (!linhas.length) { alert('Nenhum desfecho no período selecionado.'); return; }
+  var faixa = _ceDesfechoRange(mod);
+  var t = ['DESFECHOS ' + mod.toUpperCase() + ' — ' + linhas.length + ' RC(s) · '
+           + fmtDt(faixa.de) + ' a ' + fmtDt(faixa.ate)];
+  var porFluxo = {};
+  linhas.forEach(function(l){ (porFluxo[l.fluxo] = porFluxo[l.fluxo] || []).push(l); });
+  ['Pedido','Republicação','XGL','Devolução','Nova Reserva'].forEach(function(f){
+    if (!porFluxo[f]) return;
+    t.push('');
+    t.push(f + ' (' + porFluxo[f].length + '):');
+    porFluxo[f].forEach(function(l){
+      t.push('  ' + fmtDt(l.data) + ' · RC ' + l.rc + (l.item ? '/' + l.item : '')
+        + (l.oport ? ' · OP ' + l.oport : '')
+        + (l.porque ? ' · ' + l.porque : '')
+        + (l.quem ? ' · ' + l.quem : ''));
+    });
+  });
+  cpCopiaTexto(t.join('\n'), 'Relatório de desfechos copiado.');
+}
+
 async function ceDesfechoFiltrar(mod){
   const { de }=_ceDesfechoRange(mod);
   const cache=_ceCache[mod];
