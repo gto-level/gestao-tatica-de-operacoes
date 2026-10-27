@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '27/10 17:05';
+var GTO_BUILD = '27/10 17:50';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -45834,10 +45834,14 @@ function q18Consultar(valor){
     </div>
 
     <!-- Motivo — só Devolução -->
+    <!-- Uma caixa só, para a Devolução e para a Republicação: o motivo é
+         obrigatório nas duas e a lista é a mesma, então duplicar o campo
+         só criaria duas listas para manter. O título e o rótulo mudam
+         conforme o fluxo. -->
     <div id="acao-dev-box" style="display:none;background:var(--vmc);border:1px solid rgba(217,64,64,.2);border-radius:10px;padding:.875rem;margin-bottom:.75rem">
-      <div style="font-size:11px;font-weight:700;color:var(--vm);margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.4px">↩ Dados da devolução</div>
+      <div id="acao-dev-titulo" style="font-size:11px;font-weight:700;color:var(--vm);margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.4px">↩ Dados da devolução</div>
       <div>
-        <div style="font-size:11px;font-weight:600;color:var(--tx2);margin-bottom:4px">Motivo da devolução <span style="color:var(--vm)">*</span></div>
+        <div style="font-size:11px;font-weight:600;color:var(--tx2);margin-bottom:4px"><span id="acao-dev-rotulo">Motivo da devolução</span> <span style="color:var(--vm)">*</span></div>
         <select id="acao-dev-motivo" style="width:100%;font-size:13px;padding:7px 10px;border:1.5px solid var(--brd);border-radius:8px;background:#fff">
           <option value="">— selecione —</option>
           <option>Falta de retorno CSPN</option>
@@ -49145,9 +49149,10 @@ function _ceDesfechoRange(mod){
 // A tabela de cima conta; isto nomeia. Cada ação de produção já guarda
 // a RC, o desfecho e o porquê — o que faltava era um jeito de tirar
 // isso da base. Os cinco fluxos são os mesmos da contagem, e o motivo
-// é lido onde cada fluxo o escreve: a devolução tem campo próprio
-// (motivo), os outros usam a observação; pedido e MDG ainda trazem o
-// que foi preenchido na hora (SAP, fornecedor, NM, chamado).
+// é lido onde cada fluxo o escreve: devolução e republicação têm lista
+// própria (motivo, obrigatória), os outros usam a observação; pedido e
+// MDG ainda trazem o que foi preenchido na hora (SAP, fornecedor, NM,
+// chamado).
 var CE_DESFECHOS = {
   'Pedido':'Pedido', 'Republicação':'Republicação', 'Republicacao':'Republicação',
   'XGL':'XGL', 'Devolução':'Devolução', 'Devolucao':'Devolução',
@@ -49174,7 +49179,8 @@ function ceDesfechoLinhas(mod){
       rc: String(a.rc || p[0] || '').trim(),
       item: String(p[1] || '').trim(),
       oport: String(p[2] || '').trim(),
-      // o "por quê": o campo próprio da devolução, ou a observação
+      // o "por quê": a lista obrigatória (devolução e republicação) ou,
+      // nos outros fluxos, a observação digitada na hora
       porque: motivo || obs,
       motivo: motivo, obs: obs,
       quem: String(a.colab || '').trim(),
@@ -49201,7 +49207,7 @@ var CE_DESF_COLS = [
   ['Data', function(l){ return fmtDt(l.data); }],
   ['Desfecho', 'fluxo'], ['RC', 'rc'], ['Item', 'item'], ['Oportunidade', 'oport'],
   ['Motivo da conclusão', 'porque'],
-  ['Motivo (devolução)', 'motivo'], ['Observação', 'obs'],
+  ['Motivo da lista', 'motivo'], ['Observação', 'obs'],
   ['Quem concluiu', 'quem'], ['Tipo de análise', 'tipo'],
   ['Status de tratamento', 'tratamento'], ['Centro', 'centro'],
   ['Chamado MDG', 'chamadoMdg'], ['Pedido SAP', 'pedidoSap'],
@@ -50135,7 +50141,7 @@ function prodAbrirModal(origem, tipo){
   document.getElementById('acao-estagio-2').style.display = 'none';
   document.getElementById('acao-selecao-atual').style.display = 'none';
   document.getElementById('acao-finalizado-box').style.display = 'none';
-  document.getElementById('acao-dev-box').style.display = 'none';
+  _acaoMotivoBox('');
   const _cb0 = document.getElementById('acao-centro-box'); if(_cb0) _cb0.style.display = 'none';
   const _dc0 = document.getElementById('acao-dev-centro'); if(_dc0) _dc0.value = '';
   const _dm0 = document.getElementById('acao-dev-motivo'); if(_dm0) _dm0.value = '';
@@ -50257,8 +50263,7 @@ function acaoSelecionarTratamento(btn, tratamento){
     document.getElementById('acao-selecao-atual').style.display = 'block';
     document.getElementById('acao-selecao-texto').textContent = 'Status: ' + tratamento;
     // Mostrar campos de devolução se tipo do modal for 'outros'
-    const _devBox = document.getElementById('acao-dev-box');
-    if(_devBox) _devBox.style.display = _prodCtx.tipo === 'outros' ? 'block' : 'none';
+    _acaoMotivoBox(_prodCtx.tipo === 'outros' ? 'Devolução' : '');
     const _centroBoxT = document.getElementById('acao-centro-box');
     if(_centroBoxT) _centroBoxT.style.display = _prodCtx.tipo === 'outros' ? 'block' : 'none';
     if(_prodCtx.tipo !== 'outros' && document.getElementById('acao-dev-centro')) document.getElementById('acao-dev-centro').value = '';
@@ -50269,6 +50274,42 @@ function acaoSelecionarTratamento(btn, tratamento){
     if(_mdgBox) _mdgBox.style.display = _isMDG ? 'block' : 'none';
     if(!_isMDG && document.getElementById('acao-mdg-chamado')) document.getElementById('acao-mdg-chamado').value = '';
   }
+}
+
+// A caixa do motivo serve aos dois fluxos que o exigem. Chamar com ''
+// esconde e limpa; com 'Devolução' ou 'Republicação' mostra com a cor e
+// as palavras daquele fluxo.
+var ACAO_MOTIVO_FLUXOS = {
+  'Devolução':   { emoji:'↩', cor:'var(--vm)', fundo:'var(--vmc)',
+                   borda:'rgba(217,64,64,.2)', nome:'devolução' },
+  'Republicação':{ emoji:'🔄', cor:'var(--am)', fundo:'var(--amc)',
+                   borda:'rgba(192,122,18,.25)', nome:'republicação' }
+};
+function _acaoMotivoBox(fluxo){
+  var box = document.getElementById('acao-dev-box');
+  if (!box) return;
+  var cfg = ACAO_MOTIVO_FLUXOS[fluxo];
+  if (!cfg) {
+    box.style.display = 'none';
+    var z = document.getElementById('acao-dev-motivo'); if (z) z.value = '';
+    return;
+  }
+  box.style.display = 'block';
+  box.style.background = cfg.fundo;
+  box.style.borderColor = cfg.borda;
+  var t = document.getElementById('acao-dev-titulo');
+  if (t) { t.textContent = cfg.emoji + ' Dados da ' + cfg.nome; t.style.color = cfg.cor; }
+  var r = document.getElementById('acao-dev-rotulo');
+  if (r) r.textContent = 'Motivo da ' + cfg.nome;
+}
+// Qual fluxo a caixa está pedindo agora — é o que a validação e a
+// gravação consultam, em vez de adivinhar pela cor.
+function _acaoMotivoFluxo(){
+  var box = document.getElementById('acao-dev-box');
+  if (!box || box.style.display === 'none') return '';
+  var r = document.getElementById('acao-dev-rotulo');
+  var txt = String((r && r.textContent) || '').toLowerCase();
+  return txt.indexOf('republica') !== -1 ? 'Republicação' : 'Devolução';
 }
 
 function acaoSelecionarConclusao(btn, conclusao){
@@ -50313,12 +50354,12 @@ function acaoSelecionarConclusao(btn, conclusao){
     }
   }
 
-  // Mostrar campos de devolução (motivo) apenas se Devolução selecionada
-  const _devBoxC = document.getElementById('acao-dev-box');
-  if(_devBoxC) _devBoxC.style.display = conclusao === 'Devolução' ? 'block' : 'none';
-  if(conclusao !== 'Devolução'){
+  // O motivo é obrigatório na Devolução E na Republicação: nos dois o
+  // André precisa saber POR QUE o item saiu do fluxo normal.
+  if(conclusao !== _acaoMotivoFluxo()){
     const _dm = document.getElementById('acao-dev-motivo'); if(_dm) _dm.value = '';
   }
+  _acaoMotivoBox(ACAO_MOTIVO_FLUXOS[conclusao] ? conclusao : '');
   // Centro é obrigatório para TODA conclusão — sempre visível
   const _centroBoxC = document.getElementById('acao-centro-box');
   if(_centroBoxC) _centroBoxC.style.display = 'block';
@@ -50359,7 +50400,7 @@ function acaoVoltarEstagio1(){
   document.getElementById('acao-estagio-2').style.display = 'none';
   document.getElementById('acao-estagio-1').style.display = 'block';
   document.getElementById('acao-finalizado-box').style.display = 'none';
-  document.getElementById('acao-dev-box').style.display = 'none';
+  _acaoMotivoBox('');
   const _cbV = document.getElementById('acao-centro-box'); if(_cbV) _cbV.style.display = 'none';
   const _xglBoxV = document.getElementById('acao-xgl-nivel-box'); if(_xglBoxV) _xglBoxV.style.display = 'none';
   const _dcV = document.getElementById('acao-dev-centro'); if(_dcV) _dcV.value = '';
@@ -50409,9 +50450,14 @@ async function prodConfirmarAcao(){
   const _centroBoxEl = document.getElementById('acao-centro-box');
   const _centroVis   = _centroBoxEl && _centroBoxEl.style.display !== 'none';
   const _devCentro = (document.getElementById('acao-dev-centro')?.value||'').trim();
+  const _devFluxo  = _acaoMotivoFluxo();
   const _devMotivo = _devVis ? (document.getElementById('acao-dev-motivo')?.value||'') : '';
   if(_centroVis && !_devCentro){ errEl.textContent='Informe o Centro.'; errEl.style.display='block'; document.getElementById('acao-dev-centro')?.focus(); return; }
-  if(_devVis && !_devMotivo){ errEl.textContent='Selecione o Motivo da devolução.'; errEl.style.display='block'; document.getElementById('acao-dev-motivo')?.focus(); return; }
+  if(_devVis && !_devMotivo){
+    errEl.textContent = 'Selecione o Motivo da '
+      + (_devFluxo === 'Republicação' ? 'republicação' : 'devolução') + '.';
+    errEl.style.display='block'; document.getElementById('acao-dev-motivo')?.focus(); return;
+  }
   // Capturar e validar campos de Pedido
   const _pedidoBoxEl = document.getElementById('acao-pedido-box');
   const _pedidoVis   = _pedidoBoxEl && _pedidoBoxEl.style.display !== 'none';
