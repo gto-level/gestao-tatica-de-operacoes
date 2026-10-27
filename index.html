@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '27/10 11:00';
+var GTO_BUILD = '27/10 14:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -13143,6 +13143,24 @@ function _cpAchaCol(cabs, nomes){
   return -1;
 }
 
+// A letra da coluna vira índice: A=0, B=1 ... BD=55. É a rede de
+// segurança de quando o cabeçalho vem escrito de um jeito que eu não
+// conheço — o nome continua sendo a primeira tentativa, sempre.
+function _cpLetraCol(letra){
+  var n = 0, i, L = String(letra || '').toUpperCase();
+  for (i = 0; i < L.length; i++) n = n * 26 + (L.charCodeAt(i) - 64);
+  return n - 1;
+}
+// Acha pelo NOME; não achando, usa a LETRA e registra que usou, para a
+// tela poder avisar. Chute silencioso aqui vira cruzamento errado sem
+// ninguém perceber.
+function _cpColOuLetra(cabs, nomes, letra, rotulo, avisos){
+  var j = _cpAchaCol(cabs, nomes);
+  if (j !== -1) return j;
+  if (avisos) avisos.push(rotulo + ' pela coluna ' + letra);
+  return _cpLetraCol(letra);
+}
+
 // Recebe as linhas cruas da planilha (array de arrays, primeira linha =
 // cabeçalho) e devolve a medição agregada por comprador.
 function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
@@ -13157,7 +13175,8 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
             convMapa:{}, convTotal:{ mem:0, emi:0, lib:0, aguard:0, rej:0, outro:0 },
             convVelhas:0, convDesde:'',
             rejMed:{}, rejMedTotal:0, donoPedido:{},
-            respPorItem:{}, respTotal:0,
+            respPorItem:{}, respOutros:{}, respTotal:0,
+            respPorRcItem:{}, resp2Total:0, respPorLetra:[],
             rejSup:[], rejSupTotal:0, rejSupCols:{}, rejSupPos:[], rejSupPed:{},
             rejSupFunil:{ lidas:0, st8:0, elimPedido:0, elimItem:0, semElim:0,
                           semChave:0, ok:0, status:{}, exElimPedido:[], exElimItem:[],
@@ -13196,6 +13215,16 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
   var iPd   = _cpAchaCol(cabs, ['PEDIDO','NUMERO_PEDIDO','NUM_PEDIDO']);
   var iRc   = _cpAchaCol(cabs, ['REQUISICAO','RC','NUMERO_RC','NUM_RC','REQUISICAO_COMPRA','REQ']);
   var iIt   = _cpAchaCol(cabs, ['LINHAREQUISICAO','LINHA_REQUISICAO','ITEM_RC','ITEM_REQUISICAO','ITEM_DA_RC','SEQ']);
+
+  // As três que formam a chave do analista do pedido. Nome primeiro;
+  // não achando, a letra que o André passou (G, H e D) — e fica
+  // registrado que caiu na letra, para a tela poder avisar.
+  var _iRcR = _cpColOuLetra(cabs, ['REQUISICAO','RC','NUMERO_RC','NUM_RC','REQUISICAO_COMPRA','REQ'],
+                            'G', 'RC', r.respPorLetra);
+  var _iItR = _cpColOuLetra(cabs, ['LINHAREQUISICAO','LINHA_REQUISICAO','ITEM_RC','ITEM_REQUISICAO','ITEM_DA_RC'],
+                            'H', 'Linha requisição', r.respPorLetra);
+  var _iPdR = _cpColOuLetra(cabs, ['PEDIDO','NUMERO_PEDIDO','NUM_PEDIDO','NUMERO_DO_PEDIDO'],
+                            'D', 'Pedido', r.respPorLetra);
 
   // ── Rejeite Supervisor: as colunas que só ele usa ────────────────
   // São as letras que o André passou (C, D, E, G, H, I, L, M, N, T). Procuro
@@ -13339,18 +13368,28 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
       var lb = linhas[b] || [];
       var nomeB = String(lb[iQuem] == null ? '' : lb[iQuem]).trim();
 
-      // ── Quem responde por cada item de pedido ────────────────────
-      // Chave RC + item da RC + pedido — as colunas G, H e D da medição.
-      // Serve ao card Status B, que sabe RC, item e pedido eliminado mas
-      // não sabe o nome de quem tocou aquele pedido. Vale para QUALQUER
-      // status: o pedido do Status B foi eliminado, e filtrar por status
-      // aqui jogaria fora exatamente o que se quer achar.
-      if (iRc !== -1 && iIt !== -1 && iPd !== -1 && nomeB) {
-        var kResp = _cpRespChave(lb[iRc], lb[iIt], lb[iPd]);
-        if (kResp && !r.respPorItem[kResp]) {
-          r.respPorItem[kResp] = nomeB;
-          r.respTotal++;
+      // ── Quem responde por cada item de RC ────────────────────────
+      // Chave RC + item da RC — as colunas G e H da medição. Serve ao
+      // card Status B, que sabe a RC e o item mas não sabe quem cuidou
+      // deles. Vale para QUALQUER status: o pedido do Status B foi
+      // eliminado, e filtrar por status jogaria fora justo o que se
+      // quer achar.
+      // A mesma RC+item pode aparecer em mais de uma linha (pedido
+      // eliminado e o que o substituiu). Fica o primeiro nome, e se
+      // vier outro diferente isso é REGISTRADO — some com o conflito em
+      // silêncio seria pior do que mostrá-lo.
+      if (nomeB) {
+        var kResp = _cpRespChave(lb[_iRcR], lb[_iItR], lb[_iPdR]);
+        if (kResp) {
+          if (!r.respPorItem[kResp]) { r.respPorItem[kResp] = nomeB; r.respTotal++; }
+          else if (r.respPorItem[kResp] !== nomeB) {
+            var outros = r.respOutros[kResp] || (r.respOutros[kResp] = []);
+            if (outros.indexOf(nomeB) === -1) outros.push(nomeB);
+          }
         }
+        // o índice de reserva, por RC + item
+        var k2 = _cpRespChave2(lb[_iRcR], lb[_iItR]);
+        if (k2 && !r.respPorRcItem[k2]) { r.respPorRcItem[k2] = nomeB; r.resp2Total++; }
       }
 
       // ── Rejeite Supervisor ───────────────────────────────────────
@@ -15150,13 +15189,21 @@ function stbLerBU(linhas){
   if (iCab === -1) { r.aviso = 'Não achei STATUS_CARTEIRA nem STATUS_RC — isto é a BU mesmo?'; return r; }
 
   var ix = function(nomes){ return _cpAchaCol(cabs, nomes); };
+  // RC, SEQ e pedido são as três que formam a chave do cruzamento com a
+  // medição. Se o cabeçalho vier com outro nome, caem na letra que o
+  // André passou (A, B e BD) — e a tela avisa que caiu.
+  r.porLetra = [];
   var col = {
-    rc: ix(['RC']), seq: ix(['SEQ','ITEM']),
+    rc: _cpColOuLetra(cabs, ['RC','REQUISICAO','NUMERO_RC'], 'A', 'RC', r.porLetra),
+    seq: _cpColOuLetra(cabs, ['SEQ','ITEM','ITEM_RC'], 'B', 'SEQ', r.porLetra),
     carteira: ix(['STATUS_CARTEIRA']), statusRc: ix(['STATUS_RC']),
     aa: ix(['ANALISTA_AUTOMATICO']), acomp: ix(['N_ACOMPANHAMENTO','NUMERO_ACOMPANHAMENTO']),
-    texto: ix(['TEXTO_BREVE']), ped: ix(['NUMERO_PEDIDO'])
+    texto: ix(['TEXTO_BREVE']),
+    ped: _cpColOuLetra(cabs, ['NUMERO_PEDIDO','PEDIDO','NUM_PEDIDO','NUMERO_DO_PEDIDO',
+                              'PEDIDO_DE_COMPRAS','PEDIDO_COMPRAS'], 'BD', 'Pedido', r.porLetra)
   };
   r.colunas = col;
+  r.cabPedido = (col.ped >= 0 && cabs[col.ped]) ? cabs[col.ped] : '';
   if (col.carteira === -1 || col.statusRc === -1 || col.aa === -1) {
     r.aviso = 'A BU precisa ter STATUS_CARTEIRA, STATUS_RC e ANALISTA_AUTOMATICO.';
     return r;
@@ -15243,7 +15290,10 @@ async function stbUpload(file){
       + cpEsc(nome) + ', ' + cpNum(r.lidas) + ' linhas lidas, <strong>' + cpNum(r.itens.length)
       + '</strong> para duplicar.'
       + (r.reaproveitados ? ' <span style="color:var(--az)">' + cpNum(r.reaproveitados)
-          + ' já vinham com comentário ou marcação de antes.</span>' : '') + '</span>';
+          + ' já vinham com comentário ou marcação de antes.</span>' : '') + '</span>'
+      + ((r.porLetra || []).length
+          ? '<div style="color:var(--am);margin-top:4px">⚠ Não achei pelo nome: '
+            + cpEsc(r.porLetra.join(' · ')) + '. Confira se a coluna é essa mesmo.</div>' : '');
     stbRender();
     var gravou = await stbSalvar();
     if (!gravou && st) {
@@ -16194,6 +16244,25 @@ async function gpCarregarStatusB(){
               atualizadoEm:d.atualizadoEm || '', atualizadoPor:d.atualizadoPor || '' };
   } catch (e) { console.warn('gpCarregarStatusB:', e); }
 }
+// Quantos itens da fila acharam o analista, e por qual chave. É o
+// número que diz na hora se o cruzamento pegou ou não — sem ele, uma
+// coluna vazia podia ser "ninguém bateu" ou "esqueci de subir a
+// medição", e dava no mesmo na tela.
+function gpSBPlacar(lista){
+  var ok = 0, viaRc = 0;
+  (lista || []).forEach(function(i){
+    var v = gpRespInfo(i.rc, i.seq, i.pedido).via;
+    if (v === 'chave') ok++;
+    else if (v === 'rcitem') { ok++; viaRc++; }
+  });
+  var n = (lista || []).length;
+  if (!n) return '';
+  if (!ok) return '<strong style="color:var(--vm)">Nenhum dos ' + cpNum(n)
+    + ' itens bateu com a medição</strong> — confira se a medição é do mesmo período da BU.';
+  return '<strong>' + cpNum(ok) + ' de ' + cpNum(n) + '</strong> acharam o analista'
+    + (viaRc ? ' (' + cpNum(viaRc) + ' só por RC + item, marcados na coluna)' : '') + '.';
+}
+
 // Desde quando, e quantos dias, para um item do card
 function gpSBDesde(i){
   return ((_gpSB.desde || {})[i.rc + '|' + i.seq]) || '';
@@ -16231,12 +16300,15 @@ async function gpSalvarMemorizados(med, arquivo){
 // Sai da medição de momento (RC + item da RC + pedido → RESP_PEDIDO) e
 // é o que dá nome ao responsável no card Status B, que conhece a RC, o
 // item e o pedido eliminado mas não sabe quem cuidou daquele pedido.
-var _gpResp = { mapa:{}, total:0, arquivo:'', atualizadoEm:'', atualizadoPor:'' };
+var _gpResp = { mapa:{}, total:0, mapa2:{}, total2:0, porLetra:[],
+                arquivo:'', atualizadoEm:'', atualizadoPor:'' };
 
 async function gpSalvarResp(med, arquivo){
   try {
     if (!med || !med.respPorItem) return false;
     _gpResp = { mapa: med.respPorItem, total: +med.respTotal || 0,
+                mapa2: med.respPorRcItem || {}, total2: +med.resp2Total || 0,
+                porLetra: med.respPorLetra || [],
                 arquivo: arquivo || '', atualizadoEm:new Date().toISOString(),
                 atualizadoPor:cpQuem() };
     var db = getDB(); if (!db) return false;
@@ -16250,18 +16322,26 @@ async function gpCarregarResp(){
     var doc = await db.collection('config').doc('governanca_resp_pedido').get();
     if (doc && doc.exists) {
       var d = doc.data() || {};
-      _gpResp = { mapa:d.mapa || {}, total:+d.total || 0, arquivo:d.arquivo || '',
+      _gpResp = { mapa:d.mapa || {}, total:+d.total || 0,
+                  mapa2:d.mapa2 || {}, total2:+d.total2 || 0,
+                  porLetra:d.porLetra || [], arquivo:d.arquivo || '',
                   atualizadoEm:d.atualizadoEm || '', atualizadoPor:d.atualizadoPor || '' };
     }
   } catch (e) { console.warn('gpCarregarResp:', e); }
 }
-// O analista do item, pela chave das três partes. Sem medição subida,
-// ou sem a chave lá dentro, devolve vazio — e a tela diz isso em vez de
-// mostrar um nome errado.
-function gpRespDe(rc, item, pedido){
+// O analista do item. Tenta a chave inteira — RC + item + pedido — e,
+// não achando, cai em RC + item. As duas devolvem de ONDE veio, porque
+// o grau de certeza não é o mesmo: o pedido da BU é o ELIMINADO, e a
+// medição pode ter registrado o que entrou no lugar dele.
+function gpRespInfo(rc, item, pedido){
+  var m = _gpResp.mapa || {}, m2 = _gpResp.mapa2 || {};
   var k = _cpRespChave(rc, item, pedido);
-  return (k && _gpResp.mapa) ? (_gpResp.mapa[k] || '') : '';
+  if (k && m[k]) return { nome:m[k], via:'chave' };
+  var k2 = _cpRespChave2(rc, item);
+  if (k2 && m2[k2]) return { nome:m2[k2], via:'rcitem' };
+  return { nome:'', via:'' };
 }
+function gpRespDe(rc, item, pedido){ return gpRespInfo(rc, item, pedido).nome; }
 
 function gpMemPeriodo(){
   var de = document.getElementById('gp-mem-de');
@@ -16287,19 +16367,38 @@ function gpMemItens(){
   return itens;
 }
 
-// A chave que liga a medição ao Status B: RC + item da RC + pedido.
-// RC e pedido vêm com zeros à esquerda em algumas bases e sem em
-// outras ("0036906110" e "36906110" são a mesma RC), e o item ora é
-// "10", ora "00010" — por isso cada parte entra sem os zeros da frente.
+// A chave que liga a medição ao Status B: RC + item da RC.
+//
+// O pedido chegou a entrar na chave, mas não bate: o Status B conhece o
+// pedido ELIMINADO, e a medição guarda o pedido que valeu para aquele
+// item — quase nunca o mesmo número. Com as duas partes o cruzamento
+// acha. Na BU são as colunas A e B; na medição, G e H.
+//
+// Os números vêm com zeros à esquerda em uma base e sem na outra
+// ("0036906110" e "36906110" são a mesma RC; o item ora é "10", ora
+// "00010"), e o Excel às vezes põe um ".0" no fim — por isso cada parte
+// entra limpa.
 function _cpRespN(v){
   var s = String(v == null ? '' : v).trim().replace(/\.0+$/, '');
   s = s.replace(/^0+/, '');
   return s;
 }
+// A chave que o André pediu: RC + item da RC + pedido. Na BU são as
+// colunas A, B e BD; na medição, G, H e D.
 function _cpRespChave(rc, item, pedido){
   var a = _cpRespN(rc), b = _cpRespN(item), c = _cpRespN(pedido);
   if (!a || !c) return '';
   return a + '|' + b + '|' + c;
+}
+// Reserva: só RC + item. O número do pedido pode não bater entre as
+// duas bases (o da BU é o pedido ELIMINADO, e a medição pode ter
+// registrado o que o substituiu). Quando a chave inteira não acha, esta
+// acha — e a tela DIZ que foi por ela, para não parecer o mesmo grau de
+// certeza.
+function _cpRespChave2(rc, item){
+  var a = _cpRespN(rc), b = _cpRespN(item);
+  if (!a) return '';
+  return a + '|' + b;
 }
 
 // Dias corridos de uma data ISO até hoje. É a conta que o André faz na
@@ -19553,7 +19652,11 @@ function gpHtmlStatusB(){
           ? ' (' + cpNum(_gpResp.total) + ' pedido(s) na medição'
             + (_gpResp.arquivo ? ', ' + cpEsc(_gpResp.arquivo) : '') + ')'
           : ' — nenhuma medição subida ainda, por isso a coluna está vazia')
-    +   '. Os <strong>dias parados</strong> contam desde o primeiro dia em que o item '
+    +   '. ' + gpSBPlacar(pend)
+    +   (( _gpResp.porLetra || []).length
+          ? ' <span style="color:var(--am)">⚠ Na medição não achei pelo nome: '
+            + cpEsc(_gpResp.porLetra.join(' · ')) + '.</span>' : '')
+    +   ' Os <strong>dias parados</strong> contam desde o primeiro dia em que o item '
     +   'apareceu na BU sem sair mais'
     +   (_gpSB.primeiroDia
           ? ' — a base começa em ' + cpDataBR(_gpSB.primeiroDia)
@@ -19597,7 +19700,8 @@ function gpHtmlStatusB(){
     if (da !== db2) return (db2 == null ? -1 : db2) - (da == null ? -1 : da);
     return String(a.rc).localeCompare(String(b.rc)) || String(a.seq).localeCompare(String(b.seq));
   }).forEach(function(i){
-    var resp = gpRespDe(i.rc, i.seq, i.pedido);
+    var ri = gpRespInfo(i.rc, i.seq, i.pedido);
+    var resp = ri.nome;
     var dt = gpSBDesde(i);
     h += '<tr>'
       + '<td style="font-weight:700;color:var(--az)">' + cpEsc(i.rc) + '</td>'
@@ -19606,7 +19710,13 @@ function gpHtmlStatusB(){
       + '<td>' + cpEsc(i.pedido || '—') + '</td>'
       + '<td style="font-size:10.5px;font-weight:600'
       +   (resp ? '' : ';color:var(--tx2);font-weight:400') + '">'
-      +   cpEsc(resp || '—') + '</td>'
+      +   cpEsc(resp || '—')
+      +   (ri.via === 'rcitem'
+            ? ' <span title="O pedido da BU não bateu com o da medição; '
+              + 'o nome veio por RC + item." style="font-size:9px;font-weight:700;'
+              + 'color:var(--am);background:var(--amc);border-radius:4px;'
+              + 'padding:1px 5px;white-space:nowrap">RC+item</span>' : '')
+      +   '</td>'
       + '<td style="text-align:center;font-size:10.5px">'
       +   (dt ? cpDataBR(dt) : '<span style="color:var(--tx2)">—</span>') + '</td>'
       + '<td style="text-align:center">' + gpDiasHtml(gpSBDias(i)) + '</td>'
