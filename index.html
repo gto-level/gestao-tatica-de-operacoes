@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '26/10 09:30';
+var GTO_BUILD = '27/10 11:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -13157,6 +13157,7 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
             convMapa:{}, convTotal:{ mem:0, emi:0, lib:0, aguard:0, rej:0, outro:0 },
             convVelhas:0, convDesde:'',
             rejMed:{}, rejMedTotal:0, donoPedido:{},
+            respPorItem:{}, respTotal:0,
             rejSup:[], rejSupTotal:0, rejSupCols:{}, rejSupPos:[], rejSupPed:{},
             rejSupFunil:{ lidas:0, st8:0, elimPedido:0, elimItem:0, semElim:0,
                           semChave:0, ok:0, status:{}, exElimPedido:[], exElimItem:[],
@@ -13337,6 +13338,20 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
     for (var b = iCab + 1; b < linhas.length; b++) {
       var lb = linhas[b] || [];
       var nomeB = String(lb[iQuem] == null ? '' : lb[iQuem]).trim();
+
+      // ── Quem responde por cada item de pedido ────────────────────
+      // Chave RC + item da RC + pedido — as colunas G, H e D da medição.
+      // Serve ao card Status B, que sabe RC, item e pedido eliminado mas
+      // não sabe o nome de quem tocou aquele pedido. Vale para QUALQUER
+      // status: o pedido do Status B foi eliminado, e filtrar por status
+      // aqui jogaria fora exatamente o que se quer achar.
+      if (iRc !== -1 && iIt !== -1 && iPd !== -1 && nomeB) {
+        var kResp = _cpRespChave(lb[iRc], lb[iIt], lb[iPd]);
+        if (kResp && !r.respPorItem[kResp]) {
+          r.respPorItem[kResp] = nomeB;
+          r.respTotal++;
+        }
+      }
 
       // ── Rejeite Supervisor ───────────────────────────────────────
       // STATUS_PROCESSO 8, CODIGO_ELIMINACAO vazio e
@@ -13736,6 +13751,7 @@ async function cpHandleUpload(file){
     };
     await _guarda('cockpit',     function(){ return gpSalvarCockpit(med, file.name); });
     await _guarda('memorizados', function(){ return gpSalvarMemorizados(med, file.name); });
+    await _guarda('resp_pedido', function(){ return gpSalvarResp(med, file.name); });
     await _guarda('conversao',   function(){ return monSalvarConversao(med, file.name); });
     await _guarda('rejeite',     function(){ return rjsSalvarMedicao(med, file.name); });
     try { await rjlCarregar(); await rjlAplicarSupervisor(); } catch (e) {}
@@ -16115,7 +16131,7 @@ var _gpCockPsmv = cpNormCab('Em liberação');   // o card abre já nele
 // Controle de Pedidos › Status B. Pendente = ainda não foi marcado
 // como linha duplicada.
 var _gpSB = { itens:[], data:'', arquivo:'', lidas:0, emTratativa:0, statusB:0,
-              atualizadoEm:'', atualizadoPor:'' };
+              desde:{}, primeiroDia:'', atualizadoEm:'', atualizadoPor:'' };
 
 function gpSBPendentes(){
   return (_gpSB.itens || []).filter(function(i){ return !i.marcado; });
@@ -16124,25 +16140,65 @@ function gpSBMarcados(){
   return (_gpSB.itens || []).filter(function(i){ return !!i.marcado; });
 }
 
-// O dia mais recente da coleção do Status B que tenha item.
+// Desde quando cada item está parado em Status B.
+//
+// Não existe campo de "entrou em" na BU — mas existe o histórico: a
+// coleção status_b guarda um documento por dia, com a lista daquele
+// dia. A data de entrada é o começo da SEQUÊNCIA CONTÍNUA atual: se o
+// item saiu da BU num dia e voltou depois, a conta recomeça na volta,
+// porque o tempo parado é o de agora, não a soma de todas as vezes.
+//
+// O limite é honesto: só dá para enxergar até o dia mais antigo que
+// está gravado. Quem já estava lá antes do primeiro upload aparece
+// como "desde o primeiro dia da base", e a tela diz isso.
+function _stbDesdeDeDias(dias){
+  // dias: [{data, chaves:Set}] em ordem crescente
+  var desde = {}, anterior = null;
+  dias.forEach(function(dia){
+    dia.chaves.forEach(function(k){
+      // continuou do dia anterior? mantém a data de entrada
+      if (anterior && anterior[k]) desde[k] = anterior[k];
+      else desde[k] = dia.data;          // entrou (ou voltou) hoje
+    });
+    var agora = {};
+    dia.chaves.forEach(function(k){ agora[k] = desde[k]; });
+    anterior = agora;
+  });
+  return anterior || {};
+}
+
+// O dia mais recente da coleção do Status B que tenha item — e, de
+// quebra, desde quando cada item está parado.
 async function gpCarregarStatusB(){
   try {
     var db = getDB(); if (!db) return;
     var snap = await db.collection(STB_COL).get();
-    var melhor = null;
+    var melhor = null, dias = [];
     snap.forEach(function(doc){
       var d = doc.data() || {};
       var dt = d.data || doc.id;
       if (!(d.itens || []).length) return;
+      var ch = {};
+      (d.itens || []).forEach(function(i){ ch[i.rc + '|' + i.seq] = 1; });
+      dias.push({ data:String(dt),
+                  chaves:{ forEach:function(f){ Object.keys(ch).forEach(f); } } });
       if (!melhor || String(dt) > String(melhor.data)) melhor = { data:dt, d:d };
     });
     if (!melhor) return;
+    dias.sort(function(a, b){ return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
+    var desde = _stbDesdeDeDias(dias);
     var d = melhor.d;
     _gpSB = { itens:d.itens || [], data:melhor.data, arquivo:d.arquivo || '',
               lidas:+d.lidas || 0, emTratativa:+d.emTratativa || 0, statusB:+d.statusB || 0,
+              desde: desde, primeiroDia: dias.length ? dias[0].data : '',
               atualizadoEm:d.atualizadoEm || '', atualizadoPor:d.atualizadoPor || '' };
   } catch (e) { console.warn('gpCarregarStatusB:', e); }
 }
+// Desde quando, e quantos dias, para um item do card
+function gpSBDesde(i){
+  return ((_gpSB.desde || {})[i.rc + '|' + i.seq]) || '';
+}
+function gpSBDias(i){ return gpDias(gpSBDesde(i)); }
 
 // Leva ele para a aba onde o Status B é tratado de verdade.
 function gpIrStatusB(){
@@ -16171,6 +16227,42 @@ async function gpSalvarMemorizados(med, arquivo){
   } catch (e) { console.warn('gpSalvarMemorizados:', e); return false; }
 }
 
+// ── quem responde por cada item de pedido ────────────────────────
+// Sai da medição de momento (RC + item da RC + pedido → RESP_PEDIDO) e
+// é o que dá nome ao responsável no card Status B, que conhece a RC, o
+// item e o pedido eliminado mas não sabe quem cuidou daquele pedido.
+var _gpResp = { mapa:{}, total:0, arquivo:'', atualizadoEm:'', atualizadoPor:'' };
+
+async function gpSalvarResp(med, arquivo){
+  try {
+    if (!med || !med.respPorItem) return false;
+    _gpResp = { mapa: med.respPorItem, total: +med.respTotal || 0,
+                arquivo: arquivo || '', atualizadoEm:new Date().toISOString(),
+                atualizadoPor:cpQuem() };
+    var db = getDB(); if (!db) return false;
+    await db.collection('config').doc('governanca_resp_pedido').set(_gpResp);
+    return true;
+  } catch (e) { console.warn('gpSalvarResp:', e); return false; }
+}
+async function gpCarregarResp(){
+  try {
+    var db = getDB(); if (!db) return;
+    var doc = await db.collection('config').doc('governanca_resp_pedido').get();
+    if (doc && doc.exists) {
+      var d = doc.data() || {};
+      _gpResp = { mapa:d.mapa || {}, total:+d.total || 0, arquivo:d.arquivo || '',
+                  atualizadoEm:d.atualizadoEm || '', atualizadoPor:d.atualizadoPor || '' };
+    }
+  } catch (e) { console.warn('gpCarregarResp:', e); }
+}
+// O analista do item, pela chave das três partes. Sem medição subida,
+// ou sem a chave lá dentro, devolve vazio — e a tela diz isso em vez de
+// mostrar um nome errado.
+function gpRespDe(rc, item, pedido){
+  var k = _cpRespChave(rc, item, pedido);
+  return (k && _gpResp.mapa) ? (_gpResp.mapa[k] || '') : '';
+}
+
 function gpMemPeriodo(){
   var de = document.getElementById('gp-mem-de');
   var ate = document.getElementById('gp-mem-ate');
@@ -16193,6 +16285,40 @@ function gpMemItens(){
     return String(a.comprador).localeCompare(String(b.comprador));
   });
   return itens;
+}
+
+// A chave que liga a medição ao Status B: RC + item da RC + pedido.
+// RC e pedido vêm com zeros à esquerda em algumas bases e sem em
+// outras ("0036906110" e "36906110" são a mesma RC), e o item ora é
+// "10", ora "00010" — por isso cada parte entra sem os zeros da frente.
+function _cpRespN(v){
+  var s = String(v == null ? '' : v).trim().replace(/\.0+$/, '');
+  s = s.replace(/^0+/, '');
+  return s;
+}
+function _cpRespChave(rc, item, pedido){
+  var a = _cpRespN(rc), b = _cpRespN(item), c = _cpRespN(pedido);
+  if (!a || !c) return '';
+  return a + '|' + b + '|' + c;
+}
+
+// Dias corridos de uma data ISO até hoje. É a conta que o André faz na
+// mão: hoje − a data da coluna. Data em branco ou torta devolve null,
+// que a tela mostra como traço em vez de inventar um número.
+function gpDias(iso){
+  if (!iso) return null;
+  var a = new Date(String(iso).slice(0, 10) + 'T12:00:00');
+  if (isNaN(a.getTime())) return null;
+  var b = new Date(cpHojeISO() + 'T12:00:00');
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+// Quanto mais tempo parado, mais quente a cor. Os cortes são os mesmos
+// que o resto do GTO usa para idade de item: 15 e 30 dias.
+function gpDiasHtml(n){
+  if (n == null) return '<span style="color:var(--tx2)">—</span>';
+  var cor = n >= 30 ? 'var(--vm)' : (n >= 15 ? 'var(--am)' : 'var(--tx2)');
+  var peso = n >= 15 ? '700' : '600';
+  return '<span style="color:' + cor + ';font-weight:' + peso + '">' + n + '</span>';
 }
 
 function gpHtmlMemorizados(){
@@ -16240,6 +16366,7 @@ function gpHtmlMemorizados(){
   h += '<div style="overflow:auto;max-height:520px"><table><thead><tr>'
     + '<th>Comprador</th><th>Chave</th><th>Pedido</th><th>RC</th><th>Item</th>'
     + '<th>Grupo</th><th>Fornecedor</th><th>Memorizado em</th>'
+    + '<th style="text-align:center">Dias parado</th>'
     + '<th style="text-align:right">Valor</th></tr></thead><tbody>';
   itens.forEach(function(i){
     h += '<tr>'
@@ -16251,6 +16378,7 @@ function gpHtmlMemorizados(){
       + '<td>' + cpEsc(i.grupo || '—') + '</td>'
       + '<td style="font-size:10.5px">' + cpEsc(i.forn || '—') + '</td>'
       + '<td>' + (i.criacao ? cpDataBR(i.criacao) : '—') + '</td>'
+      + '<td style="text-align:center">' + gpDiasHtml(gpDias(i.criacao)) + '</td>'
       + '<td style="text-align:right">' + (i.valor ? mdDinheiro(i.valor) : '—') + '</td></tr>';
   });
   h += '</tbody></table></div></div>';
@@ -19419,6 +19547,17 @@ function gpHtmlStatusB(){
     +   '<strong>STATUS_RC igual a B</strong> · '
     +   '<strong>ANALISTA_AUTOMATICO Tratar Pedido Eliminado</strong>. '
     +   'O número do card é o que ainda não foi marcado como linha duplicada.'
+    +   '<br>O <strong>analista do pedido</strong> vem da medição de momento, '
+    +   'cruzando <strong>RC + item da RC + pedido</strong>'
+    +   (_gpResp.total
+          ? ' (' + cpNum(_gpResp.total) + ' pedido(s) na medição'
+            + (_gpResp.arquivo ? ', ' + cpEsc(_gpResp.arquivo) : '') + ')'
+          : ' — nenhuma medição subida ainda, por isso a coluna está vazia')
+    +   '. Os <strong>dias parados</strong> contam desde o primeiro dia em que o item '
+    +   'apareceu na BU sem sair mais'
+    +   (_gpSB.primeiroDia
+          ? ' — a base começa em ' + cpDataBR(_gpSB.primeiroDia)
+            + ', então item mais antigo que isso aparece como dessa data.' : '.')
     +   (_gpSB.data ? '<br>BU de <strong>' + cpDataBR(_gpSB.data) + '</strong>'
         + (_gpSB.arquivo ? ' (' + cpEsc(_gpSB.arquivo) + ')' : '')
         + ' · ' + cpNum(_gpSB.lidas) + ' linhas lidas · ' + cpNum((_gpSB.itens || []).length)
@@ -19447,16 +19586,30 @@ function gpHtmlStatusB(){
     + '</div>';
   h += '<div style="overflow:auto;max-height:520px"><table><thead><tr>'
     + '<th>RC</th><th>Item</th><th>Novo item</th><th>Pedido eliminado</th>'
+    + '<th>Analista do pedido</th>'
+    + '<th style="text-align:center">Em B desde</th>'
+    + '<th style="text-align:center">Dias parado</th>'
     + '<th>Nº acompanhamento</th><th>Responsável</th><th>Comentário</th>'
     + '<th>Texto breve</th></tr></thead><tbody>';
   pend.slice().sort(function(a, b){
+    // o que está parado há mais tempo primeiro — é por onde se começa
+    var da = gpSBDias(a), db2 = gpSBDias(b);
+    if (da !== db2) return (db2 == null ? -1 : db2) - (da == null ? -1 : da);
     return String(a.rc).localeCompare(String(b.rc)) || String(a.seq).localeCompare(String(b.seq));
   }).forEach(function(i){
+    var resp = gpRespDe(i.rc, i.seq, i.pedido);
+    var dt = gpSBDesde(i);
     h += '<tr>'
       + '<td style="font-weight:700;color:var(--az)">' + cpEsc(i.rc) + '</td>'
       + '<td style="font-weight:600">' + cpEsc(i.seq) + '</td>'
       + '<td style="font-weight:700;color:var(--vd)">' + cpEsc(i.novoItem || '—') + '</td>'
       + '<td>' + cpEsc(i.pedido || '—') + '</td>'
+      + '<td style="font-size:10.5px;font-weight:600'
+      +   (resp ? '' : ';color:var(--tx2);font-weight:400') + '">'
+      +   cpEsc(resp || '—') + '</td>'
+      + '<td style="text-align:center;font-size:10.5px">'
+      +   (dt ? cpDataBR(dt) : '<span style="color:var(--tx2)">—</span>') + '</td>'
+      + '<td style="text-align:center">' + gpDiasHtml(gpSBDias(i)) + '</td>'
       + '<td style="font-size:10.5px">' + cpEsc(i.acomp || '—') + '</td>'
       + '<td style="font-size:10.5px;font-weight:600">' + cpEsc(String(i.nome || '').trim() || '—') + '</td>'
       + '<td style="font-size:10.5px">' + cpEsc(i.comentario || '—') + '</td>'
@@ -19826,6 +19979,7 @@ async function gpAbrir(){
         _gpMem = { itens:M.itens || [], total:+M.total || 0, arquivo:M.arquivo || '',
                    atualizadoEm:M.atualizadoEm || '', atualizadoPor:M.atualizadoPor || '' };
       }
+      await gpCarregarResp();
       var d4 = await db.collection('config').doc('governanca_cockpit').get();
       if (d4 && d4.exists) {
         var C = d4.data() || {};
@@ -19921,7 +20075,10 @@ function gpCopiar(){
         if (i.chave) pp.push(i.chave);
         if (i.pedido) pp.push('Pedido ' + i.pedido);
         if (i.rc) pp.push('RC ' + i.rc + (i.item ? '/' + i.item : ''));
-        if (i.criacao) pp.push(cpDataBR(i.criacao));
+        if (i.criacao) {
+          var dM = gpDias(i.criacao);
+          pp.push(cpDataBR(i.criacao) + (dM == null ? '' : ' (' + dM + ' dia(s))'));
+        }
         tm.push('  ' + pp.join(' · '));
       });
     });
@@ -19941,9 +20098,13 @@ function gpCopiar(){
       ts.push('');
       ts.push(nome + ' (' + porNomeSB[nome].length + '):');
       porNomeSB[nome].forEach(function(i){
+        var rS = gpRespDe(i.rc, i.seq, i.pedido);
+        var dS = gpSBDias(i);
         ts.push('  RC ' + i.rc + '/' + i.seq
           + (i.novoItem ? ' → novo item ' + i.novoItem : '')
           + (i.pedido ? ' · pedido eliminado ' + i.pedido : '')
+          + (rS ? ' · ' + rS : '')
+          + (dS == null ? '' : ' · ' + dS + ' dia(s) em B')
           + (i.comentario ? ' · ' + i.comentario : ''));
       });
     });
@@ -19999,11 +20160,13 @@ function gpBaixarExcel(){
     }
     if (_gpCard === 'memorizados') {
       var cabM = ['Comprador','Chave','Pedido','RC','Item','Grupo comprador','Fornecedor',
-                  'Memorizado em','Valor'];
+                  'Memorizado em','Dias parado','Valor'];
       var aoaM = [cabM];
       gpMemItens().forEach(function(i){
+        var dM = gpDias(i.criacao);
         aoaM.push([i.comprador, i.chave, i.pedido, i.rc, i.item, i.grupo, i.forn,
-                   i.criacao ? cpDataBR(i.criacao) : '', +i.valor || 0]);
+                   i.criacao ? cpDataBR(i.criacao) : '', dM == null ? '' : dM,
+                   +i.valor || 0]);
       });
       var wsM = XLSX.utils.aoa_to_sheet(aoaM);
       wsM['!cols'] = cabM.map(function(c){ return { wch: Math.max(10, Math.min(30, c.length + 4)) }; });
@@ -20013,11 +20176,16 @@ function gpBaixarExcel(){
       return;
     }
     if (_gpCard === 'statusb') {
-      var cabS = ['RC','Item','Novo item','Pedido eliminado','Nº acompanhamento',
+      var cabS = ['RC','Item','Novo item','Pedido eliminado','Analista do pedido',
+                  'Em B desde','Dias parado','Nº acompanhamento',
                   'Grupo comprador','Responsável','Comentário','Texto breve','Texto do script'];
       var aoaS = [cabS];
       gpSBPendentes().forEach(function(i){
-        aoaS.push([i.rc, i.seq, i.novoItem, i.pedido, i.acomp, STB_GRUPO,
+        var dS = gpSBDias(i), dtS = gpSBDesde(i);
+        aoaS.push([i.rc, i.seq, i.novoItem, i.pedido,
+                   gpRespDe(i.rc, i.seq, i.pedido),
+                   dtS ? cpDataBR(dtS) : '', dS == null ? '' : dS,
+                   i.acomp, STB_GRUPO,
                    i.nome || '', i.comentario || '', i.textoBreve || '',
                    stbTextoDe(i.seq, i.novoItem)]);
       });
