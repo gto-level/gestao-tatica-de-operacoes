@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '27/10 15:30';
+var GTO_BUILD = '27/10 16:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -16310,6 +16310,7 @@ async function gpSalvarMemorizados(med, arquivo){
 // Sai da medição de momento (RC + item da RC + pedido → RESP_PEDIDO) e
 // é o que dá nome ao responsável no card Status B, que conhece a RC, o
 // item e o pedido eliminado mas não sabe quem cuidou daquele pedido.
+var SB_SEM_ANALISTA = '(sem analista na medição)';
 var _gpResp = { mapaPed:{}, totalPed:0, mapa2:{}, total2:0, conflito:0,
                 porLetra:[], arquivo:'', atualizadoEm:'', atualizadoPor:'', erro:'' };
 
@@ -19764,12 +19765,15 @@ function gpHtmlStatusB(){
       + 'linha duplicada.</div></div>';
     return h;
   }
+  // O resumo é por QUEM EMITIU o pedido, como na lista dos memorizados.
+  // Antes era pelo campo "Responsável", que quase sempre está em branco
+  // — dava "(sem nome) 237", que não ajudava ninguém.
   var porNome = {};
   pend.forEach(function(i){
-    var k = String(i.nome || '').trim() || '(sem nome)';
+    var k = gpRespDe(i.rc, i.seq, i.pedido) || SB_SEM_ANALISTA;
     porNome[k] = (porNome[k] || 0) + 1;
   });
-  h += '<div style="font-size:11px;color:var(--tx2);margin-bottom:.7rem">Por responsável: '
+  h += '<div style="font-size:11px;color:var(--tx2);margin-bottom:.7rem">Por analista do pedido: '
     + Object.keys(porNome).sort(function(a, b){ return porNome[b] - porNome[a]; })
         .map(function(k){ return cpEsc(k) + ' <strong>' + porNome[k] + '</strong>'; }).join(' · ')
     + '</div>';
@@ -20285,21 +20289,31 @@ function gpCopiar(){
     var pendSB = gpSBPendentes();
     var ts = ['STATUS B — ' + cpNum(pendSB.length) + ' item(ns) a duplicar'
               + (_gpSB.data ? ' (BU de ' + cpDataBR(_gpSB.data) + ')' : '')];
+    // Agrupado por QUEM EMITIU o pedido, igual à lista dos memorizados:
+    // é assim que a lista é repassada, uma parte para cada comprador.
+    // Dentro de cada um, o mais parado primeiro.
     var porNomeSB = {};
     pendSB.forEach(function(i){
-      var k = String(i.nome || '').trim() || '(sem nome)';
+      var k = gpRespDe(i.rc, i.seq, i.pedido) || SB_SEM_ANALISTA;
       (porNomeSB[k] = porNomeSB[k] || []).push(i);
     });
-    Object.keys(porNomeSB).sort().forEach(function(nome){
+    // quem não tem analista vai para o fim: é o que precisa de garimpo
+    Object.keys(porNomeSB).sort(function(a, b){
+      if ((a === SB_SEM_ANALISTA) !== (b === SB_SEM_ANALISTA))
+        return a === SB_SEM_ANALISTA ? 1 : -1;
+      return a.localeCompare(b, 'pt-BR');
+    }).forEach(function(nome){
       ts.push('');
       ts.push(nome + ' (' + porNomeSB[nome].length + '):');
-      porNomeSB[nome].forEach(function(i){
-        var rS = gpRespDe(i.rc, i.seq, i.pedido);
+      porNomeSB[nome].slice().sort(function(a, b){
+        var da = gpSBDias(a), db2 = gpSBDias(b);
+        if (da !== db2) return (db2 == null ? -1 : db2) - (da == null ? -1 : da);
+        return String(a.rc).localeCompare(String(b.rc));
+      }).forEach(function(i){
         var dS = gpSBDias(i);
         ts.push('  RC ' + i.rc + '/' + i.seq
           + (i.novoItem ? ' → novo item ' + i.novoItem : '')
           + (i.pedido ? ' · pedido eliminado ' + i.pedido : '')
-          + (rS ? ' · ' + rS : '')
           + (dS == null ? '' : ' · ' + dS + ' dia(s) em B')
           + (i.comentario ? ' · ' + i.comentario : ''));
       });
