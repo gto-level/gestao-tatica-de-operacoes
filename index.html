@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '27/10 14:20';
+var GTO_BUILD = '27/10 15:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -13177,6 +13177,7 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
             rejMed:{}, rejMedTotal:0, donoPedido:{},
             respPorItem:{}, respOutros:{}, respTotal:0,
             respPorRcItem:{}, resp2Total:0, respPorLetra:[],
+            respPorPedido:{}, respPedTotal:0, respPedConflito:0,
             rejSup:[], rejSupTotal:0, rejSupCols:{}, rejSupPos:[], rejSupPed:{},
             rejSupFunil:{ lidas:0, st8:0, elimPedido:0, elimItem:0, semElim:0,
                           semChave:0, ok:0, status:{}, exElimPedido:[], exElimItem:[],
@@ -13390,6 +13391,14 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
         // o índice de reserva, por RC + item
         var k2 = _cpRespChave2(lb[_iRcR], lb[_iItR]);
         if (k2 && !r.respPorRcItem[k2]) { r.respPorRcItem[k2] = nomeB; r.resp2Total++; }
+        // e o que responde à pergunta direta — QUEM EMITIU ESTE PEDIDO.
+        // Um pedido tem um emissor só, então a chave é o número dele:
+        // BU coluna BD = medição coluna D, sem mais nada no meio.
+        var kp = _cpRespN(lb[_iPdR]);
+        if (kp) {
+          if (!r.respPorPedido[kp]) { r.respPorPedido[kp] = nomeB; r.respPedTotal++; }
+          else if (r.respPorPedido[kp] !== nomeB) r.respPedConflito++;
+        }
       }
 
       // ── Rejeite Supervisor ───────────────────────────────────────
@@ -16252,13 +16261,14 @@ function gpSBPlacar(lista){
   var ok = 0, viaRc = 0;
   (lista || []).forEach(function(i){
     var v = gpRespInfo(i.rc, i.seq, i.pedido).via;
-    if (v === 'chave') ok++;
+    if (v === 'pedido') ok++;
     else if (v === 'rcitem') { ok++; viaRc++; }
   });
   var n = (lista || []).length;
   if (!n) return '';
   if (!ok) return '<strong style="color:var(--vm)">Nenhum dos ' + cpNum(n)
-    + ' itens bateu com a medição</strong> — confira se a medição é do mesmo período da BU.';
+    + ' pedidos da fila está na medição</strong> — confira se a medição é do mesmo '
+    + 'período da BU, porque o pedido do Status B foi eliminado e pode ser anterior a ela.';
   return '<strong>' + cpNum(ok) + ' de ' + cpNum(n) + '</strong> acharam o analista'
     + (viaRc ? ' (' + cpNum(viaRc) + ' só por RC + item, marcados na coluna)' : '') + '.';
 }
@@ -16300,33 +16310,101 @@ async function gpSalvarMemorizados(med, arquivo){
 // Sai da medição de momento (RC + item da RC + pedido → RESP_PEDIDO) e
 // é o que dá nome ao responsável no card Status B, que conhece a RC, o
 // item e o pedido eliminado mas não sabe quem cuidou daquele pedido.
-var _gpResp = { mapa:{}, total:0, mapa2:{}, total2:0, porLetra:[],
-                arquivo:'', atualizadoEm:'', atualizadoPor:'' };
+var _gpResp = { mapaPed:{}, totalPed:0, mapa2:{}, total2:0, conflito:0,
+                porLetra:[], arquivo:'', atualizadoEm:'', atualizadoPor:'', erro:'' };
+
+// Uma medição tem dezenas de milhares de linhas, e um documento do
+// Firestore tem 1 MiB. Gravar o índice inteiro num doc só não cabia — e
+// o erro ficava no console, com a coluna do analista vazia na tela sem
+// dizer por quê. Então: os nomes viram um dicionário (são algumas
+// dezenas, repetidos milhares de vezes) e o resto é fatiado em pedaços.
+var GPR_PARTE = 700000;
+var GPR_DOC = 'governanca_resp_pedido';
+
+function _gpRespEmpacotar(med){
+  var nomes = [], idx = {};
+  var num = function(nome){
+    if (idx[nome] == null) { idx[nome] = nomes.length; nomes.push(nome); }
+    return idx[nome];
+  };
+  var comprime = function(mapa){
+    var o = {};
+    Object.keys(mapa || {}).forEach(function(k){ o[k] = num(mapa[k]); });
+    return o;
+  };
+  // a ordem importa: 'ped' é o que responde "quem emitiu este pedido"
+  var ped = comprime(med.respPorPedido);
+  var rci = comprime(med.respPorRcItem);
+  return { nomes:nomes, ped:ped, rci:rci };
+}
+function _gpRespDesempacotar(pct){
+  var nomes = pct.nomes || [];
+  var abre = function(mapa){
+    var o = {};
+    Object.keys(mapa || {}).forEach(function(k){ o[k] = nomes[mapa[k]] || ''; });
+    return o;
+  };
+  return { ped: abre(pct.ped), rci: abre(pct.rci) };
+}
 
 async function gpSalvarResp(med, arquivo){
   try {
-    if (!med || !med.respPorItem) return false;
-    _gpResp = { mapa: med.respPorItem, total: +med.respTotal || 0,
-                mapa2: med.respPorRcItem || {}, total2: +med.resp2Total || 0,
+    if (!med || !med.respPorPedido) return false;
+    var pct = _gpRespEmpacotar(med);
+    _gpResp = { mapaPed: _gpRespDesempacotar(pct).ped,
+                mapa2: med.respPorRcItem || {},
+                totalPed: +med.respPedTotal || 0, total2: +med.resp2Total || 0,
+                conflito: +med.respPedConflito || 0,
                 porLetra: med.respPorLetra || [],
                 arquivo: arquivo || '', atualizadoEm:new Date().toISOString(),
-                atualizadoPor:cpQuem() };
+                atualizadoPor:cpQuem(), erro:'' };
     var db = getDB(); if (!db) return false;
-    await db.collection('config').doc('governanca_resp_pedido').set(_gpResp);
+    var txt = JSON.stringify(pct), partes = [];
+    for (var i = 0; i < txt.length; i += GPR_PARTE) partes.push(txt.slice(i, i + GPR_PARTE));
+    var escritas = partes.map(function(t, j){
+      return db.collection('config').doc(GPR_DOC + '_' + j).set({ t:t });
+    });
+    await Promise.all(escritas);
+    await db.collection('config').doc(GPR_DOC).set({
+      v:2, partes: partes.length,
+      totalPed: _gpResp.totalPed, total2: _gpResp.total2, conflito: _gpResp.conflito,
+      porLetra: _gpResp.porLetra, arquivo: _gpResp.arquivo,
+      atualizadoEm: _gpResp.atualizadoEm, atualizadoPor: _gpResp.atualizadoPor
+    });
     return true;
-  } catch (e) { console.warn('gpSalvarResp:', e); return false; }
+  } catch (e) {
+    console.warn('gpSalvarResp:', e);
+    _gpResp.erro = e.message || 'não consegui gravar';
+    return false;
+  }
 }
 async function gpCarregarResp(){
   try {
     var db = getDB(); if (!db) return;
-    var doc = await db.collection('config').doc('governanca_resp_pedido').get();
-    if (doc && doc.exists) {
-      var d = doc.data() || {};
-      _gpResp = { mapa:d.mapa || {}, total:+d.total || 0,
-                  mapa2:d.mapa2 || {}, total2:+d.total2 || 0,
-                  porLetra:d.porLetra || [], arquivo:d.arquivo || '',
-                  atualizadoEm:d.atualizadoEm || '', atualizadoPor:d.atualizadoPor || '' };
+    var doc = await db.collection('config').doc(GPR_DOC).get();
+    if (!doc || !doc.exists) return;
+    var d = doc.data() || {};
+    var base = { mapaPed:{}, mapa2:{}, totalPed:+d.totalPed || 0, total2:+d.total2 || 0,
+                 conflito:+d.conflito || 0, porLetra:d.porLetra || [],
+                 arquivo:d.arquivo || '', atualizadoEm:d.atualizadoEm || '',
+                 atualizadoPor:d.atualizadoPor || '', erro:'' };
+    if (d.v === 2 && d.partes) {
+      var docs = await Promise.all((function(){
+        var ps = [];
+        for (var i = 0; i < d.partes; i++) ps.push(db.collection('config').doc(GPR_DOC + '_' + i).get());
+        return ps;
+      })());
+      var txt = '';
+      docs.forEach(function(x){ if (x && x.exists) txt += (x.data().t || ''); });
+      try {
+        var abertos = _gpRespDesempacotar(JSON.parse(txt));
+        base.mapaPed = abertos.ped; base.mapa2 = abertos.rci;
+      } catch (e2) { base.erro = 'o índice gravado veio quebrado — suba a medição de novo'; }
+    } else {
+      // formato antigo, de um doc só
+      base.mapaPed = d.mapaPed || {}; base.mapa2 = d.mapa2 || d.mapa || {};
     }
+    _gpResp = base;
   } catch (e) { console.warn('gpCarregarResp:', e); }
 }
 // O analista do item. Tenta a chave inteira — RC + item + pedido — e,
@@ -16334,9 +16412,15 @@ async function gpCarregarResp(){
 // o grau de certeza não é o mesmo: o pedido da BU é o ELIMINADO, e a
 // medição pode ter registrado o que entrou no lugar dele.
 function gpRespInfo(rc, item, pedido){
-  var m = _gpResp.mapa || {}, m2 = _gpResp.mapa2 || {};
-  var k = _cpRespChave(rc, item, pedido);
-  if (k && m[k]) return { nome:m[k], via:'chave' };
+  var mp = _gpResp.mapaPed || {}, m2 = _gpResp.mapa2 || {};
+  // A pergunta é "quem emitiu ESTE pedido" — então o número do pedido
+  // sozinho é a resposta, e é a primeira tentativa (BU coluna BD =
+  // medição coluna D).
+  var kp = _cpRespN(pedido);
+  if (kp && mp[kp]) return { nome:mp[kp], via:'pedido' };
+  // Reserva: o pedido da BU é o ELIMINADO, e a medição pode ter
+  // registrado o que entrou no lugar dele. Aí vale RC + item, e a tela
+  // diz que foi por essa — o grau de certeza não é o mesmo.
   var k2 = _cpRespChave2(rc, item);
   if (k2 && m2[k2]) return { nome:m2[k2], via:'rcitem' };
   return { nome:'', via:'' };
@@ -19646,12 +19730,14 @@ function gpHtmlStatusB(){
     +   '<strong>STATUS_RC igual a B</strong> · '
     +   '<strong>ANALISTA_AUTOMATICO Tratar Pedido Eliminado</strong>. '
     +   'O número do card é o que ainda não foi marcado como linha duplicada.'
-    +   '<br>O <strong>analista do pedido</strong> vem da medição de momento, '
-    +   'cruzando <strong>RC + item da RC + pedido</strong>'
-    +   (_gpResp.total
-          ? ' (' + cpNum(_gpResp.total) + ' pedido(s) na medição'
+    +   '<br>O <strong>analista do pedido</strong> é quem emitiu aquele pedido: '
+    +   'vem da medição de momento, pelo <strong>número do pedido</strong> '
+    +   '(BU coluna BD = medição coluna D)'
+    +   (_gpResp.totalPed
+          ? ' (' + cpNum(_gpResp.totalPed) + ' pedido(s) na medição'
             + (_gpResp.arquivo ? ', ' + cpEsc(_gpResp.arquivo) : '') + ')'
           : ' — nenhuma medição subida ainda, por isso a coluna está vazia')
+    +   (_gpResp.erro ? ' <span style="color:var(--vm)">⚠ ' + cpEsc(_gpResp.erro) + '</span>' : '')
     +   '. ' + gpSBPlacar(pend)
     +   (( _gpResp.porLetra || []).length
           ? ' <span style="color:var(--am)">⚠ Na medição não achei pelo nome: '
