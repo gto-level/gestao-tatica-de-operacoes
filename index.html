@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '28/10 09:40';
+var GTO_BUILD = '28/10 10:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -32780,7 +32780,11 @@ function _agrPreencher(o, m, trat, r){
   try { o.status = govCalcStatus(prazo, m.finalizado || '') || '—'; } catch (e) {}
   if (m.finalizado) {
     o.concluidoEm = String(m.finalizado).split('-').reverse().join('/');
-    o.__motivo = 'Já concluído em ' + o.concluidoEm + ' — fora da conta do card.';
+    _agrPintarConclusao(o);
+    o.__motivo = 'Concluído em ' + o.concluidoEm
+      + (o.__comoFim ? ' como ' + o.__comoFim : '')
+      + (o.__quemFim ? ', por ' + o.__quemFim : '')
+      + ' — fora da conta do card.';
     return o;
   }
   if (r) {
@@ -32793,6 +32797,24 @@ function _agrPreencher(o, m, trat, r){
     }
   }
   return o;
+}
+
+// Um item concluído aparece de dois jeitos conforme a base que o
+// respondeu: a carteira e o Status B guardam só "CONCLUIDO", enquanto o
+// histórico sabe COMO foi concluído (Pedido, Republicação, Devolução…).
+// Aqui as duas formas viram uma só — a do histórico, que diz mais — e o
+// que não tem desfecho registrado ao menos sai escrito igual.
+function _agrPintarConclusao(o){
+  var fim = _agrNoHistorico(o.rc, o.itemRc);
+  if (fim && fim.conclusao) {
+    o.trat = 'Concluído → ' + fim.conclusao;
+    o.__comoFim = fim.conclusao;
+    o.__quemFim = fim.quem || '';
+    if (!o.analista || o.analista === '—') o.analista = _agrAnalista(fim.quem);
+    return;
+  }
+  // sem desfecho no histórico: ao menos a grafia fica a mesma
+  if (/^conclu/i.test(_agrN(o.trat))) o.trat = 'Concluído';
 }
 
 function agrLista(){
