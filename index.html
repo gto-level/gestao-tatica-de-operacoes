@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '27/10 17:50';
+var GTO_BUILD = '28/10 09:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -32028,7 +32028,11 @@ function _govPainelCarregarAux(){
     if ((typeof _aaPub === 'undefined' || !_aaPub || !_aaPub.length)
         && typeof aaPublicoCarregar === 'function') tarefas.push(aaPublicoCarregar());
     // Acionamentos sobre RCs: a lista é escrita na mão e mora na base da frente
-    if (!_agrCarregado && typeof agrCarregar === 'function') tarefas.push(agrCarregar());
+    if (!_agrCarregado && typeof agrCarregar === 'function') {
+      tarefas.push(agrCarregar().then(function(){ return agrCarregarHistorico(); }));
+    } else if (typeof agrCarregarHistorico === 'function') {
+      tarefas.push(agrCarregarHistorico());
+    }
   } catch (e) { return; }
   if (!tarefas.length) return;
   Promise.all(tarefas.map(function(t){ return Promise.resolve(t).catch(function(){}); }))
@@ -32604,6 +32608,85 @@ function _agrOndeEsta(rc, itemRc, idxs){
   return usar;
 }
 
+// ── o histórico, para os que saíram da carteira ─────────────────
+//
+// Um item some da carteira justamente quando é CONCLUÍDO. Sem olhar o
+// histórico, o card chamava isso de "fora da carteira" e dava alarme
+// falso num item que estava resolvido.
+//
+// A busca é por RC, direto na base de ações, só das RCs que estão na
+// lista — varrer a coleção inteira seria caro e desnecessário.
+var _agrHist = {};      // 'rc|item' -> { data, conclusao, quem }
+var _agrHistRc = {};    // 'rc'      -> idem, para ação sem o item na chave
+var _agrHistLidas = {}; // rc já consultada, para não repetir
+
+// O que conta como conclusão: o tratamento "Concluído" ou qualquer um
+// dos cinco desfechos. Fica a MAIS RECENTE.
+function _agrEhConclusao(a){
+  if (!a) return false;
+  if (String(a.conclusao || '').trim()) return true;
+  return String(a.tratamento || '').trim().toLowerCase() === 'concluído';
+}
+function _agrGuardaFim(alvo, k, a){
+  var o = { data: String(a.data || ''), ts: String(a.ts || ''),
+            conclusao: String(a.conclusao || '').trim(),
+            quem: String(a.colab || '').trim() };
+  var antes = alvo[k];
+  if (!antes || (o.data + o.ts) > (antes.data + antes.ts)) alvo[k] = o;
+}
+function _agrNoHistorico(rc, itemRc){
+  var k = _agrN(rc) + '|' + _agrN(itemRc);
+  if (_agrHist[k]) return _agrHist[k];
+  var porRc = _agrHistRc[_agrN(rc)];
+  // sem o item na chave da ação, a RC sozinha é o que há — e isso é dito
+  if (porRc) { var c = {}; Object.keys(porRc).forEach(function(x){ c[x] = porRc[x]; });
+               c.viaRc = true; return c; }
+  return null;
+}
+
+async function agrCarregarHistorico(rcs){
+  if (!_agrEhAdlv()) return false;
+  var lista = (rcs || _agrItens.map(function(i){ return _agrN(i.rc); }))
+    .filter(function(x){ return x && !_agrHistLidas[x]; });
+  lista = lista.filter(function(x, i){ return lista.indexOf(x) === i; });
+  if (!lista.length) return true;
+  var db = (typeof getDB === 'function') ? getDB() : null;
+  if (!db) return false;
+  try {
+    var col = db.collection('producao_acoes');
+    // em blocos de 10, que é o limite do "in" do Firestore
+    var blocos = [];
+    for (var i = 0; i < lista.length; i += 10) blocos.push(lista.slice(i, i + 10));
+    for (var b = 0; b < blocos.length; b++) {
+      var snap;
+      try {
+        snap = await col.where('rc', 'in', blocos[b]).get();
+      } catch (e1) {
+        // sem "in" disponível: uma consulta por RC
+        snap = { forEach: function(){} };
+        var partes = await Promise.all(blocos[b].map(function(rc){
+          return col.where('rc', '==', rc).get().catch(function(){ return null; });
+        }));
+        var docs = [];
+        partes.forEach(function(p){ if (p) p.forEach(function(d){ docs.push(d); }); });
+        snap = { forEach: function(f){ docs.forEach(f); } };
+      }
+      snap.forEach(function(doc){
+        var a = doc.data() || {};
+        if (a.anulada || !_agrEhConclusao(a)) return;
+        var p = String(a.rcChave || '').split('|');
+        var rcA = _agrN(a.rc || p[0]);
+        if (!rcA) return;
+        var itA = _agrN(p[1]);
+        if (itA) _agrGuardaFim(_agrHist, rcA + '|' + itA, a);
+        else     _agrGuardaFim(_agrHistRc, rcA, a);
+      });
+      blocos[b].forEach(function(rc){ _agrHistLidas[rc] = 1; });
+    }
+    return true;
+  } catch (e) { console.warn('agrCarregarHistorico:', e); return false; }
+}
+
 // A base às vezes traz "#N/A" no analista — isso é ausência, não nome.
 function _agrAnalista(v){
   var s = _agrN(v);
@@ -32651,12 +32734,29 @@ function agrLinha(it, ix, idxs){
        || ix[[rc, itemRc].join('|')];
   o.__achou = !!r;
   if (!r) {
+    // ── 3º: o histórico. Sair da carteira é o que acontece com quem
+    // FOI CONCLUÍDO — dizer "fora da carteira" nesse caso é dar alarme
+    // falso. Antes de desistir, procura-se a conclusão registrada.
+    var fim = _agrNoHistorico(rc, itemRc);
+    if (fim) {
+      o.__achou = true;
+      o.origem = 'Histórico';
+      o.analista = _agrAnalista(fim.quem) || o.analista;
+      o.trat = fim.conclusao ? ('Concluído → ' + fim.conclusao) : 'Concluído';
+      o.status = 'CONCLUÍDO';
+      o.concluidoEm = fim.data ? cpDataBR(fim.data) : 'concluído';
+      o.__motivo = 'Concluído'
+        + (fim.data ? ' em ' + cpDataBR(fim.data) : '')
+        + (fim.conclusao ? ' como ' + fim.conclusao : '')
+        + (fim.quem ? ', por ' + fim.quem : '')
+        + (fim.viaRc ? ' (achei pela RC, sem o item)' : '')
+        + ' — fora da conta do card.';
+      return o;
+    }
     o.concluidoEm = 'fora';
-    o.__motivo = 'Não achei RC + item da RC no XGL nem no Status B, '
-      + (oport ? 'e a chave com a oportunidade não bateu na carteira — '
-                 + 'confira RC, item da RC, oportunidade e item da OP.'
-               : 'e sem oportunidade não dá para procurar na carteira — '
-                 + 'preencha a oportunidade e o item da OP.')
+    o.__motivo = 'Não achei RC + item da RC no XGL, no Status B nem na carteira, '
+      + 'e também não há conclusão registrada no histórico'
+      + (oport ? '.' : ' — e sem a oportunidade não dá para procurar na carteira.')
       + ' Fora da conta do card.';
     o.status = 'FORA DA CARTEIRA';
     return o;
@@ -32866,6 +32966,17 @@ function agrAdicionar(){
   });
   govPainelRender();
   _agrAcenderNova(agrChave(it.rc, it.itemRc, it.oport, it.itemOp));
+  // a RC nova ainda não teve o histórico consultado: pode ser que ela
+  // esteja concluída. Ao voltar, redesenha — e acende a linha de novo,
+  // senão o redesenho apagaria o destaque que acabou de aparecer.
+  if (!l.__achou) {
+    var chNova = agrChave(it.rc, it.itemRc, it.oport, it.itemOp);
+    agrCarregarHistorico([_agrN(it.rc)]).then(function(ok){
+      if (!ok) return;
+      govPainelRender();
+      _agrAcenderNova(chNova);
+    });
+  }
 }
 
 // Acende a linha recém-incluída por alguns segundos e põe o cursor no
