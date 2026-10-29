@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '29/10 12:25';
+var GTO_BUILD = '29/10 13:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -39138,11 +39138,24 @@ var PCP_FAROL_DE = { liberado:'lib', liberacao:'aguard',
 // de lá sozinha. Por isso a leitura é cruzada e explícita, como já é
 // feita para os pedidos feitos do dia (pcpPedidosFeitos).
 var _pcpConv = { conv:[], arquivo:'', atualizadoEm:'', erro:'', lido:false };
+
+// A frente Pedidos é um projeto SEPARADO no Firebase, e cada projeto
+// tem a sua própria sessão. Entrar no GTO autentica o app principal,
+// não o do Pedidos — então a primeira leitura daqui volta
+// "permission-denied" mesmo com você logado. O caminho é: tentar ler;
+// se a base recusar, autenticar naquele projeto e tentar de novo. É o
+// mesmo que o Detalhamento Patec e o Rejeite já fazem.
+function _pcpEhPermissao(e){
+  var c = String((e && (e.code || e.message)) || '').toLowerCase();
+  return /permission|unauthenticated|insufficient|missing or insufficient/.test(c);
+}
+async function _pcpLerConv(){
+  var db = (typeof getDBModulo === 'function') ? getDBModulo('pedidos') : null;
+  if (!db) throw new Error('sem conexão com a base do Pedidos');
+  return await db.collection('config').doc('pedidos_conversao').get();
+}
 async function pcpCarregarConv(){
-  try {
-    var db = (typeof getDBModulo === 'function') ? getDBModulo('pedidos') : null;
-    if (!db) throw new Error('sem conexão com a base do Pedidos');
-    var doc = await db.collection('config').doc('pedidos_conversao').get();
+  var guarda = function(doc){
     if (!doc || !doc.exists) {
       _pcpConv = { conv:[], arquivo:'', atualizadoEm:'', lido:true,
                    erro:'a base do Pedidos ainda não tem medição gravada' };
@@ -39152,10 +39165,33 @@ async function pcpCarregarConv(){
     _pcpConv = { conv:d.conv || [], arquivo:d.arquivo || '',
                  atualizadoEm:d.atualizadoEm || '', erro:'', lido:true };
     return true;
+  };
+  try {
+    return guarda(await _pcpLerConv());
   } catch (e) {
+    if (!_pcpEhPermissao(e)) {
+      _pcpConv = { conv:[], arquivo:'', atualizadoEm:'', lido:true,
+                   erro: (e.code || e.message || String(e)) };
+      console.warn('pcpCarregarConv:', _pcpConv.erro);
+      return false;
+    }
+  }
+  // recusou: autentica no projeto do Pedidos e tenta uma segunda vez
+  try {
+    var r = (typeof _autenticarModulo === 'function')
+          ? await _autenticarModulo('pedidos') : { ok:false, motivo:'sem_funcao' };
+    if (!r || !r.ok) {
+      _pcpConv = { conv:[], arquivo:'', atualizadoEm:'', lido:true,
+                   erro:'sem sessão na base do Pedidos'
+                     + (r && r.motivo === 'sem_senha'
+                         ? ' — saia e entre de novo no GTO' : '') };
+      return false;
+    }
+    return guarda(await _pcpLerConv());
+  } catch (e2) {
     _pcpConv = { conv:[], arquivo:'', atualizadoEm:'', lido:true,
-                 erro: (e.code || e.message || String(e)) };
-    console.warn('pcpCarregarConv:', _pcpConv.erro);
+                 erro: (e2.code || e2.message || String(e2)) };
+    console.warn('pcpCarregarConv (2ª tentativa):', _pcpConv.erro);
     return false;
   }
 }
@@ -40259,8 +40295,8 @@ function pcpRenderFarol(){
     + '. Não se digita aqui: para simular, use a taxa do <strong>gap projetado</strong>.'
     + (_pcpConv && _pcpConv.erro
         ? '<br><span style="color:var(--vm)">⚠ Não consegui ler a base do Pedidos: '
-          + cpEsc(_pcpConv.erro) + '. Entre uma vez na frente <strong>ADLV · '
-          + 'Pedidos</strong> e volte aqui.</span>'
+          + cpEsc(_pcpConv.erro) + '. Saia e entre de novo no GTO, ou abra uma vez '
+          + 'a frente <strong>ADLV · Pedidos</strong> e volte aqui.</span>'
         : (pcpFarol().dias ? '' : '<br><span style="color:var(--am)">⚠ A medição foi '
             + 'lida, mas nenhum pedido dela foi criado dentro deste período '
             + '(' + cpDataBR(_pcp.inicio) + ' a ' + cpDataBR(_pcp.fim) + '). '
