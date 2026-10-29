@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '29/10 13:10';
+var GTO_BUILD = '29/10 14:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -13182,6 +13182,7 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
             respPorItem:{}, respOutros:{}, respTotal:0,
             respPorRcItem:{}, resp2Total:0, respPorLetra:[],
             respPorPedido:{}, respPedTotal:0, respPedConflito:0,
+            libDia:{}, libSemData:0,
             rejSup:[], rejSupTotal:0, rejSupCols:{}, rejSupPos:[], rejSupPed:{},
             rejSupFunil:{ lidas:0, st8:0, elimPedido:0, elimItem:0, semElim:0,
                           semChave:0, ok:0, status:{}, exElimPedido:[], exElimItem:[],
@@ -13215,7 +13216,12 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
   var iForn = _cpAchaCol(cabs, ['NOME_FORNECEDOR']);
   var iGrp  = _cpAchaCol(cabs, ['GRUPO_COMPRADOR','GRUPO_COMPRADORES']);
   var iVal  = _cpAchaCol(cabs, ['VALOR_TOTAL_BRUTO_PEDIDO_SAP','VALOR_TOTAL_BRUTO_PEDIDO']);
-  var iLib  = _cpAchaCol(cabs, ['DATA_PRIMEIRA_LIBERACAO','DATA_1_LIBERACAO','DATA_LIBERACAO']);
+  // A data da primeira liberação (coluna K) é o que diz em QUE MEDIÇÃO o
+  // pedido liberado entra: um pedido criado em 20/10 e liberado em 27/10
+  // é resultado da medição de outubro, não da de quando ele nasceu.
+  var iLib  = _cpColOuLetra(cabs,
+    ['DATA_PRIMEIRA_LIBERACAO','DATA_1_LIBERACAO','DATA_LIBERACAO'],
+    'K', 'Data da primeira liberação', r.respPorLetra);
   var iCh   = _cpAchaCol(cabs, ['CHAVE','CHAVE_PEDIDO']);
   var iPd   = _cpAchaCol(cabs, ['PEDIDO','NUMERO_PEDIDO','NUM_PEDIDO']);
   var iRc   = _cpAchaCol(cabs, ['REQUISICAO','RC','NUMERO_RC','NUM_RC','REQUISICAO_COMPRA','REQ']);
@@ -13551,6 +13557,16 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
         var psC = iPsmv === -1 ? '' : String(lb[iPsmv] == null ? '' : lb[iPsmv]).trim();
         var elimC = cpNormCab(psC) === 'ELIMINADO';
         if (!elimC && (stC === 2 || stC === 3 || stC === 5 || stC === 8)) {
+          // ── o liberado, contado pela data da LIBERAÇÃO ───────────
+          // Fica FORA do corte de 400 dias por data de criação: o
+          // pedido pode ser velho e ter sido liberado ontem, e é a
+          // liberação que conta para a medição de agora.
+          if (stC !== 2 && !(stC === 8 || cpNormCab(psC) === 'REJEITADO')
+              && _cpLiberado(psC)) {
+            var dLib = iLib === -1 ? '' : cpDataISO(lb[iLib]);
+            if (dLib) r.libDia[dLib] = (r.libDia[dLib] || 0) + 1;
+            else r.libSemData++;
+          }
           var dtC = iDt === -1 ? '' : cpDataISO(lb[iDt]);
           if (dtC && dtC < _convCorte) { r.convVelhas++; }
           else {
@@ -20648,6 +20664,7 @@ var _monMeds = [];      // [{ inicio, fim, meta }]
 var _monSel  = '';      // o início da medição escolhida
 var _monVisao = 'dia';  // 'dia' | 'acum'
 var _monConv = { conv:[], total:{ mem:0, emi:0, lib:0, aguard:0, rej:0, outro:0 },
+                 libDia:{}, libSemData:0,
                  rejMed:{}, rejMedTotal:0, rejDonos:{}, arquivo:'', atualizadoEm:'' };
 var _monComb = null;    // { patec:{...}, neg:{...}, temMapa, dists }
 var _monChart = null;
@@ -20891,6 +20908,7 @@ async function monSalvarConversao(med, arquivo){
     });
     _monConv = { conv:(med.conv || []).slice(0, 6000), total:med.convTotal || {},
                  desde:med.convDesde || '',
+                 libDia:med.libDia || {}, libSemData:+med.libSemData || 0,
                  rejMed:med.rejMed || {}, rejMedTotal:+med.rejMedTotal || 0,
                  rejDonos:donos, arquivo:arquivo || '',
                  atualizadoEm:new Date().toISOString(), atualizadoPor:cpQuem() };
@@ -20907,6 +20925,7 @@ async function monCarregarConversao(){
     if (!doc || !doc.exists) return;
     var d = doc.data() || {};
     _monConv = { conv:d.conv || [], desde:d.desde || '',
+                 libDia:d.libDia || {}, libSemData:+d.libSemData || 0,
                  total:d.total || { mem:0, emi:0, lib:0, aguard:0, rej:0, outro:0 },
                  rejMed:d.rejMed || {}, rejMedTotal:+d.rejMedTotal || 0,
                  rejDonos:d.rejDonos || {}, arquivo:d.arquivo || '',
@@ -39137,7 +39156,8 @@ var PCP_FAROL_DE = { liberado:'lib', liberacao:'aguard',
 // próprio no Firebase — a frente PCP é outra base e não enxerga nada
 // de lá sozinha. Por isso a leitura é cruzada e explícita, como já é
 // feita para os pedidos feitos do dia (pcpPedidosFeitos).
-var _pcpConv = { conv:[], arquivo:'', atualizadoEm:'', erro:'', lido:false };
+var _pcpConv = { conv:[], libDia:{}, libSemData:0,
+                 arquivo:'', atualizadoEm:'', erro:'', lido:false };
 
 // A frente Pedidos é um projeto SEPARADO no Firebase, e cada projeto
 // tem a sua própria sessão. Entrar no GTO autentica o app principal,
@@ -39157,12 +39177,13 @@ async function _pcpLerConv(){
 async function pcpCarregarConv(){
   var guarda = function(doc){
     if (!doc || !doc.exists) {
-      _pcpConv = { conv:[], arquivo:'', atualizadoEm:'', lido:true,
+      _pcpConv = { conv:[], libDia:{}, libSemData:0, arquivo:'', atualizadoEm:'', lido:true,
                    erro:'a base do Pedidos ainda não tem medição gravada' };
       return false;
     }
     var d = doc.data() || {};
-    _pcpConv = { conv:d.conv || [], arquivo:d.arquivo || '',
+    _pcpConv = { conv:d.conv || [], libDia:d.libDia || {},
+                 libSemData:+d.libSemData || 0, arquivo:d.arquivo || '',
                  atualizadoEm:d.atualizadoEm || '', erro:'', lido:true };
     return true;
   };
@@ -39170,7 +39191,7 @@ async function pcpCarregarConv(){
     return guarda(await _pcpLerConv());
   } catch (e) {
     if (!_pcpEhPermissao(e)) {
-      _pcpConv = { conv:[], arquivo:'', atualizadoEm:'', lido:true,
+      _pcpConv = { conv:[], libDia:{}, libSemData:0, arquivo:'', atualizadoEm:'', lido:true,
                    erro: (e.code || e.message || String(e)) };
       console.warn('pcpCarregarConv:', _pcpConv.erro);
       return false;
@@ -39181,7 +39202,7 @@ async function pcpCarregarConv(){
     var r = (typeof _autenticarModulo === 'function')
           ? await _autenticarModulo('pedidos') : { ok:false, motivo:'sem_funcao' };
     if (!r || !r.ok) {
-      _pcpConv = { conv:[], arquivo:'', atualizadoEm:'', lido:true,
+      _pcpConv = { conv:[], libDia:{}, libSemData:0, arquivo:'', atualizadoEm:'', lido:true,
                    erro:'sem sessão na base do Pedidos'
                      + (r && r.motivo === 'sem_senha'
                          ? ' — saia e entre de novo no GTO' : '') };
@@ -39189,7 +39210,7 @@ async function pcpCarregarConv(){
     }
     return guarda(await _pcpLerConv());
   } catch (e2) {
-    _pcpConv = { conv:[], arquivo:'', atualizadoEm:'', lido:true,
+    _pcpConv = { conv:[], libDia:{}, libSemData:0, arquivo:'', atualizadoEm:'', lido:true,
                  erro: (e2.code || e2.message || String(e2)) };
     console.warn('pcpCarregarConv (2ª tentativa):', _pcpConv.erro);
     return false;
@@ -39197,18 +39218,33 @@ async function pcpCarregarConv(){
 }
 
 function pcpFarol(){
-  var out = { liberado:0, liberacao:0, memorizado:0, rejeitado:0, dias:0 };
+  var out = { liberado:0, liberacao:0, memorizado:0, rejeitado:0,
+              dias:0, libPorLiberacao:false };
   if (!_pcp) return out;
   var ini = _pcp.inicio, fim = _pcp.fim;
+  var dentro = function(d){ return d && !(ini && d < ini) && !(fim && d > fim); };
   try {
     ((_pcpConv && _pcpConv.conv) || []).forEach(function(o){
-      var d = String(o.dia || '');
-      if (!d || (ini && d < ini) || (fim && d > fim)) return;
+      if (!dentro(String(o.dia || ''))) return;
       out.dias++;
       Object.keys(PCP_FAROL_DE).forEach(function(k){
         out[k] += (+o[PCP_FAROL_DE[k]] || 0);
       });
     });
+    // ── o LIBERADO é recontado pela data da primeira liberação ──
+    // Pedido criado em 20/10 e liberado em 27/10 é resultado DESTA
+    // medição, não da de quando ele nasceu. As outras três continuam
+    // pela data de criação: "em liberação" e "memorizado" são estados
+    // de agora, não eventos com data própria.
+    var ld = (_pcpConv && _pcpConv.libDia) || null;
+    if (ld && Object.keys(ld).length) {
+      out.libPorLiberacao = true;
+      out.liberado = 0;
+      Object.keys(ld).forEach(function(d){
+        if (dentro(d)) out.liberado += (+ld[d] || 0);
+      });
+      if (out.liberado) out.dias = Math.max(out.dias, 1);
+    }
   } catch (e) { console.warn('pcpFarol:', e); }
   return out;
 }
@@ -40287,8 +40323,12 @@ function pcpRenderFarol(){
     + '</strong></div>'
     + '<div style="font-size:10px;color:var(--tx2);margin-top:.5rem;line-height:1.5">'
     + 'Vem sozinho da <strong>medição de momento</strong> da frente '
-    + '<strong>Pedidos</strong>, pelos pedidos criados dentro do período desta '
-    + 'medição'
+    + '<strong>Pedidos</strong>. O <strong>liberado</strong> entra pela '
+    + '<strong>data da primeira liberação</strong> — pedido criado antes e '
+    + 'liberado dentro do período conta aqui'
+    + (pcpFarol().libPorLiberacao ? '' : ' (a medição no ar ainda é de antes '
+        + 'desta regra: suba de novo para valer)')
+    + '. Os outros três vão pela data de criação, que é o que existe para eles'
     + (_pcpConv && _pcpConv.arquivo ? ' (' + cpEsc(_pcpConv.arquivo) + ')' : '')
     + (_pcpConv && _pcpConv.atualizadoEm
         ? ' — subida em ' + cpDataBR(String(_pcpConv.atualizadoEm).slice(0, 10)) : '')
