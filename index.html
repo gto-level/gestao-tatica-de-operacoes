@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '28/10 11:10';
+var GTO_BUILD = '29/10 09:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -32485,7 +32485,8 @@ function _govDetDefs(){
     },
     agretorno: {
       t:'📞 Acionamentos sobre RCs', aba:'',
-      sub:'Lista escrita na mão: RC, item da RC, oportunidade e item da OP de quem '
+      sub:'As RCs do card PID entram sozinhas (sempre Teams · PID) e o resto é '
+        + 'escrito na mão: RC, item da RC, oportunidade e item da OP de quem '
         + 'pediu prioridade. O item é procurado primeiro no XGL e no Status B '
         + '(chave RC + item da RC) e, se não estiver lá, na carteira (com a '
         + 'oportunidade). Status de tratamento, prazo e status vêm de lá sozinhos; '
@@ -32817,10 +32818,49 @@ function _agrPintarConclusao(o){
   if (/^conclu/i.test(_agrN(o.trat))) o.trat = 'Concluído';
 }
 
+// ── as RCs do card PID entram sozinhas ───────────────────────────
+//
+// São críticas por definição: se estão no PID, alguém já está cobrando
+// retorno sobre elas. Em vez de o André copiar RC por RC para esta
+// lista, elas entram automaticamente, sempre com Teams e PID — que é
+// como ele preencheria de qualquer jeito.
+//
+// Entram como linha VIRTUAL: não são gravadas. Assim, quando a RC sai
+// do PID, ela sai daqui também, sem ninguém precisar limpar nada. Se
+// ele editar o tipo ou a pessoa de contato de uma delas, aí sim ela
+// vira um item escrito na mão (ver agrCampo) e passa a viver sozinha.
+function _agrPidItens(){
+  var out = [];
+  try {
+    (_govPcLista('pid', false) || []).forEach(function(r){
+      var rc = _agrN(r.rc);
+      if (!rc) return;
+      out.push({ rc: rc, itemRc: _agrN(r.seq),
+                 oport: _agrN(r.num_oport), itemOp: _agrN(r.item_op),
+                 tipoContato: 'Teams', pessoa: 'PID', __pid: true });
+    });
+  } catch (e) { console.warn('_agrPidItens:', e); }
+  return out;
+}
+// A lista inteira: o que foi escrito na mão primeiro (o recém-incluído
+// no topo, para editar), e depois o que veio do PID. RC que já está na
+// mão não entra duas vezes — a escrita à mão manda.
+function _agrTodosItens(){
+  var naMao = {};
+  _agrItens.forEach(function(i){ naMao[_agrN(i.rc) + '|' + _agrN(i.itemRc)] = 1; });
+  var doPid = _agrPidItens().filter(function(i){
+    return !naMao[i.rc + '|' + i.itemRc]; });
+  return _agrItens.concat(doPid);
+}
+
 function agrLista(){
   var ix = _agrIdx();
   var idxs = { 'XGL': _agrXglIdx(), 'Status B': _agrSbIdx() };
-  return _agrItens.map(function(it){ return agrLinha(it, ix, idxs); });
+  return _agrTodosItens().map(function(it){
+    var o = agrLinha(it, ix, idxs);
+    if (it.__pid) o.__pid = true;
+    return o;
+  });
 }
 // o número do card: só o que está em tratamento
 function agrQtd(){
@@ -32914,7 +32954,9 @@ function _agrAviso(txt, cor){
 function agrDuplicada(rc, itemRc){
   var a = _agrN(rc), b = _agrN(itemRc);
   if (!a) return null;
-  return _agrItens.filter(function(x){
+  // o que veio do PID também já está na lista, mesmo sem ter sido
+  // escrito — incluir de novo criaria uma linha repetida
+  return _agrTodosItens().filter(function(x){
     return _agrN(x.rc) === a && _agrN(x.itemRc) === b; })[0] || null;
 }
 
@@ -32945,7 +32987,8 @@ function agrConferir(){
     tr.style.background = 'var(--amc)';
     try { tr.scrollIntoView({ block:'nearest' }); } catch (e) {}
   }
-  var quem = 'RC ' + _agrN(ja.rc) + ' item ' + (_agrN(ja.itemRc) || '—');
+  var quem = 'RC ' + _agrN(ja.rc) + ' item ' + (_agrN(ja.itemRc) || '—')
+    + (ja.__pid ? ' já entrou sozinha pelo card PID e' : '');
   // pode ser uma concluída, que está guardada mas não aparece: dizer
   // "veja a linha acesa" sem linha nenhuma é que confundiria
   _agrAviso(tr ? (quem + ' já está na lista — veja a linha acesa.')
@@ -33028,7 +33071,18 @@ function agrRemover(ch){
 function agrCampo(ch, campo, valor){
   var it = _agrItens.filter(function(x){
     return agrChave(x.rc, x.itemRc, x.oport, x.itemOp) === ch; })[0];
-  if (!it) return;
+  if (!it) {
+    // é uma linha que veio do PID: editar o contato é dizer "esta aqui
+    // eu quero tratar à minha maneira" — então ela passa a ser escrita
+    // na mão, e deixa de depender do PID para existir
+    var doPid = _agrPidItens().filter(function(x){
+      return agrChave(x.rc, x.itemRc, x.oport, x.itemOp) === ch; })[0];
+    if (!doPid) return;
+    it = { rc:doPid.rc, itemRc:doPid.itemRc, oport:doPid.oport,
+           itemOp:doPid.itemOp, tipoContato:doPid.tipoContato,
+           pessoa:doPid.pessoa };
+    _agrItens.unshift(it);
+  }
   it[campo] = _agrN(valor);
   agrGravar().then(function(ok){
     _agrAviso(ok ? 'Salvo.' : '⚠ não consegui gravar.',
@@ -33089,8 +33143,14 @@ var AGR_COLS = [
   { t:'Status',             k:'status', w:'106px', st:function(x){
       return (typeof govCorStatus === 'function') ? govCorStatus(x.status)
            : 'color:var(--tx2)'; } },
-  { t:'',                   k:'__x', w:'26px', st:'text-align:center',
+  { t:'',                   k:'__x', w:'34px', st:'text-align:center',
     html:function(x){
+      // o que veio do PID não se tira na mão: sai quando sair do PID
+      if (x.__pid) {
+        return '<span title="Entrou sozinha, do card PID. Sai daqui quando '
+          + 'sair de lá." style="font-size:8.5px;font-weight:700;color:var(--azm);'
+          + 'background:var(--azc);border-radius:4px;padding:1px 4px">PID</span>';
+      }
       return '<button type="button" title="Tirar da lista"'
         + ' onclick="agrRemover(\'' + _govPainelEsc(x.__ch).replace(/'/g, "\\'") + '\')"'
         + ' style="border:none;background:none;cursor:pointer;color:var(--vm);'
@@ -33436,8 +33496,8 @@ function _govPainelRenderInterno(){
              'As RCs de maior SLA ainda em tratamento. Clique para ver a lista.',
              '0 1 200px')
     + cartao(agrQtd(), 'Acionamentos sobre RCs', '#0f766e', '#ccfbf1', "govPainelDetalhe('agretorno')",
-             'Quem pediu prioridade de tratamento. Lista escrita na mão; '
-             + 'só conta o que está em tratamento.',
+             'Quem pediu prioridade de tratamento, mais as RCs do card PID, '
+             + 'que entram sozinhas. Só conta o que está em tratamento.',
              '0 1 200px')
     + (aa.temBase ? ''
        : '<div style="align-self:center;font-size:10px;color:var(--tx2)">Sem resultado do Analista Pedido carregado.</div>')
