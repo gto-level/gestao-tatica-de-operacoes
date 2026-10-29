@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '29/10 09:30';
+var GTO_BUILD = '29/10 10:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -32717,12 +32717,14 @@ function agrLinha(it, ix, idxs){
             tipoContato: _agrN(it.tipoContato), pessoa: _agrN(it.pessoa),
             analista: '—',
             trat: '—', prazo: '—', status: '—', concluidoEm: '',
-            origem: '', __tambem: [] };
+            origem: '', spGrupo: '', __tambem: [] };
 
   // ── 1º: XGL e Status B, por RC + item da RC ──
   var onde = _agrOndeEsta(rc, itemRc, idxs);
   if (onde) {
     o.origem = onde.nome;
+    // XGL e Status B vão com o Finalizado, como o André pediu
+    o.spGrupo = 'finalizado';
     o.__tambem = onde.todos.filter(function(n){ return n !== onde.nome; });
     o.__achou = true;
     o.analista = _agrAnalista(onde.r.analista);
@@ -32764,6 +32766,15 @@ function agrLinha(it, ix, idxs){
   }
   o.origem = 'Carteira';
   o.analista = _agrAnalista(r.analista);
+  // Em qual dos dois botões a linha cai. Cancelado e 100% Reprovado
+  // moram com o Finalizado — é a mesma conta do Status do Patec do
+  // painel, e separá-los aqui criaria um terceiro grupo que não tem
+  // onde aparecer.
+  try {
+    var sp = _govStatusPatecDe(r);
+    o.spGrupo = (sp === 'PATEC em Andamento') ? 'andamento'
+              : (sp ? 'finalizado' : '');
+  } catch (e) {}
   var m = {};
   try { m = _govDados[govChave(r)] || {}; } catch (e) {}
   var trat = '';
@@ -32875,9 +32886,30 @@ function _agrConcluido(x){
 }
 var _agrVerConcluidos = false;   // por padrão, concluído não aparece
 
+// Os dois botões de recorte: Patec em Andamento e Patec Finalizado
+// (que leva junto XGL e Status B). É só um filtro de VISTA — o número
+// do card continua sendo a fila inteira.
+var _agrFiltroSp = '';
+function agrFiltrarSp(qual){
+  _agrFiltroSp = (_agrFiltroSp === qual) ? '' : qual;
+  govPainelRender();
+}
 function agrListaVisivel(){
   var l = agrLista();
-  return _agrVerConcluidos ? l : l.filter(function(x){ return !_agrConcluido(x); });
+  if (!_agrVerConcluidos) l = l.filter(function(x){ return !_agrConcluido(x); });
+  if (_agrFiltroSp) l = l.filter(function(x){ return x.spGrupo === _agrFiltroSp; });
+  return l;
+}
+// Quantos itens em tratamento há em cada grupo — é o número do botão
+function agrContaSp(){
+  var c = { andamento:0, finalizado:0, fora:0 };
+  agrLista().forEach(function(x){
+    if (_agrConcluido(x)) return;
+    if (x.spGrupo === 'andamento') c.andamento++;
+    else if (x.spGrupo === 'finalizado') c.finalizado++;
+    else c.fora++;
+  });
+  return c;
 }
 function agrVerConcluidos(){
   _agrVerConcluidos = !_agrVerConcluidos;
@@ -33157,6 +33189,30 @@ var AGR_COLS = [
         + 'font-size:12px;line-height:1;padding:0 4px">✕</button>'; } }
 ];
 
+// Os dois recortes, à direita do formulário. Clicar de novo no mesmo
+// botão solta o filtro — senão não haveria como voltar a ver tudo.
+function agrBotoesSp(){
+  var c = agrContaSp();
+  var bt = function(qual, rotulo, n, cor, fundo){
+    var on = (_agrFiltroSp === qual);
+    return '<button type="button" onclick="agrFiltrarSp(\'' + qual + '\')"'
+      + ' title="' + (on ? 'Clique para ver tudo de novo' : 'Ver só estes')
+      + '" style="cursor:pointer;border:1.5px solid ' + cor + ';border-radius:8px;'
+      + 'background:' + (on ? cor : fundo) + ';color:' + (on ? '#fff' : cor)
+      + ';padding:4px 12px;text-align:center;line-height:1.15;min-width:104px">'
+      + '<div style="font-size:15px;font-weight:800">' + n + '</div>'
+      + '<div style="font-size:8.5px;font-weight:700;text-transform:uppercase;'
+      + 'letter-spacing:.3px">' + rotulo + '</div></button>';
+  };
+  return '<div style="display:flex;gap:8px;margin-left:auto;align-items:center">'
+    + (_agrFiltroSp
+        ? '<button class="btn btn-s" type="button" onclick="agrFiltrarSp(\'\')"'
+          + ' style="font-size:10px;padding:2px 9px">✕ ver tudo</button>' : '')
+    + bt('andamento', 'Patec em andamento', c.andamento, 'var(--azm)', 'var(--azc)')
+    + bt('finalizado', 'Patec finalizado', c.finalizado, 'var(--vd)', 'var(--vdc)')
+    + '</div>';
+}
+
 function agrTopo(){
   // RC e Item da RC conferem a cada tecla: é o par que identifica o
   // acionamento, e é ele que não pode entrar duas vezes
@@ -33178,6 +33234,7 @@ function agrTopo(){
     + '<button class="btn btn-s" type="button" id="agr-incluir" onclick="agrAdicionar()"'
     + ' style="font-size:11px;padding:3px 12px">+ incluir</button>'
     + '<span id="agr-aviso" style="font-size:10.5px;color:var(--tx2)"></span>'
+    + agrBotoesSp()
     + '<datalist id="agr-tipos">'
     + AGR_TIPOS.map(function(t){ return '<option value="' + t + '">'; }).join('')
     + '</datalist>'
