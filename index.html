@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '29/10 10:20';
+var GTO_BUILD = '29/10 11:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -39121,17 +39121,34 @@ var PCP_FAROL = [
   { chave:'memorizado', nome:'MEMORIZADO',    cor:'#9AA3AE' },
   { chave:'rejeitado',  nome:'REJEITADO',     cor:'#D93025' }
 ];
+// O farol é AUTOMÁTICO: sai da medição de momento do Controle de
+// Pedidos, pelas mesmas regras de lá — status 2 é memorizado; 3, 5 e 8
+// são pedido emitido, e o STATUS_PSMV separa liberado, em liberação e
+// rejeitado. Aqui não se digita nada: a simulação é a taxa do gap
+// projetado, não este quadro.
+//
+// O recorte é por DATA DE CRIAÇÃO do pedido dentro do período da
+// medição — o mesmo critério da curva, senão os dois números do lado
+// esquerdo e direito da tela contariam coisas diferentes.
+var PCP_FAROL_DE = { liberado:'lib', liberacao:'aguard',
+                     memorizado:'mem', rejeitado:'rej' };
 function pcpFarol(){
-  if (!_pcp) return {};
-  _pcp.farol = _pcp.farol || {};
-  return _pcp.farol;
+  var out = { liberado:0, liberacao:0, memorizado:0, rejeitado:0, dias:0 };
+  if (!_pcp) return out;
+  var ini = _pcp.inicio, fim = _pcp.fim;
+  try {
+    ((_monConv && _monConv.conv) || []).forEach(function(o){
+      var d = String(o.dia || '');
+      if (!d || (ini && d < ini) || (fim && d > fim)) return;
+      out.dias++;
+      Object.keys(PCP_FAROL_DE).forEach(function(k){
+        out[k] += (+o[PCP_FAROL_DE[k]] || 0);
+      });
+    });
+  } catch (e) { console.warn('pcpFarol:', e); }
+  return out;
 }
 function pcpFarolN(chave){ return aagNum(pcpFarol()[chave] || 0); }
-function pcpSetFarol(chave, v){
-  if (!_pcp || _pcp.fechada) return;
-  pcpFarol()[chave] = aagNum(v);
-  pcpRenderGrafico(); pcpSalvar();
-}
 
 // ── a taxa usada na projeção ──────────────────────────────────────
 // Nasce do aproveitamento calculado, mas ele pode fixar outra para
@@ -40178,7 +40195,6 @@ function pcpRenderGrafCards(){
 function pcpRenderFarol(){
   var box = document.getElementById('pcp-farol');
   if (!box || !_pcp) return;
-  var trava = _pcp.fechada ? ' disabled' : '';
   var maior = Math.max.apply(null, PCP_FAROL.map(function(f){ return pcpFarolN(f.chave); }).concat([1]));
   var total = PCP_FAROL.reduce(function(n, f){ return n + pcpFarolN(f.chave); }, 0);
   var h = '<div style="display:flex;flex-direction:column;gap:9px">';
@@ -40190,10 +40206,8 @@ function pcpRenderFarol(){
       +   ';flex-shrink:0"></span>'
       + '<span style="font-size:10.5px;font-weight:700;color:' + f.cor
       +   ';width:98px;flex-shrink:0">' + f.nome + '</span>'
-      + '<input type="text" value="' + cpNum(n) + '"' + trava
-      +   ' onchange="pcpSetFarol(\'' + f.chave + '\',this.value)" onfocus="this.select()"'
-      +   ' style="width:62px;font-size:13px;font-weight:800;text-align:right;color:var(--tx);'
-      +   'background:transparent;border:none;border-bottom:1px dashed var(--brd);padding:0">'
+      + '<span style="width:62px;font-size:13px;font-weight:800;text-align:right;'
+      +   'color:var(--tx)">' + cpNum(n) + '</span>'
       + '<span style="font-size:10px;color:var(--tx2);width:42px;text-align:right">'
       +   (total ? (Math.round(pct * 10) / 10).toString().replace('.', ',') + '%' : '—')
       + '</span></div>'
@@ -40208,7 +40222,16 @@ function pcpRenderFarol(){
     + '<span>Total de pedidos</span><strong style="color:var(--tx)">' + cpNum(total)
     + '</strong></div>'
     + '<div style="font-size:10px;color:var(--tx2);margin-top:.5rem;line-height:1.5">'
-    + 'O que está <strong>em liberação</strong> é o que alimenta o gap projetado.</div>';
+    + 'Vem sozinho da <strong>medição de momento</strong> do Controle de Pedidos, '
+    + 'pelos pedidos criados dentro do período desta medição'
+    + (_monConv && _monConv.arquivo ? ' (' + cpEsc(_monConv.arquivo) + ')' : '')
+    + (_monConv && _monConv.atualizadoEm
+        ? ' — subida em ' + cpDataBR(String(_monConv.atualizadoEm).slice(0, 10)) : '')
+    + '. Não se digita aqui: para simular, use a taxa do <strong>gap projetado</strong>.'
+    + (pcpFarol().dias ? '' : '<br><span style="color:var(--am)">⚠ Nenhum pedido da '
+        + 'medição de momento caiu neste período. Suba a medição no Controle de '
+        + 'Pedidos ou confira as datas.</span>')
+    + '<br>O que está <strong>em liberação</strong> é o que alimenta o gap projetado.</div>';
   box.innerHTML = h;
 }
 
@@ -41272,6 +41295,14 @@ function pcpExportar(){
 function pcpAbrir(){
   if (!_pcp) pcpCarregar();
   else pcpRender();
+  // o farol vem da medição de momento: sem ela carregada, o quadro
+  // apareceria zerado sem motivo
+  if (typeof monCarregarConversao === 'function'
+      && !((_monConv && _monConv.conv) || []).length) {
+    monCarregarConversao().then(function(){
+      try { pcpRenderGrafico(); } catch (e) {}
+    });
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
