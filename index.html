@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '29/10 14:05';
+var GTO_BUILD = '29/10 15:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -39156,7 +39156,7 @@ var PCP_FAROL_DE = { liberado:'lib', liberacao:'aguard',
 // próprio no Firebase — a frente PCP é outra base e não enxerga nada
 // de lá sozinha. Por isso a leitura é cruzada e explícita, como já é
 // feita para os pedidos feitos do dia (pcpPedidosFeitos).
-var _pcpConv = { conv:[], libDia:{}, libSemData:0,
+var _pcpConv = { conv:[], libDia:{}, libSemData:0, total:null, desde:'',
                  arquivo:'', atualizadoEm:'', erro:'', lido:false };
 
 // A frente Pedidos é um projeto SEPARADO no Firebase, e cada projeto
@@ -39177,13 +39177,16 @@ async function _pcpLerConv(){
 async function pcpCarregarConv(){
   var guarda = function(doc){
     if (!doc || !doc.exists) {
-      _pcpConv = { conv:[], libDia:{}, libSemData:0, arquivo:'', atualizadoEm:'', lido:true,
+      _pcpConv = { conv:[], libDia:{}, libSemData:0, total:null, desde:'',
+                   arquivo:'', atualizadoEm:'', lido:true,
                    erro:'a base do Pedidos ainda não tem medição gravada' };
       return false;
     }
     var d = doc.data() || {};
     _pcpConv = { conv:d.conv || [], libDia:d.libDia || {},
-                 libSemData:+d.libSemData || 0, arquivo:d.arquivo || '',
+                 libSemData:+d.libSemData || 0,
+                 total:d.total || null, desde:d.desde || '',
+                 arquivo:d.arquivo || '',
                  atualizadoEm:d.atualizadoEm || '', erro:'', lido:true };
     return true;
   };
@@ -39191,7 +39194,8 @@ async function pcpCarregarConv(){
     return guarda(await _pcpLerConv());
   } catch (e) {
     if (!_pcpEhPermissao(e)) {
-      _pcpConv = { conv:[], libDia:{}, libSemData:0, arquivo:'', atualizadoEm:'', lido:true,
+      _pcpConv = { conv:[], libDia:{}, libSemData:0, total:null, desde:'',
+                   arquivo:'', atualizadoEm:'', lido:true,
                    erro: (e.code || e.message || String(e)) };
       console.warn('pcpCarregarConv:', _pcpConv.erro);
       return false;
@@ -39202,7 +39206,8 @@ async function pcpCarregarConv(){
     var r = (typeof _autenticarModulo === 'function')
           ? await _autenticarModulo('pedidos') : { ok:false, motivo:'sem_funcao' };
     if (!r || !r.ok) {
-      _pcpConv = { conv:[], libDia:{}, libSemData:0, arquivo:'', atualizadoEm:'', lido:true,
+      _pcpConv = { conv:[], libDia:{}, libSemData:0, total:null, desde:'',
+                   arquivo:'', atualizadoEm:'', lido:true,
                    erro:'sem sessão na base do Pedidos'
                      + (r && r.motivo === 'sem_senha'
                          ? ' — saia e entre de novo no GTO' : '') };
@@ -39210,40 +39215,64 @@ async function pcpCarregarConv(){
     }
     return guarda(await _pcpLerConv());
   } catch (e2) {
-    _pcpConv = { conv:[], libDia:{}, libSemData:0, arquivo:'', atualizadoEm:'', lido:true,
+    _pcpConv = { conv:[], libDia:{}, libSemData:0, total:null, desde:'',
+                 arquivo:'', atualizadoEm:'', lido:true,
                  erro: (e2.code || e2.message || String(e2)) };
     console.warn('pcpCarregarConv (2ª tentativa):', _pcpConv.erro);
     return false;
   }
 }
 
+// Cada coluna do farol responde a uma pergunta diferente, e por isso
+// nem todas têm recorte de data:
+//
+//   LIBERADO é um EVENTO que aconteceu — conta pela data da primeira
+//   liberação dentro do período, porque é o que esta medição entregou.
+//   Pedido criado em 20/10 e liberado em 27/10 é resultado daqui.
+//
+//   EM LIBERAÇÃO, MEMORIZADO e REJEITADO são ESTADOS de agora, não
+//   eventos: é o estoque inteiro, sem data. O que está esperando
+//   liberação hoje pode ser liberado dentro desta medição, tenha sido
+//   criado quando tiver sido — e é esse estoque que alimenta o gap
+//   projetado. Recortar por data de criação escondia a fila antiga e
+//   fazia a projeção prometer menos do que se pode entregar.
 function pcpFarol(){
   var out = { liberado:0, liberacao:0, memorizado:0, rejeitado:0,
-              dias:0, libPorLiberacao:false };
+              dias:0, libPorLiberacao:false, desde:'' };
   if (!_pcp) return out;
   var ini = _pcp.inicio, fim = _pcp.fim;
   var dentro = function(d){ return d && !(ini && d < ini) && !(fim && d > fim); };
   try {
-    ((_pcpConv && _pcpConv.conv) || []).forEach(function(o){
-      if (!dentro(String(o.dia || ''))) return;
-      out.dias++;
-      Object.keys(PCP_FAROL_DE).forEach(function(k){
-        out[k] += (+o[PCP_FAROL_DE[k]] || 0);
+    var C = _pcpConv || {};
+    out.desde = C.desde || '';
+    // ── os três estados: o estoque inteiro ──
+    if (C.total) {
+      out.liberacao  = +C.total.aguard || 0;
+      out.memorizado = +C.total.mem    || 0;
+      out.rejeitado  = +C.total.rej    || 0;
+    } else {
+      // medição antiga, sem o total gravado: soma o detalhe, sem data
+      (C.conv || []).forEach(function(o){
+        out.liberacao  += (+o.aguard || 0);
+        out.memorizado += (+o.mem    || 0);
+        out.rejeitado  += (+o.rej    || 0);
       });
-    });
-    // ── o LIBERADO é recontado pela data da primeira liberação ──
-    // Pedido criado em 20/10 e liberado em 27/10 é resultado DESTA
-    // medição, não da de quando ele nasceu. As outras três continuam
-    // pela data de criação: "em liberação" e "memorizado" são estados
-    // de agora, não eventos com data própria.
-    var ld = (_pcpConv && _pcpConv.libDia) || null;
+    }
+    // ── o liberado: evento, pela data da primeira liberação ──
+    var ld = C.libDia || null;
     if (ld && Object.keys(ld).length) {
       out.libPorLiberacao = true;
-      out.liberado = 0;
       Object.keys(ld).forEach(function(d){
         if (dentro(d)) out.liberado += (+ld[d] || 0);
+        out.dias++;
       });
-      if (out.liberado) out.dias = Math.max(out.dias, 1);
+    } else {
+      // medição de antes desta regra: o que há é a data de criação
+      (C.conv || []).forEach(function(o){
+        if (!dentro(String(o.dia || ''))) return;
+        out.liberado += (+o.lib || 0);
+        out.dias++;
+      });
     }
   } catch (e) { console.warn('pcpFarol:', e); }
   return out;
@@ -40295,8 +40324,9 @@ function pcpRenderGrafCards(){
 function pcpRenderFarol(){
   var box = document.getElementById('pcp-farol');
   if (!box || !_pcp) return;
-  var maior = Math.max.apply(null, PCP_FAROL.map(function(f){ return pcpFarolN(f.chave); }).concat([1]));
-  var total = PCP_FAROL.reduce(function(n, f){ return n + pcpFarolN(f.chave); }, 0);
+  var fa = pcpFarol();
+  var maior = Math.max.apply(null, PCP_FAROL.map(function(x){ return pcpFarolN(x.chave); }).concat([1]));
+  var total = PCP_FAROL.reduce(function(n, x){ return n + pcpFarolN(x.chave); }, 0);
   var h = '<div style="display:flex;flex-direction:column;gap:9px">';
   PCP_FAROL.forEach(function(f){
     var n = pcpFarolN(f.chave);
@@ -40323,24 +40353,28 @@ function pcpRenderFarol(){
     + '</strong></div>'
     + '<div style="font-size:10px;color:var(--tx2);margin-top:.5rem;line-height:1.5">'
     + 'Vem sozinho da <strong>medição de momento</strong> da frente '
-    + '<strong>Pedidos</strong>. O <strong>liberado</strong> entra pela '
-    + '<strong>data da primeira liberação</strong> — pedido criado antes e '
-    + 'liberado dentro do período conta aqui'
-    + (pcpFarol().libPorLiberacao ? '' : ' (a medição no ar ainda é de antes '
-        + 'desta regra: suba de novo para valer)')
-    + '. Os outros três vão pela data de criação, que é o que existe para eles'
+    + '<strong>Pedidos</strong>'
     + (_pcpConv && _pcpConv.arquivo ? ' (' + cpEsc(_pcpConv.arquivo) + ')' : '')
     + (_pcpConv && _pcpConv.atualizadoEm
-        ? ' — subida em ' + cpDataBR(String(_pcpConv.atualizadoEm).slice(0, 10)) : '')
+        ? ', subida em ' + cpDataBR(String(_pcpConv.atualizadoEm).slice(0, 10)) : '')
+    + '. O <strong>liberado</strong> é o que esta medição entregou: conta pela '
+    + '<strong>data da primeira liberação</strong> dentro do período '
+    + '(' + cpDataBR(_pcp.inicio) + ' a ' + cpDataBR(_pcp.fim) + ')'
+    + (fa.libPorLiberacao ? '' : ' — <span style="color:var(--am)">a medição no ar '
+        + 'ainda é de antes desta regra, então aqui vale a data de criação; '
+        + 'suba de novo para valer</span>')
+    + '. Os outros três são <strong>estoque de agora</strong>, sem recorte de data: '
+    + 'o que está esperando liberação pode ser liberado dentro desta medição, '
+    + 'tenha sido criado quando tiver sido'
+    + (fa.desde ? ' (a medição enxerga pedidos criados desde ' + cpDataBR(fa.desde) + ')' : '')
     + '. Não se digita aqui: para simular, use a taxa do <strong>gap projetado</strong>.'
     + (_pcpConv && _pcpConv.erro
         ? '<br><span style="color:var(--vm)">⚠ Não consegui ler a base do Pedidos: '
           + cpEsc(_pcpConv.erro) + '. Saia e entre de novo no GTO, ou abra uma vez '
           + 'a frente <strong>ADLV · Pedidos</strong> e volte aqui.</span>'
-        : (pcpFarol().dias ? '' : '<br><span style="color:var(--am)">⚠ A medição foi '
-            + 'lida, mas nenhum pedido dela foi criado dentro deste período '
-            + '(' + cpDataBR(_pcp.inicio) + ' a ' + cpDataBR(_pcp.fim) + '). '
-            + 'Confira as datas da medição.</span>'))
+        : (total ? '' : '<br><span style="color:var(--am)">⚠ A medição foi lida, '
+            + 'mas não trouxe pedido nenhum. Confira o arquivo no Controle de '
+            + 'Pedidos.</span>'))
     + '<br>O que está <strong>em liberação</strong> é o que alimenta o gap projetado.</div>';
   box.innerHTML = h;
 }
