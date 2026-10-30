@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '29/10 15:10';
+var GTO_BUILD = '30/10 11:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -6412,6 +6412,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         <button id="gov-main-tab-pedidos" onclick="govMainTab('pedidos',this)" style="padding:.6rem 1.4rem;font-size:13px;font-weight:700;border:none;background:none;cursor:pointer;color:var(--tx2);border-bottom:3px solid transparent;margin-bottom:-2px">📦 Pedidos</button>
         <button id="gov-main-tab-govnova" onclick="govMainTab('govnova',this)" style="padding:.6rem 1.4rem;font-size:13px;font-weight:700;border:none;background:none;cursor:pointer;color:var(--tx2);border-bottom:3px solid transparent;margin-bottom:-2px">🆕 Governança Nova</button>
         <button id="gov-main-tab-detpatec" onclick="govMainTab('detpatec',this)" style="padding:.6rem 1.4rem;font-size:13px;font-weight:700;border:none;background:none;cursor:pointer;color:var(--tx2);border-bottom:3px solid transparent;margin-bottom:-2px">📋 Detalhamento do Patec</button>
+        <button id="gov-main-tab-urg" onclick="govMainTab('urg',this)" style="padding:.6rem 1.4rem;font-size:13px;font-weight:700;border:none;background:none;cursor:pointer;color:var(--tx2);border-bottom:3px solid transparent;margin-bottom:-2px">🚦 Urgência</button>
       </div>
 
       <!-- ── ABA: COBRANÇA POR STATUS (exclusiva do módulo FAST) ── -->
@@ -6707,6 +6708,37 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 </div>
               </div>
         </div>
+      </div>
+
+      <!-- ── ABA: URGÊNCIA (urgência da necessidade, col L do levelboard) ──
+           A urgência vem do índice que o Montar base grava a partir do
+           levelboard, por RC + item da RC. A FASE vem do mapa do dia
+           (o Radar guarda o STATUS MAPA por item), cruzada pela MESMA
+           chave — por isso a fase muda sozinha a cada mapa novo e a
+           urgência só muda quando o levelboard é subido de novo. -->
+      <div id="gov-main-content-urg" style="display:none">
+        <div class="cd" style="margin-bottom:1rem;border-top:3px solid var(--vm)">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+            <div>
+              <div class="cd-t" style="margin:0">🚦 Urgência da necessidade</div>
+              <div style="font-size:11px;color:var(--tx2);margin-top:2px">
+                Coluna <strong>URGENCIA_NECESSIDADE</strong> (col L) do levelboard, cruzada com o
+                mapa do dia pela chave <strong>RC + item da RC</strong>.
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <span id="un-fonte" style="font-size:11px;color:var(--tx2)"></span>
+              <button class="btn btn-s" style="font-size:11px" onclick="unRecarregar()">↻ Atualizar</button>
+              <button class="btn btn-s" style="font-size:11px" onclick="unBaixar()">⬇ Exportar</button>
+            </div>
+          </div>
+          <div id="un-aviso"></div>
+        </div>
+
+        <div id="un-farol" style="margin-bottom:1rem"></div>
+        <div id="un-cards" style="margin-bottom:1rem"></div>
+        <div id="un-detalhe"></div>
+        <div id="un-rodape" style="font-size:10.5px;color:var(--tx2);line-height:1.7;margin-top:.9rem"></div>
       </div>
 
       <div id="gov-main-content-govnova" style="display:none">
@@ -31376,7 +31408,9 @@ function _govUrgPainelSync(){
 // O Detalhamento do Patec entrou nesta lista em 21/10: ele é do PATEC do
 // ADLV (lê o mapa diário e o Radar daquele projeto) e no FAST abriria
 // vazio, parecendo tela quebrada em vez de tela que não é de lá.
-var GOV_ABAS_OCULTAS_FAST = ['gov', 'pc', 'sla', 'prazo', 'cobranca', 'detpatec'];
+// A Urgência entrou na lista em 30/10 pelo mesmo motivo do Detalhamento:
+// ela lê o levelboard e o mapa do PATEC do ADLV, e no FAST abriria vazia.
+var GOV_ABAS_OCULTAS_FAST = ['gov', 'pc', 'sla', 'prazo', 'cobranca', 'detpatec', 'urg'];
 
 // Abas cujo BOTÃO fica escondido em qualquer módulo. As telas continuam
 // inteiras e continuam sendo o destino do botão "abrir a tela" dos cards
@@ -31436,7 +31470,7 @@ function govMainTab(aba, btn){
     aba = 'gov'; btn = document.getElementById('gov-main-tab-gov');
   }
   // Alternar entre abas principais: Governança e Planilha Crítica
-  ['gov','pc','sla','prazo','cobranca','pedidos','govnova','detpatec'].forEach(t => {
+  ['gov','pc','sla','prazo','cobranca','pedidos','govnova','detpatec','urg'].forEach(t => {
     const content = document.getElementById('gov-main-content-'+t);
     const tabBtn  = document.getElementById('gov-main-tab-'+t);
     if(content) content.style.display = t===aba ? '' : 'none';
@@ -31452,6 +31486,7 @@ function govMainTab(aba, btn){
   if(aba==='pedidos')  { govPedidosRender(); _govUrgPainelSync(); }
   if(aba==='govnova')  { govNovaRender(); _govUrgPainelSync(); }
   if(aba==='detpatec') { if (typeof dpAbrir === 'function') dpAbrir(); }
+  if(aba==='urg')      { if (typeof unAbrir === 'function') unAbrir(); }
   if(typeof _fcAgendarVarredura==='function') _fcAgendarVarredura();
 }
 
@@ -41985,17 +42020,116 @@ function aagEscalaColuna(linhas, i){
 // O Excel compara texto sem ligar para maiúscula nem acento.
 function aagIgual(a, b){ return cpNormCab(a) === cpNormCab(b); }
 
-// A régua de urgência, igual à da coluna AA da planilha.
+// A régua de urgência, igual à da coluna AA da planilha. O número vem da
+// coluna URGENCIA_NECESSIDADE (col L do levelboard) e a tabela de de-para
+// é esta, conferida com o André em 30/10:
+//
+//   1, 2, 3            → baixo
+//   4, 10, 11, 51, 52  → alto
+//   53, 54, 55         → baixo
+//   99                 → muito alto
+//
+// Até 30/10 o 51 e o 52 caíam no "return ''" lá embaixo e sumiam da conta
+// de urgência alta sem ninguém ver. Qualquer outro número continua vazio
+// de propósito: número que não está na tabela não vira urgência chutada.
+var AAG_URG_REGUA = { 1:'baixo', 2:'baixo', 3:'baixo',
+                      4:'alto', 10:'alto', 11:'alto', 51:'alto', 52:'alto',
+                      53:'baixo', 54:'baixo', 55:'baixo',
+                      99:'muito alto' };
 function aagUrgencia(v){
   var t = aagTxt(v);
   if (t === '') return '';
   var n = parseFloat(t.replace(',', '.'));
   if (!isFinite(n) || n === 0) return '';
-  if (n <= 3) return 'baixo';
-  if (n === 4 || n === 10 || n === 11) return 'alto';
-  if (n === 99) return 'muito alto';
-  if (n === 53 || n === 54 || n === 55) return 'baixo';
-  return '';
+  return AAG_URG_REGUA[n] || '';
+}
+
+// ── o índice de urgência, lido do levelboard ──────────────────────
+// A coluna é URGENCIA_NECESSIDADE (coluna L do levelboard). A chave
+// aqui é RC + item da RC, de propósito: é a chave que sobrevive quando
+// a oportunidade é excluída no meio do processo, e é com ela que a aba
+// Urgência da Governança cruza o item com o mapa do dia.
+//
+// O que fica gravado é o NÚMERO cru, não a classificação. Se a régua
+// mudar (ela já mudou uma vez: o 51 e o 52 faltavam), a aba recalcula
+// sozinha sem ninguém precisar subir o levelboard de novo.
+function aagUrgIndice(aviso){
+  var out = { mapa:{}, linhas:0, chaves:0, com:0, semChave:0, repetidas:0,
+              porLetra:[], arquivo:'', col:'' };
+  var d = _aagArq.level;
+  if (!d) return out;
+  out.arquivo = d.nome || '';
+  var i = aagChavesDoArquivo(d);
+  if (i.rc === -1 || i.seq === -1) {
+    if (aviso) aviso.push('Urgência: o levelboard não traz RC e SEQ em colunas separadas, '
+      + 'então não montei a chave RC + item da RC. A aba Urgência da Governança continua '
+      + 'com o índice da vez anterior.');
+    return out;
+  }
+  var col = aagCol(d.cab, ['URGENCIA_NECESSIDADE','URGENCIA NECESSIDADE',
+                           'URGENCIA','URGÊNCIA']);
+  if (col === -1) {
+    col = _cpLetraCol('L');
+    out.porLetra.push('urgência da necessidade pela coluna L');
+    if (aviso) aviso.push('Urgência: não achei a coluna URGENCIA_NECESSIDADE pelo nome no '
+      + 'levelboard, então li pela LETRA L. Se a planilha mudou de ordem, o número vem da '
+      + 'coluna errada — confira.');
+  }
+  out.col = aagTxt((d.cab || [])[col]) || ('coluna ' + (col + 1));
+  (d.linhas || []).forEach(function(l){
+    out.linhas++;
+    var rc = aagId(l[i.rc]), seq = aagId(l[i.seq]);
+    if (!rc || !seq) { out.semChave++; return; }
+    var k = unChave(rc, seq);
+    var v = aagTxt(l[col]);
+    var n = parseFloat(String(v).replace(',', '.'));
+    if (!isFinite(n) || n === 0) n = 0;
+    if (out.mapa[k] !== undefined) {
+      out.repetidas++;
+      // mesma RC + item em duas linhas (uma por oportunidade): fica a
+      // urgência MAIOR, que é a que manda no atendimento
+      if (n > out.mapa[k]) out.mapa[k] = n;
+      return;
+    }
+    out.mapa[k] = n;
+    out.chaves++;
+    if (n) out.com++;
+  });
+  if (!out.com && out.chaves && aviso) {
+    aviso.push('Urgência: li ' + cpNum(out.chaves) + ' item(ns) do levelboard e nenhum tem '
+      + 'número de urgência na coluna "' + out.col + '". A aba Urgência vai sair vazia.');
+  }
+  return out;
+}
+
+// Grava o índice em config/governanca_urgencia, fatiado — uma base de 40
+// mil itens não cabe em um documento de 1 MiB, e quando não cabe o
+// Firestore recusa calado e a aba abre vazia sem dizer por quê.
+var UNI_PARTE = 700000;
+var UNI_DOC = 'governanca_urgencia';
+
+async function aagSalvarUrgencia(idx){
+  try {
+    if (!idx || !idx.chaves) return false;
+    var db = (typeof getDB === 'function') ? getDB() : null;
+    if (!db) return false;
+    var txt = JSON.stringify(idx.mapa), partes = [];
+    for (var i = 0; i < txt.length; i += UNI_PARTE) partes.push(txt.slice(i, i + UNI_PARTE));
+    await Promise.all(partes.map(function(t, j){
+      return db.collection('config').doc(UNI_DOC + '_' + j).set({ t:t });
+    }));
+    await db.collection('config').doc(UNI_DOC).set({
+      v:1, partes: partes.length,
+      chaves: idx.chaves, com: idx.com, linhas: idx.linhas,
+      semChave: idx.semChave, repetidas: idx.repetidas,
+      col: idx.col, porLetra: idx.porLetra || [], arquivo: idx.arquivo || '',
+      atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem()
+    });
+    return true;
+  } catch (e) {
+    console.warn('aagSalvarUrgencia:', e);
+    return false;
+  }
 }
 
 // ── a classificação: a coluna D da planilha final, regra por regra ──
@@ -42367,7 +42501,16 @@ function aagProcessar(){
     dentroAA.forEach(function(i){ por[i.aa] = (por[i.aa] || 0) + 1; });
     var itensAA = {};
     dentroAA.forEach(function(i){ itensAA[i.chave] = 1; });
+    // A urgência da necessidade sai do levelboard por chave curta (RC +
+    // item da RC) e vai gravada à parte: a aba Urgência da Governança lê
+    // de lá, e ela precisa da chave curta porque o item pode ter perdido
+    // a oportunidade no meio do caminho.
+    var urgIdx = aagUrgIndice(aviso);
+    if (urgIdx.chaves) aagSalvarUrgencia(urgIdx);
+
     _aagBase = { linhas: linhas, plataforma: plataforma, modelo: modelo,
+                 urg: { chaves:urgIdx.chaves, com:urgIdx.com, col:urgIdx.col,
+                        porLetra:urgIdx.porLetra, repetidas:urgIdx.repetidas },
                  por: por, geradoEm: new Date().toISOString(),
                  // retrato da distribuição que entrou NESTA base — é com ele
                  // que o passo 4 sabe avisar "você distribuiu depois de montar"
@@ -64765,6 +64908,424 @@ function rfDetExportar(){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(linhas), 'Itens');
   XLSX.writeFile(wb, 'Radar_FAST_' + _rfDet.titulo.replace(/[^\w]+/g, '_') + '_'
     + new Date().toISOString().slice(0,10).replace(/-/g,'') + '.xlsx');
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  GOVERNANÇA › URGÊNCIA — a urgência da necessidade, item a item
+//
+//  Duas fontes, cada uma com o seu tempo:
+//
+//    urgência  → coluna URGENCIA_NECESSIDADE (col L) do levelboard,
+//                lida no Montar base e gravada em config/governanca_urgencia
+//                com a chave RC + item da RC. Só muda quando o
+//                levelboard é subido de novo.
+//    fase      → STATUS MAPA do mapa do dia, que o Radar guarda por
+//                item (analista_auto). Muda a cada mapa novo.
+//
+//  A chave é a CURTA — RC + item da RC — de propósito: o item pode ter
+//  perdido a oportunidade no meio do processo, e a chave de quatro
+//  partes deixaria ele de fora justo quando ele mais precisa aparecer.
+// ══════════════════════════════════════════════════════════════════
+
+var UN_CLASSES = [
+  { k:'muito alto', t:'Muito Alta', pin:'🔴', cor:'var(--vm)', fundo:'var(--vmc)' },
+  { k:'alto',       t:'Alta',       pin:'🟠', cor:'var(--am)', fundo:'var(--amc)' },
+  { k:'baixo',      t:'Baixa',      pin:'🟢', cor:'var(--vd)', fundo:'var(--vdc)' }
+];
+var UN_SEM_FASE = '(sem status no mapa do dia)';
+var UN_MAX = 400;          // linhas desenhadas por bloco; o XLSX leva todas
+
+var _unIdx = { mapa:{}, chaves:0, com:0, linhas:0, repetidas:0, col:'',
+               porLetra:[], arquivo:'', atualizadoEm:'', atualizadoPor:'',
+               erro:'', lido:false, achou:false };
+var _unAberto = '';        // 'classe\u0001fase' do bloco aberto
+var _unLendo = false;
+
+// RC + item da RC, sem zero à esquerda e sem ponto de milhar — a mesma
+// forma dos dois lados, senão 0012345 e 12345 viram itens diferentes.
+function unChave(rc, item){
+  var n = function(v){
+    var t = String(v == null ? '' : v).trim();
+    t = t.replace(/\.0+$/, '').replace(/[.\s]/g, '');
+    return t.replace(/^0+(?=\d)/, '');
+  };
+  var r = n(rc), i = n(item);
+  return (r && i) ? (r + '|' + i) : '';
+}
+
+// O Radar guarda a urgência já classificada ("alto") OU o número cru,
+// conforme de onde veio o Dashboard_Dados. Os dois caem aqui.
+function unClasseTexto(v){
+  var t = String(v == null ? '' : v).trim();
+  if (!t) return '';
+  if (/^[\d.,]+$/.test(t)) return aagUrgencia(t);
+  var n = cpNormCab(t);
+  if (n.indexOf('MUITO_ALT') !== -1) return 'muito alto';
+  if (n.indexOf('ALT') === 0) return 'alto';
+  if (n.indexOf('BAIX') === 0) return 'baixo';
+  return '';
+}
+function unClasse(k){
+  for (var i = 0; i < UN_CLASSES.length; i++) if (UN_CLASSES[i].k === k) return UN_CLASSES[i];
+  return { k:'', t:'Sem urgência', pin:'⚪', cor:'var(--tx2)', fundo:'var(--cin)' };
+}
+
+// ── a leitura do índice ───────────────────────────────────────────
+async function unCarregar(){
+  _unIdx.erro = ''; _unIdx.lido = true; _unIdx.achou = false;
+  try {
+    var db = (typeof getDB === 'function') ? getDB() : null;
+    if (!db) { _unIdx.erro = 'Firebase indisponível — atualize a página (F5).'; return; }
+    var doc = await db.collection('config').doc(UNI_DOC).get();
+    if (!doc || !doc.exists) return;
+    var d = doc.data() || {};
+    var txt = '';
+    if (d.partes) {
+      var ps = [];
+      for (var i = 0; i < d.partes; i++) ps.push(db.collection('config').doc(UNI_DOC + '_' + i).get());
+      var docs = await Promise.all(ps);
+      docs.forEach(function(x){ if (x && x.exists) txt += (x.data().t || ''); });
+    }
+    try { _unIdx.mapa = txt ? JSON.parse(txt) : {}; }
+    catch (e2) {
+      _unIdx.mapa = {};
+      _unIdx.erro = 'o índice gravado veio quebrado — rode o Montar base de novo.';
+    }
+    _unIdx.chaves = +d.chaves || 0;
+    _unIdx.com = +d.com || 0;
+    _unIdx.linhas = +d.linhas || 0;
+    _unIdx.repetidas = +d.repetidas || 0;
+    _unIdx.col = d.col || '';
+    _unIdx.porLetra = d.porLetra || [];
+    _unIdx.arquivo = d.arquivo || '';
+    _unIdx.atualizadoEm = d.atualizadoEm || '';
+    _unIdx.atualizadoPor = d.atualizadoPor || '';
+    _unIdx.achou = true;
+  } catch (e) {
+    console.warn('unCarregar:', e);
+    _unIdx.erro = (e && (e.code || e.message)) || 'não consegui ler o índice de urgência.';
+  }
+}
+
+// ── as linhas: o mapa do dia, com a urgência colada ───────────────
+// O universo é o mapa (o Radar): é lá que existe FASE. Chave do
+// levelboard que não aparece no mapa não vira linha — o rodapé conta
+// quantas ficaram de fora, para ninguém achar que sumiu dado.
+function unLinhas(){
+  var base = (typeof _radarDados !== 'undefined' && _radarDados) ? _radarDados : [];
+  var out = [];
+  base.forEach(function(r){
+    var item = String(r.seq || r.item_rc || '').trim();
+    var k = unChave(r.rc, item);
+    var num = (k && _unIdx.mapa[k] !== undefined) ? +_unIdx.mapa[k] : null;
+    var cls = '', de = '';
+    if (num) { cls = aagUrgencia(num); if (cls) de = 'levelboard'; }
+    if (!cls) {
+      var c2 = unClasseTexto(r.urgencia);
+      if (c2) { cls = c2; de = 'radar'; }
+    }
+    out.push({
+      rc: String(r.rc || '').trim(),
+      item: item,
+      op: String(r.num_oport || '').trim(),
+      analista: String(r.analista || '').trim(),
+      fila: String(r.fila || '').trim(),
+      fase: String(r.analista_auto || '').trim() || UN_SEM_FASE,
+      status: String(r.status || '').trim(),
+      sla: +r.sla || 0,
+      cls: cls, num: num, de: de, chave: k
+    });
+  });
+  return out;
+}
+
+// Quantas chaves do levelboard não acharam par no mapa do dia.
+function unForaDoMapa(linhas){
+  var tem = {};
+  (linhas || []).forEach(function(l){ if (l.chave) tem[l.chave] = 1; });
+  var n = 0;
+  Object.keys(_unIdx.mapa || {}).forEach(function(k){
+    if (!tem[k] && +_unIdx.mapa[k]) n++;
+  });
+  return n;
+}
+
+// ── o farol ───────────────────────────────────────────────────────
+function unFarol(linhas){
+  var f = { total: linhas.length, sem: 0, por: {} };
+  UN_CLASSES.forEach(function(c){ f.por[c.k] = 0; });
+  linhas.forEach(function(l){
+    if (l.cls && f.por[l.cls] !== undefined) f.por[l.cls]++;
+    else f.sem++;
+  });
+  return f;
+}
+
+// Fases de um grupo, da maior para a menor.
+function unFases(linhas, cls){
+  var por = {};
+  linhas.forEach(function(l){
+    if ((l.cls || '') !== cls) return;
+    por[l.fase] = (por[l.fase] || 0) + 1;
+  });
+  return Object.keys(por).map(function(f){ return { fase:f, n:por[f] }; })
+    .sort(function(a, b){ return b.n - a.n || a.fase.localeCompare(b.fase, 'pt-BR'); });
+}
+
+function unItens(linhas, cls, fase){
+  return linhas.filter(function(l){
+    return (l.cls || '') === cls && (!fase || l.fase === fase);
+  }).sort(function(a, b){
+    return (b.sla - a.sla) || String(a.rc).localeCompare(String(b.rc), 'pt-BR');
+  });
+}
+
+// ── o desenho ─────────────────────────────────────────────────────
+function unDesenhar(){
+  var fonte = document.getElementById('un-fonte');
+  var aviso = document.getElementById('un-aviso');
+  var elF = document.getElementById('un-farol');
+  var elC = document.getElementById('un-cards');
+  var elD = document.getElementById('un-detalhe');
+  var elR = document.getElementById('un-rodape');
+  if (!elF || !elC) return;
+
+  if (_unLendo) {
+    if (fonte) fonte.textContent = 'buscando o índice...';
+    elF.innerHTML = '<div class="cd" style="text-align:center;color:var(--tx2);padding:1.5rem">'
+      + '⏳ Lendo o índice de urgência...</div>';
+    elC.innerHTML = ''; if (elD) elD.innerHTML = ''; if (elR) elR.innerHTML = '';
+    return;
+  }
+
+  var linhas = unLinhas();
+  var f = unFarol(linhas);
+
+  if (fonte) {
+    fonte.innerHTML = _unIdx.atualizadoEm
+      ? ('levelboard de <b>' + cpEsc(cpDataBR(_unIdx.atualizadoEm.slice(0,10))) + '</b>'
+         + (_unIdx.atualizadoPor ? ' · ' + cpEsc(_unIdx.atualizadoPor) : ''))
+      : 'índice ainda não montado';
+  }
+
+  // ── avisos ──
+  var av = [];
+  if (_unIdx.erro) {
+    av.push({ cor:'var(--vm)', fundo:'var(--vmc)',
+      t: '✗ ' + cpEsc(_unIdx.erro) });
+  } else if (!_unIdx.achou) {
+    av.push({ cor:'var(--am)', fundo:'var(--amc)',
+      t: '⚠ O índice de urgência ainda não foi montado. Vá em <strong>Analista Automático › '
+       + 'Montar base</strong>, suba o <strong>levelboard</strong> e clique em '
+       + '<strong>Montar tudo</strong> — a urgência é lida lá, da coluna '
+       + '<strong>URGENCIA_NECESSIDADE (col L)</strong>. Enquanto isso a aba mostra a urgência '
+       + 'que veio dentro do próprio Radar, quando ela existe.' });
+  }
+  if ((_unIdx.porLetra || []).length) {
+    av.push({ cor:'var(--am)', fundo:'var(--amc)',
+      t: '⚠ No levelboard eu não achei a coluna pelo nome e li <strong>'
+       + cpEsc(_unIdx.porLetra.join(' · ')) + '</strong>. Se a planilha mudou de ordem, o número '
+       + 'veio da coluna errada.' });
+  }
+  if (!linhas.length) {
+    av.push({ cor:'var(--vm)', fundo:'var(--vmc)',
+      t: '✗ O Radar do PATEC está vazio — sem ele não existe fase para cruzar. '
+       + 'Suba o Radar (ou rode o Montar base e mande o Modelo completo para o Radar).' });
+  } else if (!f.total || (f.total - f.sem) === 0) {
+    av.push({ cor:'var(--am)', fundo:'var(--amc)',
+      t: '⚠ Nenhum item do mapa do dia achou urgência pela chave <strong>RC + item da RC</strong>. '
+       + 'Confira se o levelboard e o mapa são do mesmo ciclo.' });
+  }
+  if (aviso) {
+    aviso.innerHTML = av.map(function(a){
+      return '<div style="margin-top:.75rem;padding:.6rem .875rem;border-radius:7px;font-size:11.5px;'
+        + 'line-height:1.6;border:1px solid ' + a.cor + ';background:' + a.fundo + ';color:var(--tx)">'
+        + a.t + '</div>';
+    }).join('');
+  }
+
+  // ── farol ──
+  var luzes = UN_CLASSES.map(function(c){
+    var n = f.por[c.k] || 0;
+    var pct = f.total ? Math.round(n / f.total * 100) : 0;
+    var on = n > 0;
+    return '<div style="flex:1;min-width:170px;border:2px solid ' + (on ? c.cor : 'var(--brd)')
+      + ';border-radius:10px;padding:.85rem 1rem;background:' + (on ? c.fundo : 'var(--cin)')
+      + ';opacity:' + (on ? '1' : '.55') + '">'
+      + '<div style="font-size:12px;font-weight:700;color:' + c.cor + '">' + c.pin + ' ' + c.t + '</div>'
+      + '<div style="font-size:28px;font-weight:800;line-height:1.15;color:' + c.cor + '">'
+      + cpNum(n) + '</div>'
+      + '<div style="font-size:10.5px;color:var(--tx2)">' + pct + '% dos itens do mapa</div>'
+      + '</div>';
+  }).join('');
+  elF.innerHTML = '<div class="cd"><div class="cd-t">Farol da urgência</div>'
+    + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:.5rem">' + luzes + '</div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-top:.7rem">'
+    + cpNum(f.total) + ' item(ns) no mapa do dia · <strong>' + cpNum(f.total - f.sem)
+    + '</strong> com urgência · ' + cpNum(f.sem) + ' sem número de urgência na régua.'
+    + '</div></div>';
+
+  // ── os três cards, com a fase de cada um ──
+  elC.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px">'
+    + UN_CLASSES.map(function(c){ return unCard(linhas, c, f); }).join('') + '</div>';
+
+  unDesenharDetalhe(linhas);
+
+  // ── rodapé ──
+  if (elR) {
+    var fora = unForaDoMapa(linhas);
+    var p = [];
+    p.push('<strong>Urgência</strong> — coluna <strong>'
+      + cpEsc(_unIdx.col || 'URGENCIA_NECESSIDADE') + '</strong> (col L) do levelboard subido em '
+      + '<em>Montar base</em>' + (_unIdx.arquivo ? ' (' + cpEsc(_unIdx.arquivo) + ')' : '')
+      + ', com ' + cpNum(_unIdx.chaves) + ' chave(s) RC + item da RC, '
+      + cpNum(_unIdx.com) + ' com número.');
+    p.push('<strong>Régua</strong> — 1, 2, 3 = baixo · 4, 10, 11, 51, 52 = alto · '
+      + '53, 54, 55 = baixo · 99 = muito alto. Outro número fica sem urgência, não vira chute.');
+    p.push('<strong>Fase</strong> — STATUS MAPA do mapa do dia, que o Radar guarda por item. '
+      + 'Ela muda a cada mapa novo; a urgência só muda quando o levelboard é subido de novo.');
+    if (_unIdx.repetidas) p.push('A mesma RC + item apareceu ' + cpNum(_unIdx.repetidas)
+      + ' vez(es) a mais no levelboard (uma linha por oportunidade). Ficou a urgência <strong>maior</strong>.');
+    if (fora) p.push(cpNum(fora) + ' item(ns) do levelboard têm urgência mas não estão no mapa do dia — '
+      + 'não aparecem aqui porque não têm fase.');
+    elR.innerHTML = p.map(function(x){ return '• ' + x; }).join('<br>');
+  }
+
+  if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
+}
+
+function unCard(linhas, c, f){
+  var n = f.por[c.k] || 0;
+  var fases = unFases(linhas, c.k);
+  var corpo = fases.length
+    ? fases.map(function(x){
+        var id = c.k + '\u0001' + x.fase;
+        var sel = _unAberto === id;
+        var pct = n ? Math.round(x.n / n * 100) : 0;
+        return '<div onclick="unAbrirFase(' + unArg(c.k) + ',' + unArg(x.fase) + ')" '
+          + 'style="cursor:pointer;padding:.45rem .6rem;border-radius:6px;margin-bottom:4px;'
+          + 'background:' + (sel ? c.fundo : 'var(--cin)') + ';border:1px solid '
+          + (sel ? c.cor : 'transparent') + '">'
+          + '<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">'
+          + '<span style="font-size:11.5px;font-weight:600;color:var(--tx)">' + cpEsc(x.fase) + '</span>'
+          + '<span style="font-size:12.5px;font-weight:800;color:' + c.cor + '">' + cpNum(x.n) + '</span>'
+          + '</div>'
+          + '<div style="height:4px;border-radius:3px;background:var(--brd);margin-top:4px">'
+          + '<div style="height:4px;border-radius:3px;width:' + pct + '%;background:' + c.cor + '"></div>'
+          + '</div></div>';
+      }).join('')
+    : '<div style="font-size:11.5px;color:var(--tx2);padding:.6rem 0">Nenhum item nesta urgência.</div>';
+  return '<div class="cd" style="border-top:3px solid ' + c.cor + '">'
+    + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">'
+    + '<div class="cd-t" style="margin:0;color:' + c.cor + '">' + c.pin + ' Urgência ' + c.t + '</div>'
+    + '<div style="font-size:22px;font-weight:800;color:' + c.cor + '">' + cpNum(n) + '</div></div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin:2px 0 .6rem">'
+    + 'em que fase do processo cada item está — clique para ver as RCs</div>'
+    + corpo + '</div>';
+}
+
+// Texto para dentro de um onclick="" — aspas e acento não podem quebrar o HTML.
+function unArg(s){
+  return "'" + String(s == null ? '' : s)
+    .replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')
+    .replace(/</g, '\\x3c') + "'";
+}
+
+function unAbrirFase(cls, fase){
+  var id = cls + '\u0001' + fase;
+  _unAberto = (_unAberto === id) ? '' : id;
+  unDesenhar();
+  if (_unAberto) {
+    var el = document.getElementById('un-detalhe');
+    if (el && el.scrollIntoView) el.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  }
+}
+
+var UN_DET_COLS = [
+  { t:'RC',          v:function(l){ return l.rc; } },
+  { t:'Item da RC',  v:function(l){ return l.item; } },
+  { t:'Oportunidade',v:function(l){ return l.op; } },
+  { t:'Urgência',    v:function(l){ return unClasse(l.cls).t; } },
+  { t:'Nº',          v:function(l){ return l.num == null ? '' : l.num; } },
+  { t:'Fase (mapa)', v:function(l){ return l.fase; } },
+  { t:'Analista',    v:function(l){ return l.analista; } },
+  { t:'Fila',        v:function(l){ return l.fila; } },
+  { t:'SLA',         v:function(l){ return l.sla || ''; } },
+  { t:'Status (GOV)',v:function(l){ return l.status; } }
+];
+
+function unDesenharDetalhe(linhas){
+  var el = document.getElementById('un-detalhe');
+  if (!el) return;
+  if (!_unAberto) { el.innerHTML = ''; return; }
+  var p = _unAberto.split('\u0001');
+  var c = unClasse(p[0]);
+  var itens = unItens(linhas, p[0], p[1]);
+  var corpo = itens.slice(0, UN_MAX).map(function(l){
+    return '<tr>' + UN_DET_COLS.map(function(col){
+      return '<td style="font-size:11px">' + cpEsc(col.v(l)) + '</td>';
+    }).join('') + '</tr>';
+  }).join('');
+  el.innerHTML = '<div class="cd" style="border-top:3px solid ' + c.cor + '">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">'
+    + '<div class="cd-t" style="margin:0">' + c.pin + ' ' + c.t + ' · ' + cpEsc(p[1])
+    + ' <span style="font-weight:600;color:var(--tx2);font-size:12px">— '
+    + cpNum(itens.length) + ' item(ns)</span></div>'
+    + '<button class="btn btn-s" style="font-size:11px" onclick="unFechar()">✕ Fechar</button></div>'
+    // a folha do painel (.items-table) é escopada por #gdp-root e companhia;
+    // aqui, dentro da Governança, vale a tabela da casa: .tw + <table>
+    + '<div class="tw" style="margin-top:.7rem;max-height:500px"><table><thead><tr>'
+    + UN_DET_COLS.map(function(col){ return '<th>' + col.t + '</th>'; }).join('')
+    + '</tr></thead><tbody>' + (corpo || '<tr><td colspan="' + UN_DET_COLS.length
+    + '" style="text-align:center;color:var(--tx2);padding:1.2rem">Nenhum item.</td></tr>')
+    + '</tbody></table></div>'
+    + (itens.length > UN_MAX
+       ? '<div style="font-size:10.5px;color:var(--tx2);margin-top:.5rem">mostrando os '
+         + cpNum(UN_MAX) + ' primeiros de ' + cpNum(itens.length) + ' — o ⬇ Exportar leva todos</div>'
+       : '')
+    + '</div>';
+}
+
+function unFechar(){ _unAberto = ''; unDesenhar(); }
+
+// ── exportar ──────────────────────────────────────────────────────
+// Uma aba por urgência, mais a aba com tudo — é como ele manda o
+// recorte para o analista sem ter que filtrar na mão.
+function unBaixar(){
+  if (typeof XLSX === 'undefined') return;
+  var linhas = unLinhas();
+  if (!linhas.length) return;
+  var monta = function(ls){
+    return ls.map(function(l){
+      var o = {};
+      UN_DET_COLS.forEach(function(c){ o[c.t] = c.v(l); });
+      return o;
+    });
+  };
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(monta(linhas)), 'Tudo');
+  UN_CLASSES.forEach(function(c){
+    var ls = unItens(linhas, c.k, '');
+    if (!ls.length) return;
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(monta(ls)), c.t);
+  });
+  XLSX.writeFile(wb, 'Urgencia_' + cpHojeISO().replace(/-/g, '') + '.xlsx');
+}
+
+// ── abrir / recarregar ────────────────────────────────────────────
+async function unAbrir(){
+  if (_unLendo) return;
+  if (_unIdx.lido) { unDesenhar(); return; }
+  _unLendo = true;
+  unDesenhar();
+  await unCarregar();
+  _unLendo = false;
+  unDesenhar();
+}
+
+async function unRecarregar(){
+  _unIdx.lido = false; _unIdx.achou = false; _unIdx.mapa = {}; _unAberto = '';
+  await unAbrir();
 }
 
 </script>
