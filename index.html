@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '30/10 11:40';
+var GTO_BUILD = '03/11 10:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -7651,6 +7651,48 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         <div style="margin-bottom:.75rem;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button class="btn btn-p" style="font-size:11px" onclick="sbAbrirModal()">＋ Adicionar item</button>
           <button class="btn btn-g" style="font-size:11px" onclick="sbAbrirImport()">📤 Importar planilha</button>
+          <button class="btn btn-s" style="font-size:11px" onclick="sbSyncAbrir()">🔄 Sincronizar com a relação</button>
+        </div>
+
+        <!-- Modal SINCRONIZAR — acerta a base inteira contra uma relação -->
+        <div id="sb-sync-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;align-items:center;justify-content:center">
+          <div class="cd" style="width:680px;max-width:95vw;padding:1.5rem;position:relative;max-height:92vh;overflow:auto">
+            <div style="font-weight:700;font-size:14px;margin-bottom:.5rem">🔄 Sincronizar o Status B com a relação correta</div>
+            <div style="font-size:11px;color:var(--tx2);margin-bottom:.9rem;line-height:1.6">
+              Cole a relação direto do Excel (ou suba o arquivo). A base passa a ser <strong>exatamente</strong>
+              essa lista: o que está nos dois lados <strong>fica como está</strong>, o que está só no dash
+              <strong>sai</strong> e o que está só na relação <strong>entra</strong>.
+              <br>A chave é o item — <strong>RC + item da RC + oportunidade + item da OP</strong>.
+              O <strong>analista não entra na chave</strong>: item que mudou de dono continua o mesmo item
+              e passa a valer o nome da relação.
+              <br>O que sai <strong>não perde o histórico</strong>: status e comentário ficam guardados.
+            </div>
+
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:.6rem">
+              <button class="btn btn-s" style="font-size:11px" onclick="sbSyncUsarRelacao()">📋 Usar a relação de 03/11 (19 itens)</button>
+              <button class="btn btn-s" style="font-size:11px" onclick="sbBaixarModelo()">⬇️ Baixar modelo</button>
+              <label style="font-size:11px;color:var(--tx2);display:inline-flex;align-items:center;gap:6px">
+                ou suba o arquivo
+                <input type="file" id="sb-sync-file" accept=".xlsx,.xls,.csv" onchange="sbSyncArquivo(this)"
+                  style="font-size:11px;max-width:200px">
+              </label>
+            </div>
+
+            <div class="field-wrap" style="margin-bottom:.75rem">
+              <span class="field-label">Relação (Analista · RC · Item da RC · Oportunidade · Item da OP)</span>
+              <textarea id="sb-sync-texto" rows="7" oninput="sbSyncLerTexto()"
+                placeholder="Cole aqui direto do Excel — com ou sem a linha de cabeçalho."
+                style="width:100%;font-size:11.5px;padding:7px 10px;font-family:ui-monospace,Menlo,Consolas,monospace;box-sizing:border-box"></textarea>
+            </div>
+
+            <div id="sb-sync-preview" style="margin-bottom:.5rem"></div>
+
+            <div style="display:flex;gap:8px;margin-top:1rem;justify-content:flex-end">
+              <button class="btn btn-s" onclick="sbSyncFechar()">Cancelar</button>
+              <button class="btn btn-p" id="sb-sync-aplicar" onclick="sbSyncAplicar()" disabled>💾 Aplicar</button>
+            </div>
+            <span id="sb-sync-erro" style="font-size:11px;color:var(--vm);display:none;margin-top:.5rem"></span>
+          </div>
         </div>
 
         <!-- Modal -->
@@ -35880,7 +35922,8 @@ async function govBuscaSalvar(aba, chave, campo, valor){
       // Salvar lista atualizada no Firebase
       try{
         const db = getDB();
-        if(db) await db.collection('config').doc('sb_itens').set({ itens: _sbItens, dt: new Date().toISOString() });
+        // os removidos vão junto: este set() reescreve o doc inteiro
+        if(db) await db.collection('config').doc('sb_itens').set({ itens: _sbItens, removidos: _sbRemovidos || [], dt: new Date().toISOString() });
       } catch(e){ console.warn('sbSalvarAnalista:', e); }
       sbRender();
     }
@@ -36706,6 +36749,9 @@ async function xglEditarSalvar(){
 // ════════════════════════════════════════════
 let _sbItens = [];
 let _sbDados = {};
+// Chaves tiradas da base de propósito (config/sb_itens.removidos). Elas
+// barram a mesclagem da base embutida — senão o item volta no próximo load.
+let _sbRemovidos = [];
 
 const _SB_BASE_ITENS = [{"rc": "36415142", "seq": "10", "op": "7004581075", "item": "1", "analista": "Lory"}, {"rc": "36415143", "seq": "10", "op": "7004581075", "item": "2", "analista": "Lory"}, {"rc": "36381134", "seq": "10", "op": "7004572873", "item": "1", "analista": "Lory"}, {"rc": "36000309", "seq": "30", "op": "7004569687", "item": "1", "analista": "Lory"}, {"rc": "36079439", "seq": "20", "op": "7004565396", "item": "1", "analista": "Lory"}, {"rc": "36349179", "seq": "20", "op": "7004570080", "item": "2", "analista": "Lory"}, {"rc": "35695631", "seq": "20", "op": "7004565752", "item": "1", "analista": "Lory"}, {"rc": "35729584", "seq": "20", "op": "7004565752", "item": "2", "analista": "Lory"}, {"rc": "35729762", "seq": "20", "op": "7004565752", "item": "3", "analista": "Lory"}, {"rc": "36116758", "seq": "20", "op": "7004561049", "item": "", "analista": "Lory"}, {"rc": "36272787", "seq": "10", "op": "7004557262", "item": "", "analista": "Lory"}, {"rc": "36267250", "seq": "10", "op": "7004557414", "item": "8", "analista": "Lory"}, {"rc": "36262937", "seq": "10", "op": "7004561155", "item": "1", "analista": "Lory"}, {"rc": "36205066", "seq": "10", "op": "7004571984", "item": "3", "analista": "Lory"}, {"rc": "36187508", "seq": "10", "op": "7004561946", "item": "1", "analista": "Lory"}, {"rc": "36183034", "seq": "10", "op": "7004548111", "item": "5", "analista": "Lory"}, {"rc": "36293337", "seq": "10", "op": "7004559928", "item": "5", "analista": "Lory"}, {"rc": "36423753", "seq": "10", "op": "7004583328", "item": "1", "analista": "Lory"}, {"rc": "35331316", "seq": "30", "op": "7004582980", "item": "2", "analista": "Lory"}, {"rc": "36273084", "seq": "10", "op": "7004553812", "item": "5", "analista": "Lory"}, {"rc": "36362655", "seq": "10", "op": "7004571566", "item": "2", "analista": "Lory"}, {"rc": "36396569", "seq": "10", "op": "7004589356", "item": "5", "analista": "Lory"}, {"rc": "36169923", "seq": "10", "op": "7004542251", "item": "5", "analista": "Lory"}, {"rc": "35842122", "seq": "10", "op": "7004561176", "item": "1", "analista": "Lory"}, {"rc": "36473393", "seq": "10", "op": "7004591038", "item": "27", "analista": "Lory"}, {"rc": "36507054", "seq": "10", "op": "7004593279", "item": "2", "analista": "Lory"}, {"rc": "36374733", "seq": "10", "op": "7004594688", "item": "1", "analista": "Lory"}];
 const _SB_BASE_DADOS = {"36415142|10|7004581075|1": {"status": "SAIU DO DPV", "envio": "", "finalizado": "", "comentario": "18/05 - RC transferida para o grupo comprador XXR"}, "36415143|10|7004581075|2": {"status": "SAIU DO DPV", "envio": "", "finalizado": "", "comentario": "18/05 - RC transferida para o grupo comprador XXR"}, "36381134|10|7004572873|1": {"status": "EMITIR PEDIDO PATEC", "envio": "", "finalizado": "", "comentario": "13/04 - Enviado para emissão do PC"}, "36000309|30|7004569687|1": {"status": "EMITIR PEDIDO PATEC", "envio": "", "finalizado": "", "comentario": "18/05 - Reemitir o pedido. Confirmação de fornecimento de material idêntico na sala de colaboração"}, "36079439|20|7004565396|1": {"status": "REPUBLICAÇÃO", "envio": "", "finalizado": "", "comentario": "18/05 - Republicação. Forn não enviou docs solicitados. Além disso, o item recebeu apenas esta cotação."}, "36349179|20|7004570080|2": {"status": "EMITIR PEDIDO PATEC", "envio": "", "finalizado": "", "comentario": "13/04 - Reativar pedido. Forn aprovado em PATEC idêntico sim (Palloma)"}, "35695631|20|7004565752|1": {"status": "EMITIR PEDIDO PATEC", "envio": "", "finalizado": "", "comentario": "13/04 - Enviado para emissão do PC (item de classe descritiva)"}, "35729584|20|7004565752|2": {"status": "EMITIR PEDIDO PATEC", "envio": "", "finalizado": "", "comentario": "13/04 - Enviado para emissão do PC (item de classe descritiva)"}, "35729762|20|7004565752|3": {"status": "EMITIR PEDIDO PATEC", "envio": "", "finalizado": "", "comentario": "13/04 - Enviado para emissão do PC (item de classe descritiva)"}, "36116758|20|7004561049|": {"status": "REPUBLICAÇÃO", "envio": "", "finalizado": "", "comentario": "13/04 - O item recebeu apenas uma cotação,aprovada em PATEC sem documentação técnica enviada. Solicitado docs ao fornecedor, mas não houve retorno."}, "36272787|10|7004557262|": {"status": "REPUBLICAÇÃO", "envio": "", "finalizado": "", "comentario": "30/03 - Solicitado doc técnico ao fornecedor  JM4 para enviar a RC para XGL, pois a RC solicitou  a linha Performa e ele ofertou a linha Active, mas só enviou uma foto do produto.Fornecedor não respondeu."}, "36267250|10|7004557414|8": {"status": "EMITIR PEDIDO PATEC", "envio": "", "finalizado": "", "comentario": "06/04 - Forn cotou ident não devido erro no cadastro do NP. O mesmo foi corrigido através do MDG.Emitir pedido"}, "36262937|10|7004561155|1": {"status": "REPUBLICAÇÃO", "envio": "", "finalizado": "", "comentario": "18/05 - Proposta vencida, republicar"}, "36205066|10|7004571984|3": {"status": "REPUBLICAÇÃO", "envio": "", "finalizado": "", "comentario": "18/05 - Todos os forn foram reprovados em PATEC"}, "36187508|10|7004561946|1": {"status": "EMITIR PEDIDO PATEC", "envio": "", "finalizado": "", "comentario": "11/03- Reativar pedido para fornecedor GREEN PROCESS, aprovado em PATEC. Aplicar NM FILHO 30097041 (Breno)"}, "36183034|10|7004548111|5": {"status": "REPUBLICAÇÃO", "envio": "", "finalizado": "", "comentario": "14/04 - Propostas vencidas. RC encaminhada à 2ª ida ao mercado."}, "36293337|10|7004559928|5": {"status": "REPUBLICAÇÃO", "envio": "", "finalizado": "", "comentario": "07/05 - Republicação/OP vencida"}, "36423753|10|7004583328|1": {"status": "DEVOLUÇÃO", "envio": "", "finalizado": "", "comentario": "24/04 - Enviado para devolução"}, "35331316|30|7004582980|2": {"status": "EMITIR PEDIDO PATEC", "envio": "", "finalizado": "", "comentario": "18/05 - Reemitir o pedido. Material aprovado em PATEC. O material é o mesmo que está sendo solicitado. O forn indicou no relatório consolidado a empresa EURO como fabricante, mas esta é a comercioalizadora/distribuidora aqui no Brasil. O fabricante original  é a NINGBO, conforme consta no cadastro do material. Anexar o Certificado de fabricação no  pedido, no qual o fornecedor enviou (anexos patec no petronect)."}, "36273084|10|7004553812|5": {"status": "REPUBLICAÇÃO", "envio": "", "finalizado": "", "comentario": "18/05 - Forn não retornou doc solicitados. Além disso, a proposta está vencida. ELIMINAR PEDIDO PARA REPUBLICAR"}, "36362655|10|7004571566|2": {"status": "REPUBLICAÇÃO", "envio": "", "finalizado": "", "comentario": "18/05- Este item foi liberado da OP sem  nenhuma justificativa em nota no SAP. Não consegui analisar, pois no relatório consolidado consta como item cancelado (anexei no sap). Enviei parar republicação."}, "36396569|10|7004589356|5": {"status": "SAIU DO DPV", "envio": "", "finalizado": "", "comentario": "18/05 - RC transferida para o grupo comprador XRP"}, "36169923|10|7004542251|5": {"status": "REPUBLICAÇÃO", "envio": "", "finalizado": "", "comentario": "18/05 - ELIMINAR PEDIDO e Enviar para republicação.Forncedor não enviou a documentação neessária além da Proposta estar vencida."}, "35842122|10|7004561176|1": {"status": "MDG", "envio": "", "finalizado": "", "comentario": "18/05 - Aberto chamado para correção de NP 1137628"}, "36473393|10|7004591038|27": {"status": "PATEC FINALIZADO", "envio": "", "finalizado": "", "comentario": ""}, "36507054|10|7004593279|2": {"status": "", "envio": "", "finalizado": "", "comentario": ""}, "36374733|10|7004594688|1": {"status": "PATEC FINALIZADO", "envio": "", "finalizado": "", "comentario": "Caso não ter sucesso, seguir para devolução, pois o tipo de avaliação esta incorreto."}, "OBS: Ao inserir itens novos, peço o favor de identificá-los na coluna STATUS como \"tratar\" e na de OBS com data XX/YY - Item novo + demais observações|||": {"status": "", "envio": "", "finalizado": "", "comentario": ""}};
@@ -36744,17 +36790,22 @@ async function sbCarregarFirebase(){
       // Auto-correção: se havia duplicata, regrava a lista limpa (1 escrita, só quando necessário)
       if(fbItens.length !== fbItensRaw.length){
         try{
-          await db.collection('config').doc('sb_itens').set({ itens:fbItens, dt:new Date().toISOString() });
+          await db.collection('config').doc('sb_itens').set({ itens:fbItens, removidos:(docItens.data().removidos||[]), dt:new Date().toISOString() });
           console.log('Status B: '+(fbItensRaw.length-fbItens.length)+' duplicata(s) removida(s) do Firebase.');
         }catch(e){ console.warn('sb dedup writeback:', e); }
       }
+      // Itens tirados da base de propósito. Sem esta lista, excluir um item
+      // que veio de _SB_BASE_ITENS não adiantava nada: ele voltava sozinho no
+      // próximo load, porque a base embutida é mesclada toda vez. É o mesmo
+      // arranjo que o XGL já usava (xgl_itens.removidos).
+      _sbRemovidos = Array.isArray(docItens.data().removidos) ? docItens.data().removidos : [];
       // Mesclar base embutida (Firebase tem prioridade)
       // CORREÇÃO BUG (20/06): _SB_BASE_ITENS é uma base real do ADLV
       // embutida no código — só mescla quando o módulo ativo é o ADLV.
       if(_moduloAtivo !== 'fast'){
         _SB_BASE_ITENS.forEach(r => {
           const k = sbChave(r.rc,r.seq,r.op,r.item);
-          if(!vistos.has(k)){ _sbItens.push(r); vistos.add(k); }
+          if(!vistos.has(k) && _sbRemovidos.indexOf(k) === -1){ _sbItens.push(r); vistos.add(k); }
         });
       }
     }
@@ -36878,7 +36929,14 @@ async function sbAdicionarItem(){
       const docItens = await db.collection('config').doc('sb_itens').get();
       const itensAtuais = docItens.exists?(docItens.data().itens||[]):[];
       itensAtuais.push({ rc, seq, op, item, analista:'Lory' });
-      await db.collection('config').doc('sb_itens').set({ itens:itensAtuais, dt:new Date().toISOString() });
+      // O set() reescreve o doc inteiro: sem carregar os removidos aqui, um
+      // item adicionado à mão apagava a lista de exclusões e tudo que tinha
+      // sido tirado da base voltava. Reconduzir o item à mão também tira ele
+      // dessa lista — é o que "adicionar de novo" quer dizer.
+      const remAtuais = (docItens.exists && Array.isArray(docItens.data().removidos)
+        ? docItens.data().removidos : []).filter(k => k !== chave);
+      _sbRemovidos = remAtuais;
+      await db.collection('config').doc('sb_itens').set({ itens:itensAtuais, removidos:remAtuais, dt:new Date().toISOString() });
       await db.collection('gov_sb').doc(chave.replace(/[|]/g,'_')).set({
         ..._sbDados[chave], chave, ts:new Date().toISOString()
       });
@@ -37077,7 +37135,13 @@ async function sbConfirmarImport(){
       const docItens = await db.collection('config').doc('sb_itens').get();
       const itensAtuais = docItens.exists ? (docItens.data().itens||[]) : [];
       novos.forEach(p => itensAtuais.push({ rc:p.rc, seq:p.seq, op:p.op, item:p.item, analista:p.analista||'Lory' }));
-      await db.collection('config').doc('sb_itens').set({ itens:itensAtuais, dt:new Date().toISOString() });
+      // mesmo cuidado do "adicionar item": o set() reescreve o doc, então os
+      // removidos precisam voltar junto — menos os que estão sendo reimportados
+      const chavesNovas = novos.map(p => p.chave);
+      const remAtuais = (docItens.exists && Array.isArray(docItens.data().removidos)
+        ? docItens.data().removidos : []).filter(k => chavesNovas.indexOf(k) === -1);
+      _sbRemovidos = remAtuais;
+      await db.collection('config').doc('sb_itens').set({ itens:itensAtuais, removidos:remAtuais, dt:new Date().toISOString() });
 
       // Grava os dados em lotes (batch), respeitando o limite de 500 ops do Firestore
       for(let i=0; i<novos.length; i+=450){
@@ -37108,6 +37172,419 @@ function sbBaixarModelo(){
   const ws = XLSX.utils.aoa_to_sheet([cab, exemplo]);
   XLSX.utils.book_append_sheet(wb, ws, 'Status B');
   XLSX.writeFile(wb, 'modelo_status_b.xlsx');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  STATUS B — SINCRONIZAR A BASE COM UMA RELAÇÃO
+//
+//  O "importar planilha" só SOMA. Quando chega a relação correta do
+//  Status B — a lista do que deveria estar lá — o que falta é o outro
+//  lado: tirar o que entrou sem dever e acertar quem é o dono.
+//
+//  A chave é a do item: RC + item da RC + oportunidade + item da OP.
+//  O ANALISTA NÃO entra na chave: item que mudou de dono continua sendo
+//  o mesmo item e só troca de nome. Era a regra que o André pediu em
+//  03/11 — "não importa o analista, e sim a RC".
+//
+//  Três baldes:
+//    manter  — está nos dois lados. Guarda status, envio, prazo e
+//              comentário do dash; só o analista vem da relação.
+//    excluir — está no dash e não está na relação.
+//    incluir — está na relação e não está no dash.
+//
+//  O que sai NÃO perde o histórico: o doc em gov_sb fica onde está, e a
+//  chave vai para config/sb_itens.removidos. Se o item voltar um dia,
+//  volta com o que já estava escrito nele.
+// ═══════════════════════════════════════════════════════════════════
+
+var _sbSync = null;          // { manter:[], sair:[], entrar:[], repetidas:n, lidas:n }
+
+// A relação que o André passou em 03/11. Fica aqui como atalho datado:
+// o botão enche a caixa, ele confere na prévia e aplica. Em dezembro
+// isso é só um botão velho que ninguém clica — a caixa abre vazia.
+var SB_RELACAO_0311 = [
+  ['Wan','36428780','10','7004604687','4'],
+  ['Wan','36326109','10','7004629340','1'],
+  ['Wan','36732757','10','7004629826','2'],
+  ['Wan','36732756','10','7004629826','1'],
+  ['Wan','36757238','10','7004634232','1'],
+  ['Wan','36668010','10','7004632128','1'],
+  ['Wan','36764210','10','7004637705','1'],
+  ['Wan','36777675','10','7004641833','2'],
+  ['Wan','36798493','10','7004641015','1'],
+  ['Wan','36784286','10','7004643589','3'],
+  ['Wan','36794354','70','7004643074','7'],
+  ['Wan','35418446','30','7004639910','1'],
+  ['Wan','36564019','10','7004641906','2'],
+  ['Wan','36775478','10','7004639803','2'],
+  ['Wan','36794354','70','7004643074','8'],
+  ['Wan','36732769','10','7004629826','4'],
+  ['Wan','36621773','10','7004651277','1'],
+  ['Wan','36777306','10','7004636352','1'],
+  ['Wan','36850746','10','7004660211','4']
+];
+
+function sbSyncAbrir(){
+  _sbSync = null;
+  var ta = document.getElementById('sb-sync-texto'); if (ta) ta.value = '';
+  var inp = document.getElementById('sb-sync-file'); if (inp) inp.value = '';
+  var pv = document.getElementById('sb-sync-preview'); if (pv) pv.innerHTML = '';
+  var er = document.getElementById('sb-sync-erro'); if (er) er.style.display = 'none';
+  sbSyncAtualizarBotao();
+  document.getElementById('sb-sync-modal').style.display = 'flex';
+}
+function sbSyncFechar(){
+  document.getElementById('sb-sync-modal').style.display = 'none';
+  _sbSync = null;
+}
+function sbSyncUsarRelacao(){
+  var ta = document.getElementById('sb-sync-texto');
+  if (!ta) return;
+  ta.value = 'Analista\tRC\tItem da RC\tOportunidade\tItem da OP\n'
+    + SB_RELACAO_0311.map(function(l){ return l.join('\t'); }).join('\n');
+  sbSyncLerTexto();
+}
+
+// ── o parser ──────────────────────────────────────────────────────
+// Colado do Excel vem com TAB. Mas também aceito ; , e duas ou mais
+// casas de espaço, porque nem todo copiar/colar passa pelo Excel.
+function sbSyncQuebrar(linha){
+  if (linha.indexOf('\t') !== -1) return linha.split('\t');
+  if (linha.indexOf(';')  !== -1) return linha.split(';');
+  if (/\s{2,}/.test(linha))       return linha.split(/\s{2,}/);
+  if (linha.indexOf(',')  !== -1) return linha.split(',');
+  return linha.split(/\s+/);
+}
+function sbSyncLimpa(v){
+  return String(v == null ? '' : v).replace(/\.0+$/, '').trim();
+}
+// Onde está cada coluna. Com cabeçalho, pelo nome; sem cabeçalho, pela
+// ordem do modelo — e aí a primeira célula decide se tem Analista ou não
+// (número comprido na coluna 1 = a relação começa na RC).
+function sbSyncColunas(cels){
+  var nomes = cels.map(function(c){ return cpNormCab(c); });
+  var acha = function(lista){
+    for (var i = 0; i < nomes.length; i++) if (lista.indexOf(nomes[i]) !== -1) return i;
+    return -1;
+  };
+  var rc = acha(['RC','NUMERO_RC','N_RC','NUMERO_DA_RC']);
+  if (rc === -1) return null;      // não é cabeçalho
+  return {
+    cab: true,
+    analista: acha(['ANALISTA','ANALISTA_RESPONSAVEL','RESPONSAVEL','ANALISTA_PATEC']),
+    rc: rc,
+    seq: acha(['ITEM_DA_RC','ITEM_RC','SEQ','LINHAREQUISICAO']),
+    op: acha(['OPORTUNIDADE','OP','NUMERO_OPORTUNIDADE','N_OPORTUNIDADE']),
+    item: acha(['ITEM_DA_OP','ITEM_OP','ITEM_OPORTUNIDADE','ITEM'])
+  };
+}
+function sbSyncColunasSemCab(cels){
+  var primeiro = sbSyncLimpa(cels[0]);
+  var comAnalista = !/^\d{5,}$/.test(primeiro);
+  return comAnalista
+    ? { cab:false, analista:0, rc:1, seq:2, op:3, item:4 }
+    : { cab:false, analista:-1, rc:0, seq:1, op:2, item:3 };
+}
+
+function sbSyncLinhasDeTexto(txt){
+  var cruas = String(txt || '').split(/\r?\n/).filter(function(l){ return l.trim() !== ''; });
+  if (!cruas.length) return [];
+  var cols = sbSyncColunas(sbSyncQuebrar(cruas[0]).map(sbSyncLimpa));
+  var ini = 0;
+  if (cols) ini = 1; else cols = sbSyncColunasSemCab(sbSyncQuebrar(cruas[0]).map(sbSyncLimpa));
+  var out = [];
+  for (var i = ini; i < cruas.length; i++) {
+    var c = sbSyncQuebrar(cruas[i]).map(sbSyncLimpa);
+    var pega = function(j){ return j >= 0 && j < c.length ? c[j] : ''; };
+    var rc = pega(cols.rc);
+    if (!/^\d{3,}$/.test(rc)) continue;        // linha de título, total, vazia
+    out.push({ analista: pega(cols.analista), rc: rc, seq: pega(cols.seq),
+               op: pega(cols.op), item: pega(cols.item) });
+  }
+  return out;
+}
+
+function sbSyncLerTexto(){
+  var ta = document.getElementById('sb-sync-texto');
+  var er = document.getElementById('sb-sync-erro');
+  if (er) er.style.display = 'none';
+  var linhas = sbSyncLinhasDeTexto(ta ? ta.value : '');
+  if (!linhas.length) {
+    _sbSync = null;
+    var pv = document.getElementById('sb-sync-preview');
+    if (pv) pv.innerHTML = (ta && ta.value.trim())
+      ? '<div style="font-size:12px;color:var(--vm);padding:.5rem;background:var(--vmc);border-radius:6px">'
+        + 'Não achei nenhuma linha com RC. Esperado: Analista · RC · Item da RC · Oportunidade · Item da OP.</div>'
+      : '';
+    sbSyncAtualizarBotao();
+    return;
+  }
+  sbSyncMontar(linhas);
+}
+
+function sbSyncArquivo(inp){
+  var f = inp.files && inp.files[0]; if (!f) return;
+  var er = document.getElementById('sb-sync-erro'); if (er) er.style.display = 'none';
+  var leitor = new FileReader();
+  leitor.onload = function(e){
+    try {
+      var wb = XLSX.read(e.target.result, { type:'array', cellDates:false });
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var aoa = XLSX.utils.sheet_to_json(ws, { header:1, defval:'', raw:false });
+      var txt = aoa.map(function(l){ return (l || []).join('\t'); }).join('\n');
+      var ta = document.getElementById('sb-sync-texto');
+      if (ta) ta.value = txt;
+      sbSyncLerTexto();
+    } catch (ex) {
+      if (er) { er.textContent = 'Erro ao ler o arquivo: ' + ex.message; er.style.display = 'block'; }
+    }
+  };
+  leitor.readAsArrayBuffer(f);
+}
+
+// ── a comparação ──────────────────────────────────────────────────
+function sbSyncMontar(linhas){
+  var naLista = {}, lista = [], repetidas = 0;
+  linhas.forEach(function(l){
+    var k = sbChave(l.rc, l.seq, l.op, l.item);
+    if (naLista[k]) { repetidas++; return; }
+    naLista[k] = l; lista.push({ chave:k, dados:l });
+  });
+
+  var naBase = {};
+  (_sbItens || []).forEach(function(r){
+    naBase[sbChave(r.rc, r.seq, r.op, r.item)] = r;
+  });
+
+  var manter = [], sair = [], entrar = [];
+  lista.forEach(function(x){
+    var b = naBase[x.chave];
+    if (b) {
+      var de = String(b.analista || '').trim(), para = String(x.dados.analista || '').trim();
+      manter.push({ chave:x.chave, item:b, analista: para || de,
+                    trocaDe: (para && de && cpNormCab(para) !== cpNormCab(de)) ? de : '' });
+    } else {
+      entrar.push({ chave:x.chave, dados:x.dados, sel:true });
+    }
+  });
+  Object.keys(naBase).forEach(function(k){
+    if (!naLista[k]) sair.push({ chave:k, item:naBase[k], sel:true });
+  });
+
+  // Mesma RC + item da RC dos dois lados, oportunidade diferente: quase
+  // sempre é o MESMO item que trocou de OP, não uma exclusão com uma
+  // inclusão. Marco os dois para ele decidir em vez de descobrir depois.
+  var curto = function(r){ return [sbSyncLimpa(r.rc), sbSyncLimpa(r.seq)].join('|'); };
+  var porCurto = {};
+  entrar.forEach(function(e){
+    var c = curto(e.dados);
+    (porCurto[c] = porCurto[c] || []).push(e);
+  });
+  sair.forEach(function(s){
+    var par = porCurto[curto(s.item)];
+    if (!par || !par.length) return;
+    var e = par[0];
+    s.trocouOp = String(e.dados.op || '');
+    e.trocouOp = String(s.item.op || '');
+  });
+
+  _sbSync = { manter:manter, sair:sair, entrar:entrar,
+              repetidas:repetidas, lidas:linhas.length,
+              base:(_sbItens || []).length };
+  sbSyncRenderPreview();
+}
+
+// ── a prévia ──────────────────────────────────────────────────────
+function sbSyncRenderPreview(){
+  var pv = document.getElementById('sb-sync-preview');
+  if (!pv || !_sbSync) { sbSyncAtualizarBotao(); return; }
+  var s = _sbSync;
+  var trocas = s.manter.filter(function(m){ return m.trocaDe; }).length;
+
+  var resumo = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:.75rem">'
+    + sbSyncChip('manter', s.manter.length, 'var(--tx2)', 'var(--cin)')
+    + sbSyncChip('excluir', s.sair.length, 'var(--vm)', 'var(--vmc)')
+    + sbSyncChip('incluir', s.entrar.length, 'var(--vd)', 'var(--vdc)')
+    + (trocas ? sbSyncChip('troca de analista', trocas, 'var(--am)', 'var(--amc)') : '')
+    + '</div>'
+    + '<div style="font-size:11px;color:var(--tx2);margin-bottom:.75rem;line-height:1.6">'
+    + 'Relação com <strong>' + cpNum(s.lidas) + '</strong> linha(s)'
+    + (s.repetidas ? ' (' + cpNum(s.repetidas) + ' repetida(s), contei uma vez)' : '')
+    + ' · base do Status B hoje com <strong>' + cpNum(s.base) + '</strong> item(ns).'
+    + '</div>';
+
+  pv.innerHTML = resumo
+    + sbSyncBloco('sair', '🗑 Sai da base', s.sair, 'var(--vm)',
+        'Está no dash e não está na relação. O status e o comentário ficam guardados: '
+        + 'se o item voltar um dia, volta com tudo.')
+    + sbSyncBloco('entrar', '➕ Entra na base', s.entrar, 'var(--vd)',
+        'Está na relação e não está no dash. Entra como AG. TRATAMENTO.')
+    + sbSyncBlocoManter(s.manter);
+  sbSyncAtualizarBotao();
+}
+
+function sbSyncChip(rot, n, cor, fundo){
+  return '<span style="font-size:11px;font-weight:700;color:' + cor + ';background:' + fundo
+    + ';border:1px solid ' + cor + ';padding:3px 10px;border-radius:20px">'
+    + cpNum(n) + ' ' + rot + '</span>';
+}
+
+function sbSyncLinhaTxt(r){
+  return [sbSyncLimpa(r.rc), sbSyncLimpa(r.seq), sbSyncLimpa(r.op), sbSyncLimpa(r.item)]
+    .join(' · ');
+}
+
+function sbSyncBloco(grupo, titulo, lista, cor, dica){
+  if (!lista.length) return '';
+  var marcados = lista.filter(function(x){ return x.sel; }).length;
+  var linhas = lista.map(function(x, i){
+    var r = grupo === 'sair' ? x.item : x.dados;
+    var quem = String((grupo === 'sair' ? x.item.analista : x.dados.analista) || '').trim();
+    return '<label style="display:flex;gap:8px;align-items:flex-start;padding:3px 0;font-size:11px;cursor:pointer">'
+      + '<input type="checkbox" ' + (x.sel ? 'checked' : '') + ' style="margin-top:2px"'
+      + ' onchange="sbSyncToggle(\'' + grupo + '\',' + i + ',this.checked)">'
+      + '<span><strong>' + cpEsc(sbSyncLinhaTxt(r)) + '</strong>'
+      + (quem ? ' <span style="color:var(--tx2)">· ' + cpEsc(quem) + '</span>' : '')
+      + (x.trocouOp
+         ? '<br><span style="color:var(--am)">⚠ mesma RC + item da RC com outra oportunidade na relação ('
+           + cpEsc(x.trocouOp) + ') — pode ser o mesmo item que trocou de OP</span>'
+         : '')
+      + '</span></label>';
+  }).join('');
+  return '<div style="border:1px solid ' + cor + ';border-radius:8px;padding:.6rem .75rem;margin-bottom:.6rem">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'
+    + '<strong style="font-size:12px;color:' + cor + '">' + titulo + ' — ' + cpNum(lista.length)
+    + ' item(ns), ' + cpNum(marcados) + ' marcado(s)</strong>'
+    + '<span><button class="btn btn-s" style="font-size:10px" onclick="sbSyncSelTodos(\'' + grupo + '\',true)">marcar todos</button> '
+    + '<button class="btn btn-s" style="font-size:10px" onclick="sbSyncSelTodos(\'' + grupo + '\',false)">desmarcar</button></span>'
+    + '</div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin:3px 0 .4rem;line-height:1.5">' + dica + '</div>'
+    + '<div style="max-height:190px;overflow:auto">' + linhas + '</div></div>';
+}
+
+function sbSyncBlocoManter(lista){
+  if (!lista.length) return '';
+  var trocas = lista.filter(function(m){ return m.trocaDe; });
+  return '<div style="border:1px solid var(--brd);border-radius:8px;padding:.6rem .75rem">'
+    + '<strong style="font-size:12px;color:var(--tx2)">✓ Fica como está — ' + cpNum(lista.length)
+    + ' item(ns)</strong>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin:3px 0 .4rem;line-height:1.5">'
+    + 'Está nos dois lados. Status de tratamento, envio, prazo, conclusão e comentário '
+    + 'continuam exatamente como estão no dash.</div>'
+    + (trocas.length
+       ? '<div style="font-size:11px;color:var(--am);line-height:1.7;max-height:150px;overflow:auto">'
+         + '<strong>' + cpNum(trocas.length) + ' troca(m) de analista:</strong><br>'
+         + trocas.map(function(m){
+             return cpEsc(sbSyncLinhaTxt(m.item)) + ' · ' + cpEsc(m.trocaDe)
+                  + ' → <strong>' + cpEsc(m.analista) + '</strong>';
+           }).join('<br>') + '</div>'
+       : '')
+    + '</div>';
+}
+
+function sbSyncToggle(grupo, i, on){
+  if (!_sbSync || !_sbSync[grupo] || !_sbSync[grupo][i]) return;
+  _sbSync[grupo][i].sel = !!on;
+  sbSyncRenderPreview();
+}
+function sbSyncSelTodos(grupo, on){
+  if (!_sbSync || !_sbSync[grupo]) return;
+  _sbSync[grupo].forEach(function(x){ x.sel = !!on; });
+  sbSyncRenderPreview();
+}
+function sbSyncAtualizarBotao(){
+  var b = document.getElementById('sb-sync-aplicar');
+  if (!b) return;
+  var s = _sbSync;
+  var n = s ? (s.sair.filter(function(x){ return x.sel; }).length
+             + s.entrar.filter(function(x){ return x.sel; }).length
+             + s.manter.filter(function(m){ return m.trocaDe; }).length) : 0;
+  b.disabled = !n;
+  b.textContent = n ? ('💾 Aplicar (' + cpNum(n) + ' mudança(s))') : '💾 Aplicar';
+}
+
+// ── aplicar ───────────────────────────────────────────────────────
+function sbSyncResultado(){
+  var s = _sbSync;
+  if (!s) return null;
+  var sai = {}, itens = [], removidos = [];
+  s.sair.forEach(function(x){ if (x.sel) { sai[x.chave] = 1; removidos.push(x.chave); } });
+  // o que fica: tudo que estava na base e não foi marcado para sair,
+  // com o analista da relação quando o item está nela
+  var analistaDe = {};
+  s.manter.forEach(function(m){ analistaDe[m.chave] = m.analista; });
+  (_sbItens || []).forEach(function(r){
+    var k = sbChave(r.rc, r.seq, r.op, r.item);
+    if (sai[k]) return;
+    itens.push({ rc:r.rc, seq:r.seq, op:r.op, item:r.item,
+                 analista: analistaDe[k] || r.analista || '' });
+  });
+  var novos = s.entrar.filter(function(x){ return x.sel; }).map(function(x){
+    var d = x.dados;
+    return { rc:d.rc, seq:d.seq, op:d.op, item:d.item,
+             analista: String(d.analista || '').trim() || 'Lory', chave:x.chave };
+  });
+  novos.forEach(function(n){
+    itens.push({ rc:n.rc, seq:n.seq, op:n.op, item:n.item, analista:n.analista });
+  });
+  return { itens:itens, novos:novos, removidos:removidos };
+}
+
+async function sbSyncAplicar(){
+  var r = sbSyncResultado();
+  if (!r) return;
+  var btn = document.getElementById('sb-sync-aplicar');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Aplicando...'; }
+
+  // estado local primeiro: a tela responde mesmo se o Firebase recusar,
+  // e o erro aparece escrito em vez de a tela ficar parada
+  _sbItens = r.itens.slice();
+  r.novos.forEach(function(n){
+    if (!_sbDados[n.chave]) {
+      _sbDados[n.chave] = { status:'AG. TRATAMENTO', envio:'', finalizado:'', comentario:'' };
+    }
+  });
+  var antes = (_sbRemovidos || []).filter(function(k){
+    return r.removidos.indexOf(k) === -1;
+  });
+  _sbRemovidos = antes.concat(r.removidos);
+
+  var erro = '';
+  try {
+    var db = getDB();
+    if (db) {
+      await db.collection('config').doc('sb_itens').set({
+        itens: _sbItens, removidos: _sbRemovidos, dt: new Date().toISOString()
+      });
+      // Só os itens NOVOS ganham doc. Os que saíram ficam intocados em
+      // gov_sb de propósito: é o histórico deles.
+      for (var i = 0; i < r.novos.length; i += 450) {
+        var lote = db.batch();
+        r.novos.slice(i, i + 450).forEach(function(n){
+          lote.set(db.collection('gov_sb').doc(n.chave.replace(/[|]/g, '_')), {
+            status:'AG. TRATAMENTO', envio:'', finalizado:'', comentario:'',
+            chave:n.chave, ts:new Date().toISOString()
+          });
+        });
+        await lote.commit();
+      }
+    } else {
+      erro = 'sem conexão com o Firebase — a tela mudou, mas nada foi gravado.';
+    }
+  } catch (e) {
+    console.warn('sbSyncAplicar:', e);
+    erro = (e && (e.code || e.message)) || 'não consegui gravar.';
+  }
+
+  var nSai = r.removidos.length, nEnt = r.novos.length;
+  sbSyncFechar();
+  sbRender();
+  var msg = '✅ Status B sincronizado: ' + cpNum(nSai) + ' excluído(s), '
+          + cpNum(nEnt) + ' incluído(s), ' + cpNum(_sbItens.length) + ' na base.';
+  if (erro) msg = '⚠ ' + erro + ' (' + msg.replace('✅ ', '') + ')';
+  if (typeof _expStatus === 'function') _expStatus(msg, !erro);
+  else console.log(msg);
+  if (erro) alert(msg);
 }
 
 // ═══════════════════ NOVA RESERVA (aba alimentada por planilha) ═══════════════════
