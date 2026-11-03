@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '03/11 10:20';
+var GTO_BUILD = '03/11 14:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -33026,16 +33026,89 @@ function agrLimparConcluidos(){
 }
 
 function agrCabExtra(){
-  var n = agrLista().filter(_agrConcluido).length;
-  if (!n) return '';
-  var bt = function(acao, txt){
+  var bt = function(acao, txt, dica){
     return '<button class="btn btn-s" type="button" onclick="' + acao + '"'
+      + (dica ? ' title="' + _govPainelEsc(dica) + '"' : '')
       + ' style="font-size:10px;padding:1px 8px">' + txt + '</button>';
   };
+  // O exportar vale sempre, mesmo sem concluída nenhuma na lista
+  var exportar = bt('agrExportar()', '⬇ exportar',
+    'Baixa o card inteiro em XLSX — em tratamento, fora da carteira e concluídas, '
+    + 'cada uma na sua aba. Não é o recorte que está na tela.');
+  var n = agrLista().filter(_agrConcluido).length;
+  if (!n) return exportar;
   return '<span style="font-size:11px;color:var(--tx2)">· ' + n
     + (n === 1 ? ' concluída escondida' : ' concluídas escondidas') + '</span>'
     + bt('agrVerConcluidos()', _agrVerConcluidos ? '✕ esconder' : '👁 ver')
-    + (_agrVerConcluidos ? bt('agrLimparConcluidos()', '🗑 tirar da lista') : '');
+    + (_agrVerConcluidos ? bt('agrLimparConcluidos()', '🗑 tirar da lista') : '')
+    + exportar;
+}
+
+// ── exportar o card ───────────────────────────────────────────────
+// Sai o card INTEIRO, não o recorte da tela: quem filtrou por "Patec em
+// andamento" e exportou achando que levou tudo descobriria o buraco
+// depois, no e-mail já enviado. O recorte continua no arquivo, na coluna
+// Grupo — dá para filtrar no Excel sem perder o resto.
+var AGR_EXP_GRUPOS = { andamento:'Patec em andamento', finalizado:'Patec finalizado' };
+
+function agrExpSituacao(x){
+  if (_agrConcluido(x))          return 'Concluída';
+  if (x.concluidoEm === 'fora')  return 'Fora da carteira';
+  return 'Em tratamento';
+}
+
+function agrExpLinha(x){
+  var tracinho = function(v){ var t = _agrN(v); return t === '—' ? '' : t; };
+  return {
+    'RC':                 tracinho(x.rc),
+    'Item da RC':         tracinho(x.itemRc),
+    'Oportunidade':       tracinho(x.oport),
+    'Item da OP':         tracinho(x.itemOp),
+    'Analista':           tracinho(x.analista),
+    'Tipo de contato':    _agrN(x.tipoContato),
+    'Pessoa de contato':  _agrN(x.pessoa),
+    'Status Tratamento':  tracinho(x.trat),
+    'Prazo':              tracinho(x.prazo),
+    'Status':             tracinho(x.status),
+    'Situação':           agrExpSituacao(x),
+    'Grupo':              AGR_EXP_GRUPOS[x.spGrupo] || '',
+    'Onde achei':         _agrN(x.origem),
+    'Também está em':     (x.__tambem || []).join(', '),
+    'Concluída em':       x.concluidoEm === 'fora' ? '' : _agrN(x.concluidoEm),
+    'Como concluiu':      _agrN(x.__comoFim),
+    'Quem concluiu':      _agrN(x.__quemFim),
+    'Entrou pelo PID':    x.__pid ? 'Sim' : '',
+    'Observação':         _agrN(x.__motivo)
+  };
+}
+
+function agrExportar(){
+  if (typeof XLSX === 'undefined') {
+    _agrAviso('a biblioteca de planilha não carregou — recarregue a página (F5).', 'var(--vm)');
+    return;
+  }
+  var todas;
+  try { todas = agrLista(); } catch (e) { todas = []; }
+  if (!todas.length) {
+    _agrAviso('não há nada para exportar.', 'var(--am)');
+    return;
+  }
+  var abas = [
+    ['Em tratamento',    todas.filter(function(x){ return !x.concluidoEm; })],
+    ['Fora da carteira', todas.filter(function(x){ return x.concluidoEm === 'fora'; })],
+    ['Concluídas',       todas.filter(_agrConcluido)],
+    ['Tudo',             todas]
+  ];
+  var wb = XLSX.utils.book_new();
+  abas.forEach(function(a){
+    if (!a[1].length) return;                       // aba vazia não entra
+    XLSX.utils.book_append_sheet(wb,
+      XLSX.utils.json_to_sheet(a[1].map(agrExpLinha)), a[0]);
+  });
+  XLSX.writeFile(wb, 'Acionamentos_sobre_RCs_'
+    + cpHojeISO().replace(/-/g, '') + '.xlsx');
+  _agrAviso('exportado: ' + todas.length + ' item(ns) em '
+    + wb.SheetNames.length + ' aba(s).', 'var(--vd)');
 }
 
 // ── a base ───────────────────────────────────────────────────────
