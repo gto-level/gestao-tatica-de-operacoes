@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '03/11 14:05';
+var GTO_BUILD = '04/11 10:35';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -47068,6 +47068,19 @@ function q18Consultar(valor){
     <div id="gnv-etapa-fila">
       <div style="font-size:11px;font-weight:700;color:var(--tx2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:.75rem">↓ Fila — para onde foi?</div>
       <div id="gnv-acao-filas" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1rem"></div>
+      <!-- Só aparece nas filas de SLA escolhido (hoje, o Chamado CSP).
+           Sem marcar um dos dois, o confirmar barra. -->
+      <div id="gnv-acao-sla" style="display:none;border:1.5px solid var(--am);background:var(--amc);
+           border-radius:10px;padding:.7rem .85rem;margin-bottom:1rem">
+        <div style="font-size:11px;font-weight:700;color:var(--am);text-transform:uppercase;
+             letter-spacing:.4px;margin-bottom:.1rem">
+          ⏱ <span id="gnv-acao-sla-titulo">Prazo do chamado</span> <span style="color:var(--vm)">*</span>
+        </div>
+        <div style="font-size:10.5px;color:var(--tx2);margin-bottom:.55rem">
+          O prazo depende de quantos ajustes o NM tem — escolha antes de confirmar.
+        </div>
+        <div id="gnv-acao-sla-opcoes" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+      </div>
     </div>
 
     <div id="gnv-etapa-conclusao" style="display:none">
@@ -56272,7 +56285,8 @@ var _GNV_FILA_NOME = {
   'MDG SCOMP':           'MDG SCOMP',
   'PARADA REQUISITANTE': 'Parada Requisitante',
   'PARADA FORNECEDOR':   'Parada Fornecedor',
-  'PARECERISTA':         'Parecerista'
+  'PARECERISTA':         'Parecerista',
+  'CHAMADO CSP':         'Chamado CSP'
 };
 
 var _GNV_FILA_ICONE = {
@@ -56281,7 +56295,8 @@ var _GNV_FILA_ICONE = {
   'MDG SCOMP':           '🗂',
   'PARADA REQUISITANTE': '👤',
   'PARADA FORNECEDOR':   '🏭',
-  'PARECERISTA':         '📝'
+  'PARECERISTA':         '📝',
+  'CHAMADO CSP':         '🛠'
 };
 
 var GOV_NOVA_PRAZOS = {
@@ -56289,8 +56304,40 @@ var GOV_NOVA_PRAZOS = {
   'MDG SCOMP':           10,
   'PARADA REQUISITANTE': 5,
   'PARADA FORNECEDOR':   2,
-  'PARECERISTA':         5
+  'PARECERISTA':         5,
+  // O Chamado CSP é a única fila sem prazo fixo: são 5 ou 10 dias úteis
+  // conforme o tamanho do chamado, e quem sabe disso é o analista que
+  // abriu. Por isso null aqui e a escolha logo abaixo — o prazo sai do
+  // que ele marcar no modal, não de um número cravado nesta tabela.
+  'CHAMADO CSP':         null
 };
+
+// Filas em que o SLA é escolhido no lançamento, em vez de vir da tabela
+// acima. O número escolhido fica gravado NO ITEM (_gnvEdit[chave].slaDias),
+// para o prazo continuar certo se alguém reabrir e mexer na data de envio.
+var GNV_SLA_ESCOLHA = {
+  'CHAMADO CSP': {
+    resumo: '5 ou 10 dias úteis',
+    titulo: 'Quantos dias úteis tem este chamado?',
+    opcoes: [
+      { dias: 5,  rotulo: '5 dias úteis',  dica: 'até 10 ajustes no NM' },
+      { dias: 10, rotulo: '10 dias úteis', dica: '11 ajustes ou mais' }
+    ]
+  }
+};
+function _gnvSlaEscolha(fila){
+  return GNV_SLA_ESCOLHA[String(fila || '').toUpperCase().trim()] || null;
+}
+// O número é escolhido na tela, então não dá para confiar nele: só vale
+// se for uma das opções da fila. Qualquer outra coisa volta vazio e o
+// lançamento é barrado em vez de gravar um prazo inventado.
+function _gnvSlaValido(fila, dias){
+  var cfg = _gnvSlaEscolha(fila);
+  if (!cfg) return null;
+  var n = parseInt(dias, 10);
+  var ok = cfg.opcoes.some(function(o){ return o.dias === n; });
+  return ok ? n : null;
+}
 
 // "Patec em Andamento" e "Patec Finalizado" não são fila de tratamento: são o
 // estado do PATEC. Viraram coluna própria, alimentada pelo upload.
@@ -56468,9 +56515,14 @@ function _gnvChave(rc, itemRc, op, itemOp){
 }
 
 // ── Colunas calculadas ───────────────────────────────────────────
-function _gnvPrazoRetorno(fila, envio){
+function _gnvPrazoRetorno(fila, envio, slaDias){
   if (!fila || !envio) return '';
-  var dias = GOV_NOVA_PRAZOS[String(fila).toUpperCase().trim()];
+  // fila de SLA escolhido: manda o que o analista marcou no lançamento.
+  // Sem escolha gravada não há prazo — e é de propósito: é melhor a
+  // coluna ficar vazia do que mostrar uma data que ninguém escolheu.
+  var dias = _gnvSlaEscolha(fila)
+    ? _gnvSlaValido(fila, slaDias)
+    : GOV_NOVA_PRAZOS[String(fila).toUpperCase().trim()];
   if (!dias) return '';
   if (typeof govAddDiasUteis !== 'function') return '';
   // try/catch pelo mesmo motivo do resto do arquivo: govAddDiasUteis lê
@@ -56511,11 +56563,12 @@ function _gnvLinhaCalc(r){
   // aparecendo com envio 23/09 e retorno 17/09.
   var manual = e.prazoRetManual || '';
   if (manual && e.envio && manual < e.envio) manual = '';
-  var prazoRet = _gnvPrazoRetorno(e.fila || '', e.envio || '') || manual;
+  var prazoRet = _gnvPrazoRetorno(e.fila || '', e.envio || '', e.slaDias) || manual;
   return {
     dataSolic: e.dataSolic || '',
     fila:      e.fila || '',
     envio:     e.envio || '',
+    slaDias:   _gnvSlaValido(e.fila || '', e.slaDias),
     cobranca:  (e.cobranca == null || e.cobranca === '') ? 0 : (parseInt(e.cobranca, 10) || 0),
     prazoRet:  prazoRet,
     // concluído para de contar prazo e dias parados, como no resto do sistema
@@ -58260,7 +58313,11 @@ function gnvAcaoAbrir(chave, tipo){
   var r = _gnvBase.find(function(x){ return x.id === chave; });
   if (!r) return;
   _gnvAcaoCtx = { chave: chave, tipo: tipo, fila: '', conclusao: '', etapa: 'fila',
-                  filaAtual: _gnvLinhaCalc(r).fila || '', rc: r.rc, itemRc: r.itemRc };
+                  filaAtual: _gnvLinhaCalc(r).fila || '', rc: r.rc, itemRc: r.itemRc,
+                  // SLA escolhido do item, para quem reabre um Chamado CSP já
+                  // lançado não ter de escolher de novo às cegas
+                  slaDias: _gnvLinhaCalc(r).slaDias || null,
+                  slaAtual: _gnvLinhaCalc(r).slaDias || null };
 
   var cfg = _cobManualLabel(tipo);
   var tit = document.getElementById('gnv-acao-titulo');
@@ -58289,6 +58346,7 @@ function gnvAcaoAbrir(chave, tipo){
     var atual = _gnvLinhaCalc(r).fila;
     box.innerHTML = Object.keys(GOV_NOVA_PRAZOS).map(function(f){
       var dias = GOV_NOVA_PRAZOS[f];
+      var esc = _gnvSlaEscolha(f);
       return '<button type="button" class="acao-sel-btn" data-fila="' + _cobEsc(f) + '" onclick="gnvAcaoSelFila(this)"'
         + ' style="background:' + (f === atual ? 'var(--azc)' : 'var(--cin)') + ';border:1.5px solid '
         + (f === atual ? 'var(--azm)' : 'var(--brd)') + ';border-radius:10px;padding:.875rem;cursor:pointer;'
@@ -58296,8 +58354,10 @@ function gnvAcaoAbrir(chave, tipo){
         + '<div style="font-size:20px;margin-bottom:4px">' + (_GNV_FILA_ICONE[f] || '📋') + '</div>'
         + '<div style="font-size:12px;font-weight:600;color:var(--tx)">'
         + _cobEsc(_GNV_FILA_NOME[f] || f) + '</div>'
-        + '<div style="font-size:10px;font-weight:600;color:var(--tx2);margin-top:2px">'
-        + (dias ? dias + ' dias úteis' : 'sem prazo') + '</div></button>';
+        + '<div style="font-size:10px;font-weight:600;color:'
+        + (esc ? 'var(--am)' : 'var(--tx2)') + ';margin-top:2px">'
+        + (esc ? _cobEsc(esc.resumo) : (dias ? dias + ' dias úteis' : 'sem prazo'))
+        + '</div></button>';
     }).join('')
     // Sair da fila: o item volta para a nossa mão, sem terceiro envolvido.
     // Fica com traço pontilhado para não se confundir com os destinos acima.
@@ -58336,6 +58396,7 @@ function gnvAcaoAbrir(chave, tipo){
     centro.value = jaTem;
     if (centroAuto) centroAuto.style.display = (!calc.centro && r.centro) ? 'block' : 'none';
   }
+  _gnvAcaoPintarSla();
   _gnvAcaoPrevia();
   var err = document.getElementById('gnv-acao-erro');
   if (err) { err.style.display = 'none'; err.textContent = ''; }
@@ -58343,6 +58404,49 @@ function gnvAcaoAbrir(chave, tipo){
   _gnvAcaoTrocarEtapa();
   var m = document.getElementById('gnv-acao-modal');
   if (m) m.style.display = 'flex';
+}
+
+// ── o campo de SLA das filas que não têm prazo fixo ──────────────
+// Aparece só quando a fila escolhida pede o prazo. Enquanto nada está
+// marcado, a caixa fica vermelha: é o que diz, antes de clicar em
+// confirmar, que ainda falta alguma coisa ali.
+function _gnvAcaoPintarSla(){
+  var box = document.getElementById('gnv-acao-sla');
+  if (!box || !_gnvAcaoCtx) return;
+  var cfg = (_gnvAcaoCtx.etapa === 'conclusao') ? null : _gnvSlaEscolha(_gnvAcaoCtx.fila);
+  if (!cfg) { box.style.display = 'none'; return; }
+
+  box.style.display = 'block';
+  var marcado = _gnvSlaValido(_gnvAcaoCtx.fila, _gnvAcaoCtx.slaDias);
+  box.style.borderColor = marcado ? 'var(--vd)' : 'var(--vm)';
+  box.style.background  = marcado ? 'var(--vdc)' : 'var(--vmc)';
+
+  var tit = document.getElementById('gnv-acao-sla-titulo');
+  if (tit) tit.textContent = cfg.titulo;
+
+  var ops = document.getElementById('gnv-acao-sla-opcoes');
+  if (ops) {
+    ops.innerHTML = cfg.opcoes.map(function(o){
+      var on = (marcado === o.dias);
+      return '<button type="button" class="gnv-sla-btn" data-sla="' + o.dias + '"'
+        + ' onclick="gnvAcaoSelSla(this)"'
+        + ' style="background:' + (on ? 'var(--vd)' : '#fff') + ';color:' + (on ? '#fff' : 'var(--tx)')
+        + ';border:1.5px solid ' + (on ? 'var(--vd)' : 'var(--brd)') + ';border-radius:9px;'
+        + 'padding:.6rem .7rem;cursor:pointer;text-align:center;line-height:1.25;transition:all .18s">'
+        + '<div style="font-size:13px;font-weight:800">' + o.dias + ' dias úteis</div>'
+        + '<div style="font-size:10px;font-weight:600;opacity:.85">' + _cobEsc(o.dica) + '</div>'
+        + '</button>';
+    }).join('');
+  }
+}
+
+function gnvAcaoSelSla(btn){
+  if (!_gnvAcaoCtx) return;
+  var n = _gnvSlaValido(_gnvAcaoCtx.fila, btn.getAttribute('data-sla'));
+  // clicar de novo no mesmo desmarca — e aí o confirmar volta a barrar
+  _gnvAcaoCtx.slaDias = (n && n === _gnvAcaoCtx.slaDias) ? null : n;
+  _gnvAcaoPintarSla();
+  _gnvAcaoPrevia();
 }
 
 // Mostra o prazo que vai resultar da escolha, antes de confirmar
@@ -58353,10 +58457,20 @@ function _gnvAcaoPrevia(){
   var envio = (document.getElementById('gnv-acao-envio') || {}).value || '';
   var fila  = _gnvAcaoCtx.fila || '';
   if (!fila || !envio) { el.innerHTML = ''; return; }
-  var pr = _gnvPrazoRetorno(fila, envio);
+  var escolha = _gnvSlaEscolha(fila);
+  var sla = escolha ? _gnvSlaValido(fila, _gnvAcaoCtx.slaDias) : null;
+  // fila de SLA escolhido ainda sem escolha: o recado é "falta marcar",
+  // não "esta fila não tem prazo" — que seria mentira
+  if (escolha && !sla) {
+    el.innerHTML = '<span style="color:var(--vm);font-weight:600">Escolha acima se o chamado '
+      + 'é de 5 ou de 10 dias úteis.</span>';
+    return;
+  }
+  var pr = _gnvPrazoRetorno(fila, envio, sla);
   el.innerHTML = pr
     ? 'Prazo de retorno: <strong style="color:var(--az)">' + pr.split('-').reverse().join('/') + '</strong>'
-      + ' <span style="color:var(--tx2)">(' + GOV_NOVA_PRAZOS[fila] + ' dias úteis a partir do envio)</span>'
+      + ' <span style="color:var(--tx2)">(' + (sla || GOV_NOVA_PRAZOS[fila])
+      + ' dias úteis a partir do envio)</span>'
     : '<span style="color:var(--am)">Esta fila não tem prazo definido — o item fica <strong>sem data de retorno</strong>'
       + ((_gnvEdit[_gnvAcaoCtx && _gnvAcaoCtx.chave] || {}).prazoRetManual ? ' (o prazo atual é zerado).' : '.') + '</span>';
 }
@@ -58404,6 +58518,7 @@ function _gnvAcaoTrocarEtapa(){
     : 'Ao escolher uma fila diferente da atual, a cobrança zera e a contagem recomeça hoje — os campos acima continuam editáveis antes de confirmar.';
   var err = document.getElementById('gnv-acao-erro');
   if (err) { err.style.display = 'none'; err.textContent = ''; }
+  _gnvAcaoPintarSla();
   _gnvAcaoPrevia();
 }
 
@@ -58461,10 +58576,12 @@ function gnvAcaoTogglePatec(){
   // A escolha continua livre: clicar numa fila depois troca de novo.
   if (_gnvAcaoCtx.patecNovo === 'Patec Finalizado') {
     _gnvAcaoCtx.fila = _GNV_FILA_ENTRADA;
+    _gnvAcaoCtx.slaDias = null;      // Ag. Ação não tem SLA escolhido
     document.querySelectorAll('#gnv-acao-filas .acao-sel-btn')
       .forEach(function(b){ b.classList.remove('selecionado'); });
     var c = document.getElementById('gnv-acao-cobr');  if (c) c.value = 0;
     var d = document.getElementById('gnv-acao-solic'); if (d) d.value = _gnvHoje();
+    _gnvAcaoPintarSla();
   }
   _gnvAcaoPintarPatec();
 }
@@ -58492,9 +58609,15 @@ function gnvAcaoSelFila(btn){
     var d = document.getElementById('gnv-acao-solic'); if (d) d.value = _gnvHoje();
   }
   _gnvAcaoCtx.fila = nova;
+  // O SLA pertence à fila: só sobrevive se continuar na MESMA fila de
+  // escolha em que foi marcado. Trocar de fila zera — senão um chamado
+  // de 10 dias deixaria prazo de 10 dias num item que foi para MDG.
+  _gnvAcaoCtx.slaDias = (_gnvSlaEscolha(nova) && nova === _gnvAcaoCtx.filaAtual)
+    ? _gnvSlaValido(nova, _gnvAcaoCtx.slaAtual) : null;
   document.querySelectorAll('#gnv-acao-filas .acao-sel-btn')
     .forEach(function(b){ b.classList.remove('selecionado'); });
   btn.classList.add('selecionado');
+  _gnvAcaoPintarSla();
   _gnvAcaoPrevia();
 }
 
@@ -58525,6 +58648,16 @@ async function gnvAcaoConfirmar(){
     if (!centro)  { mostrarErro('Informe o Centro.'); return; }
   } else {
     if (!_gnvAcaoCtx.fila) { mostrarErro('Selecione a fila de tratamento.'); return; }
+    // fila de SLA escolhido: sem o prazo marcado não grava. Gravar sem ele
+    // deixaria o item na fila sem data de retorno e fora da conta de vencidas.
+    var escolhaSla = _gnvSlaEscolha(_gnvAcaoCtx.fila);
+    if (escolhaSla && !_gnvSlaValido(_gnvAcaoCtx.fila, _gnvAcaoCtx.slaDias)) {
+      mostrarErro('Escolha o prazo do ' + (_GNV_FILA_NOME[_gnvAcaoCtx.fila] || _gnvAcaoCtx.fila)
+        + ': ' + escolhaSla.opcoes.map(function(o){ return o.dias + ' dias úteis (' + o.dica + ')'; })
+          .join(' ou ') + '.');
+      _gnvAcaoPintarSla();
+      return;
+    }
   }
   if (!envio)     { mostrarErro('Informe a data de envio.'); return; }
   if (!dataSolic) { mostrarErro('Informe a data da solicitação.'); return; }
@@ -58532,7 +58665,8 @@ async function gnvAcaoConfirmar(){
   // A data de envio não pode ser posterior ao prazo de retorno. Com as filas
   // atuais o prazo é sempre envio + dias úteis, então isso só barra o caso de
   // fila sem prazo caindo num prazo antigo da planilha.
-  var prazoNovo = _gnvPrazoRetorno(_gnvAcaoCtx.fila, envio);
+  var slaDias = _gnvSlaValido(_gnvAcaoCtx.fila, _gnvAcaoCtx.slaDias);
+  var prazoNovo = _gnvPrazoRetorno(_gnvAcaoCtx.fila, envio, slaDias);
   var ed = _gnvEdit[_gnvAcaoCtx.chave] || {};
   // O prazo que veio da planilha foi calculado para um envio anterior: se o
   // envio novo já passou dele, ele não vale mais e é zerado na gravação —
@@ -58576,6 +58710,7 @@ async function gnvAcaoConfirmar(){
       data: _gnvHoje(),
       tipo: tipo,
       tratamento: ehConclusao ? '' : fila,
+      ...(!ehConclusao && slaDias ? { slaDias: slaDias } : {}),
       conclusao: ehConclusao ? _gnvAcaoCtx.conclusao : '',
       obs: obs,
       origem: 'gov_nova',
@@ -58618,6 +58753,10 @@ async function gnvAcaoConfirmar(){
       // ele é limpo para a coluna da planilha voltar a valer.
       _gnvEdit[chave].statusPatec     = '';
       _gnvEdit[chave].fila         = fila;
+      // o SLA escolhido fica gravado no item: é o que mantém o prazo certo
+      // se alguém reabrir e mexer na data de envio. Fila sem escolha zera,
+      // para não sobrar número de uma fila antiga.
+      _gnvEdit[chave].slaDias      = _gnvSlaEscolha(fila) ? slaDias : null;
       // mudança feita no botão: fica marcada com a hora, para valer sobre o
       // último upload e ser substituída pelo próximo
       if (_gnvAcaoCtx.patecNovo) {
