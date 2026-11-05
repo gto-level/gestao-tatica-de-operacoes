@@ -50348,41 +50348,600 @@ var CE_DESF_COLS = [
   ['Comentário do pedido', 'comentarioPedido']
 ];
 
+
+// ===== GTO: Relatório formatado de Desfechos (ExcelJS + gráfico nativo) =====
+function _gtoEnsureLibs(){
+  return new Promise(function(resolve, reject){
+    function have(){ return window.ExcelJS && window.JSZip; }
+    if (have()) { resolve(); return; }
+    var need = [];
+    if (!window.ExcelJS) need.push('https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js');
+    if (!window.JSZip)   need.push('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js');
+    var left = need.length;
+    if (!left) { resolve(); return; }
+    need.forEach(function(src){
+      var sc = document.createElement('script');
+      sc.src = src;
+      sc.onload = function(){ left--; if (left === 0) { have() ? resolve() : reject(new Error('bibliotecas nao carregaram')); } };
+      sc.onerror = function(){ reject(new Error('falha ao carregar ' + src)); };
+      document.head.appendChild(sc);
+    });
+  });
+}
+
+// Converte as linhas do dash no formato do relatório e aplica a REGRA:
+// Pedido, XGL e Nova Reserva => motivo da conclusão = o próprio desfecho.
+function _gtoReportData(mod){
+  var linhas = ceDesfechoLinhas(mod);
+  var REGRA = { 'Pedido':1, 'XGL':1, 'Nova Reserva':1 };
+  var rows = linhas.map(function(l){
+    var p = String(l.data || '').split('-'); // ISO yyyy-mm-dd
+    var d = new Date((+p[0]) || 1970, ((+p[1]) || 1) - 1, (+p[2]) || 1);
+    var motivo = REGRA[l.fluxo] ? l.fluxo : (String(l.porque || '').trim() || '(Sem motivo informado)');
+    var rcN = parseInt(l.rc, 10), itN = parseInt(l.item, 10);
+    return { data:d, desfecho:l.fluxo,
+             rc: isNaN(rcN) ? String(l.rc || '') : rcN,
+             item: isNaN(itN) ? String(l.item || '') : itN,
+             motivo: motivo };
+  });
+  rows.sort(function(a,b){
+    return (a.data - b.data)
+        || String(a.desfecho).localeCompare(b.desfecho)
+        || String(a.rc).localeCompare(String(b.rc));
+  });
+  return rows;
+}
+
 function ceDesfechoBaixar(mod){
   try {
-    var linhas = ceDesfechoLinhas(mod);
-    if (!linhas.length) {
-      alert('Nenhum desfecho no período selecionado — ajuste as datas e filtre de novo.');
-      return;
-    }
+    var rows = _gtoReportData(mod);
+    if (!rows.length) { alert('Nenhum desfecho no período selecionado — ajuste as datas e filtre de novo.'); return; }
     var faixa = _ceDesfechoRange(mod);
-    var cab = CE_DESF_COLS.map(function(c){ return c[0]; });
-    var linha = function(l){
-      return CE_DESF_COLS.map(function(c){
-        return (typeof c[1] === 'function') ? c[1](l) : (l[c[1]] || '');
-      });
-    };
-    var wb = XLSX.utils.book_new();
-    // uma aba com tudo e uma por fluxo: é assim que cada frente recebe
-    var aoa = [cab].concat(linhas.map(linha));
-    var ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = cab.map(function(c){ return { wch: Math.max(10, Math.min(34, c.length + 6)) }; });
-    XLSX.utils.book_append_sheet(wb, ws, 'Tudo');
-    ['Pedido','Republicação','XGL','Devolução','Nova Reserva'].forEach(function(f){
-      var sub = linhas.filter(function(l){ return l.fluxo === f; });
-      if (!sub.length) return;
-      var ws2 = XLSX.utils.aoa_to_sheet([cab].concat(sub.map(linha)));
-      ws2['!cols'] = ws['!cols'];
-      // o nome da aba do Excel não aceita acento em algumas versões
-      XLSX.utils.book_append_sheet(wb, ws2, f.normalize('NFD').replace(/[̀-ͯ]/g, ''));
-    });
-    XLSX.writeFile(wb, 'Desfechos_' + mod.toUpperCase() + '_'
-      + String(faixa.de).replace(/-/g, '') + '_a_'
-      + String(faixa.ate).replace(/-/g, '') + '.xlsx');
+    var de = rows.reduce(function(m,r){ return r.data < m ? r.data : m; }, rows[0].data);
+    var ate = rows.reduce(function(m,r){ return r.data > m ? r.data : m; }, rows[0].data);
+    _gtoEnsureLibs().then(function(){
+      return _gtoGenerateReport(rows, { de:de, ate:ate, modulo:String(mod).toUpperCase() });
+    }).then(function(blob){
+      var nome = 'Relatorio_Desfechos_' + String(mod).toUpperCase() + '_'
+        + String(faixa.de).replace(/-/g,'') + '_a_' + String(faixa.ate).replace(/-/g,'') + '.xlsx';
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = nome;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+    }).catch(function(e){ alert('Não consegui gerar o relatório: ' + (e && e.message || e)); });
   } catch (e) {
     alert('Não consegui gerar o relatório: ' + e.message);
   }
 }
+
+(function(root){
+"use strict";
+var ExcelJS = root.ExcelJS; var JSZip = root.JSZip;
+function _gtoRefreshLibs(){ ExcelJS=root.ExcelJS; JSZip=root.JSZip; }
+// Gerador do Relatório de Desfechos (formatado) — ExcelJS
+// Reproduz o layout validado: Resumo Executivo, Por Desfecho e Motivo,
+// Evolução Diária e Base de Dados. Pensado para rodar no navegador (dash)
+// e em Node (protótipo/teste).
+
+const C = {
+  NAVY:'FF1F3864', BLUE:'FF2E5496', BLUE_L:'FFD9E1F2', GREY_L:'FFF2F2F2',
+  GREEN:'FF548235', GREEN_L:'FFE2EFDA', RED:'FFC00000', RED_L:'FFFBE4E4',
+  AMBER:'FFBF8F00', AMBER_L:'FFFFF2CC', WHITE:'FFFFFFFF', GREY_TXT:'FF595959',
+  GREY_TXT2:'FF404040', BORDER:'FFBFBFBF'
+};
+const DESF_ORDER = ['Pedido','Republicação','Devolução','Nova Reserva','XGL'];
+const DESF_COLOR = {
+  'Pedido':['FF548235','FFE2EFDA'],
+  'Republicação':['FFBF8F00','FFFFF2CC'],
+  'Devolução':['FFC00000','FFFBE4E4'],
+  'Nova Reserva':['FF2E75B6','FFDDEBF7'],
+  'XGL':['FF7030A0','FFE9DEF2']
+};
+const DESF_DESC = {
+  'Pedido':'Item concluído com pedido de compra emitido',
+  'Republicação':'Item devolvido ao mercado para nova cotação',
+  'Devolução':'Item devolvido sem conclusão da compra',
+  'Nova Reserva':'Item que gerou nova reserva',
+  'XGL':'Item tratado via XGL'
+};
+
+function solid(argb){ return {type:'pattern', pattern:'solid', fgColor:{argb:argb}}; }
+function font(o){ return Object.assign({name:'Calibri', size:11}, o||{}); }
+const B_THIN = {style:'thin', color:{argb:C.BORDER}};
+const B_MED  = {style:'medium', color:{argb:C.NAVY}};
+function allBorder(){ return {top:B_THIN,left:B_THIN,right:B_THIN,bottom:B_THIN}; }
+const CEN = {horizontal:'center', vertical:'middle', wrapText:true};
+const LEFT = {horizontal:'left', vertical:'middle', wrapText:true};
+
+function headerRow(ws, row, c1, c2, bg, fg, h){
+  bg=bg||C.NAVY; fg=fg||C.WHITE; h=h||22;
+  for(let c=c1;c<=c2;c++){
+    const cell=ws.getCell(row,c);
+    cell.fill=solid(bg); cell.font=font({bold:true,color:{argb:fg}});
+    cell.alignment=CEN; cell.border=allBorder();
+  }
+  ws.getRow(row).height=h;
+}
+
+// pt(n/total)
+function pct1(n,t){ return (t? (n/t*100):0).toFixed(1)+'%'; }
+
+// rows: [{data:Date, desfecho, rc, item, motivo}]  (motivo já com a regra aplicada)
+// meta: {de:Date, ate:Date, modulo:'ADLV'}
+function buildWorkbook(rows, meta){
+  const wb = new ExcelJS.Workbook();
+  wb.creator='GTO'; wb.created=new Date();
+  const TOTAL = rows.length;
+  const LAST = TOTAL + 1;
+
+  // contagens
+  const counts={}; DESF_ORDER.forEach(d=>counts[d]=0);
+  const motCount={};
+  const datasSet=new Set();
+  rows.forEach(r=>{
+    counts[r.desfecho]=(counts[r.desfecho]||0)+1;
+    motCount[r.motivo]=(motCount[r.motivo]||0)+1;
+    datasSet.add(+r.data);
+  });
+  const datas=[...datasSet].sort((a,b)=>a-b).map(t=>new Date(t));
+  const motOrder=Object.keys(motCount).sort((a,b)=>motCount[b]-motCount[a]);
+  const nRC=new Set(rows.map(r=>String(r.rc))).size;
+  const nPed=counts['Pedido']||0, nRep=counts['Republicação']||0, nDev=counts['Devolução']||0;
+  const nDias=datas.length;
+
+  // ===================================================================
+  // ABA 1: RESUMO EXECUTIVO
+  // ===================================================================
+  const wsr=wb.addWorksheet('Resumo Executivo',{views:[{showGridLines:false}]});
+  for(let c=1;c<=8;c++) wsr.getColumn(c).width=16;
+  wsr.mergeCells('A1:H1');
+  wsr.getCell('A1').value='RELATÓRIO DE DESFECHOS DE RCs';
+  wsr.getCell('A1').font=font({size:20,bold:true,color:{argb:C.WHITE}});
+  wsr.getCell('A1').alignment=CEN; wsr.getCell('A1').fill=solid(C.NAVY);
+  wsr.getRow(1).height=34;
+  wsr.mergeCells('A2:H2');
+  const dfmt=d=>('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear();
+  wsr.getCell('A2').value='Módulo: '+(meta.modulo||'ADLV')+'  ·  Período: '+dfmt(meta.de)+' a '+dfmt(meta.ate)
+     +'  ·  '+nDias+' dias úteis  ·  Fonte: GTO (extração do dashboard)';
+  wsr.getCell('A2').font=font({size:10,italic:true,color:{argb:C.GREY_TXT}});
+  wsr.getCell('A2').alignment=CEN; wsr.getRow(2).height=20;
+
+  // cartões KPI
+  const nXGL=counts['XGL']||0, nNR=counts['Nova Reserva']||0;
+  const kpis=[
+    ['Itens processados',TOTAL,C.NAVY,C.BLUE_L],
+    ['RCs distintas',nRC,C.BLUE,C.BLUE_L],
+    ['Pedidos (concluídos)',nPed,C.GREEN,C.GREEN_L],
+    ['Republicações',nRep,C.AMBER,C.AMBER_L],
+    ['Devoluções',nDev,C.RED,C.RED_L],
+    ['XGL',nXGL,DESF_COLOR['XGL'][0],DESF_COLOR['XGL'][1]],
+    ['Nova Reserva',nNR,DESF_COLOR['Nova Reserva'][0],DESF_COLOR['Nova Reserva'][1]]
+  ];
+  const rowK=4;
+  kpis.forEach((k,i)=>{
+    const col=1+i;
+    const vc=wsr.getCell(rowK,col);
+    vc.value=k[1]; vc.font=font({size:26,bold:true,color:{argb:k[2]}});
+    vc.alignment=CEN; vc.fill=solid(k[3]);
+    vc.border={top:B_MED,left:B_MED,right:B_MED,bottom:B_THIN};
+    const lc=wsr.getCell(rowK+1,col);
+    lc.value=k[0]; lc.font=font({size:10,bold:true,color:{argb:k[2]}});
+    lc.alignment=CEN; lc.fill=solid(k[3]);
+    lc.border={top:B_THIN,left:B_MED,right:B_MED,bottom:B_MED};
+  });
+  wsr.getRow(rowK).height=44; wsr.getRow(rowK+1).height=26;
+
+  // indicadores-chave
+  let rr=rowK+3;
+  wsr.getCell(rr,1).value='Indicadores-chave';
+  wsr.getCell(rr,1).font=font({size:13,bold:true,color:{argb:C.NAVY}});
+  rr++;
+  ['Indicador','Valor','O que significa'].forEach((h,i)=>wsr.getCell(rr,i+1).value=h);
+  headerRow(wsr,rr,1,6);
+  wsr.mergeCells(rr,3,rr,6);
+  rr++;
+  const inds=[
+    ['Taxa de conversão em Pedido', TOTAL?nPed/TOTAL:0,'Itens que resultaram em pedido de compra',C.GREEN,'0.0%'],
+    ['Taxa de Republicação', TOTAL?nRep/TOTAL:0,'Itens que voltaram ao mercado para nova cotação',C.AMBER,'0.0%'],
+    ['Taxa de Devolução', TOTAL?nDev/TOTAL:0,'Itens devolvidos sem conclusão da compra',C.RED,'0.0%'],
+    ['Média de itens por dia', nDias?TOTAL/nDias:0,'Volume médio processado por dia útil',C.BLUE,'0.0']
+  ];
+  inds.forEach(ind=>{
+    wsr.getCell(rr,1).value=ind[0]; wsr.getCell(rr,1).font=font({bold:true,color:{argb:ind[3]}});
+    wsr.getCell(rr,1).border=allBorder(); wsr.getCell(rr,1).alignment=LEFT;
+    const vc=wsr.getCell(rr,2); vc.value=ind[1]; vc.font=font({size:13,bold:true,color:{argb:ind[3]}});
+    vc.alignment=CEN; vc.border=allBorder(); vc.numFmt=ind[4];
+    wsr.mergeCells(rr,3,rr,6);
+    const dc=wsr.getCell(rr,3); dc.value=ind[2]; dc.font=font({size:10,color:{argb:C.GREY_TXT2}});
+    dc.alignment=LEFT;
+    for(let c=3;c<=6;c++) wsr.getCell(rr,c).border=allBorder();
+    rr++;
+  });
+
+  // leitura dos destaques
+  rr++;
+  wsr.getCell(rr,1).value='Leitura dos destaques';
+  wsr.getCell(rr,1).font=font({size:13,bold:true,color:{argb:C.NAVY}});
+  rr++;
+  const topMot=(desf)=>{
+    const c={}; rows.filter(r=>r.desfecho===desf).forEach(r=>c[r.motivo]=(c[r.motivo]||0)+1);
+    return Object.keys(c).sort((a,b)=>c[b]-c[a]).slice(0,3).map(m=>m+' ('+c[m]+')').join('; ');
+  };
+  const diaPico=(()=>{ const c={}; rows.forEach(r=>c[+r.data]=(c[+r.data]||0)+1);
+    let best=null; Object.keys(c).forEach(t=>{ if(!best||c[t]>best[1]) best=[t,c[t]]; });
+    return best?[new Date(+best[0]),best[1]]:null; })();
+  const destaques=[
+    'De '+TOTAL+' itens processados no período, '+nPed+' ('+pct1(nPed,TOTAL)+') foram concluídos como Pedido — a maior fatia ficou em Republicação ('+nRep+') e Devolução ('+nDev+'), que somadas representam '+pct1(nRep+nDev,TOTAL)+' e indicam retrabalho/esforço não convertido.',
+    'Principais motivos de Devolução: '+topMot('Devolução')+'.',
+    'Principais motivos de Republicação: '+topMot('Republicação')+'.',
+    "'Reprovado 100%' e 'Falta de retorno do fornecedor' concentram boa parte das não-conclusões — pontos de atenção para atuação junto a fornecedores e pareceristas.",
+    diaPico?('Dia de maior volume: '+dfmt(diaPico[0])+' com '+diaPico[1]+' itens.'):''
+  ];
+  destaques.forEach(txt=>{
+    if(!txt) return;
+    wsr.mergeCells(rr,1,rr,8);
+    const c=wsr.getCell(rr,1); c.value='•  '+txt;
+    c.font=font({size:10,color:{argb:'FF262626'}});
+    c.alignment={horizontal:'left',vertical:'top',wrapText:true};
+    wsr.getRow(rr).height=30; rr++;
+  });
+  rr++;
+  wsr.mergeCells(rr,1,rr,8);
+  wsr.getCell(rr,1).value='Relatório gerado pelo GTO a partir do controle do dashboard. Detalhamento nas abas: Por Desfecho e Motivo, Evolução Diária e Base de Dados. Pedido, XGL e Nova Reserva têm o motivo igual ao desfecho.';
+  wsr.getCell(rr,1).font=font({size:9,italic:true,color:{argb:'FF808080'}});
+  wsr.getCell(rr,1).alignment={horizontal:'left',vertical:'top',wrapText:true};
+  wsr.getRow(rr).height=28;
+
+  // ===================================================================
+  // ABA 2: POR DESFECHO E MOTIVO
+  // ===================================================================
+  const wsx=wb.addWorksheet('Por Desfecho e Motivo',{views:[{showGridLines:false}]});
+  wsx.getColumn(1).width=40; wsx.getColumn(2).width=10; wsx.getColumn(3).width=12;
+  wsx.getCell('A1').value='Resumo por Desfecho e por Motivo';
+  wsx.getCell('A1').font=font({size:16,bold:true,color:{argb:C.NAVY}});
+  wsx.getCell('A2').value='Duas visões: o tipo de desfecho de cada item e o motivo que levou a ele';
+  wsx.getCell('A2').font=font({size:10,italic:true,color:{argb:C.GREY_TXT}});
+
+  wsx.getCell('A4').value='1) Por Desfecho';
+  wsx.getCell('A4').font=font({size:12,bold:true,color:{argb:C.BLUE}});
+  let hr=5;
+  ['Desfecho','Qtde','% do Total'].forEach((h,i)=>wsx.getCell(hr,i+1).value=h);
+  headerRow(wsx,hr,1,3);
+  let r=hr+1; const desfFirst=r;
+  DESF_ORDER.forEach(d=>{
+    wsx.getCell(r,1).value=d;
+    wsx.getCell(r,2).value={formula:"COUNTIF('Base de Dados'!$B$2:$B$"+LAST+",A"+r+")"};
+    wsx.getCell(r,3).value={formula:"B"+r+"/$B$"+(desfFirst+DESF_ORDER.length)};
+    const [strong,light]=DESF_COLOR[d];
+    wsx.getCell(r,1).fill=solid(light); wsx.getCell(r,1).font=font({bold:true,color:{argb:strong}});
+    wsx.getCell(r,2).font=font({bold:true}); wsx.getCell(r,2).alignment=CEN;
+    wsx.getCell(r,3).font=font({}); wsx.getCell(r,3).alignment=CEN; wsx.getCell(r,3).numFmt='0.0%';
+    for(let c=1;c<=3;c++) wsx.getCell(r,c).border=allBorder();
+    r++;
+  });
+  const desfTot=r;
+  wsx.getCell(desfTot,1).value='TOTAL';
+  wsx.getCell(desfTot,2).value={formula:"SUM(B"+desfFirst+":B"+(desfTot-1)+")"};
+  wsx.getCell(desfTot,3).value={formula:"SUM(C"+desfFirst+":C"+(desfTot-1)+")"};
+  for(let c=1;c<=3;c++){ const cell=wsx.getCell(desfTot,c);
+    cell.fill=solid(C.NAVY); cell.font=font({bold:true,color:{argb:C.WHITE}});
+    cell.alignment=CEN; cell.border=allBorder(); }
+  wsx.getCell(desfTot,3).numFmt='0.0%';
+
+  const mrow=desfTot+3;
+  wsx.getCell(mrow,1).value='2) Por Motivo da Conclusão';
+  wsx.getCell(mrow,1).font=font({size:12,bold:true,color:{argb:C.BLUE}});
+  const hrm=mrow+1;
+  ['Motivo da Conclusão','Qtde','% do Total'].forEach((h,i)=>wsx.getCell(hrm,i+1).value=h);
+  headerRow(wsx,hrm,1,3);
+  r=hrm+1; const motFirst=r;
+  motOrder.forEach((m,idx)=>{
+    wsx.getCell(r,1).value=m;
+    wsx.getCell(r,2).value={formula:"COUNTIF('Base de Dados'!$E$2:$E$"+LAST+",A"+r+")"};
+    wsx.getCell(r,3).value={formula:"B"+r+"/$B$"+(motFirst+motOrder.length)};
+    wsx.getCell(r,1).font=font({size:10}); wsx.getCell(r,1).alignment=LEFT;
+    wsx.getCell(r,2).font=font({size:10,bold:true}); wsx.getCell(r,2).alignment=CEN;
+    wsx.getCell(r,3).font=font({size:10}); wsx.getCell(r,3).alignment=CEN; wsx.getCell(r,3).numFmt='0.0%';
+    for(let c=1;c<=3;c++) wsx.getCell(r,c).border=allBorder();
+    if((r-hrm)%2===0){ for(let c=1;c<=3;c++) wsx.getCell(r,c).fill=solid(C.GREY_L); }
+    r++;
+  });
+  const motTot=r;
+  wsx.getCell(motTot,1).value='TOTAL';
+  wsx.getCell(motTot,2).value={formula:"SUM(B"+motFirst+":B"+(motTot-1)+")"};
+  wsx.getCell(motTot,3).value={formula:"SUM(C"+motFirst+":C"+(motTot-1)+")"};
+  for(let c=1;c<=3;c++){ const cell=wsx.getCell(motTot,c);
+    cell.fill=solid(C.NAVY); cell.font=font({size:10,bold:true,color:{argb:C.WHITE}});
+    cell.alignment=CEN; cell.border=allBorder(); }
+  wsx.getCell(motTot,3).numFmt='0.0%';
+
+  // ===================================================================
+  // ABA 3: EVOLUÇÃO DIÁRIA
+  // ===================================================================
+  const wse=wb.addWorksheet('Evolução Diária',{views:[{showGridLines:false}]});
+  wse.getColumn(1).width=13;
+  for(let j=2;j<=DESF_ORDER.length+2;j++) wse.getColumn(j).width=14;
+  wse.getCell('A1').value='Evolução Diária por Desfecho';
+  wse.getCell('A1').font=font({size:16,bold:true,color:{argb:C.NAVY}});
+  wse.getCell('A2').value='Volume de itens concluídos a cada dia, separado por tipo de desfecho';
+  wse.getCell('A2').font=font({size:10,italic:true,color:{argb:C.GREY_TXT}});
+  const ehr=4;
+  wse.getCell(ehr,1).value='Data';
+  DESF_ORDER.forEach((d,i)=>wse.getCell(ehr,i+2).value=d);
+  wse.getCell(ehr,DESF_ORDER.length+2).value='Total do Dia';
+  headerRow(wse,ehr,1,DESF_ORDER.length+2);
+  DESF_ORDER.forEach((d,i)=>{ wse.getCell(ehr,i+2).fill=solid(DESF_COLOR[d][0]); });
+  let er=ehr+1;
+  datas.forEach(dt=>{
+    const cd=wse.getCell(er,1); cd.value=dt; cd.numFmt='dd/mm/yyyy';
+    cd.font=font({size:10,bold:true}); cd.alignment=CEN; cd.border=allBorder();
+    DESF_ORDER.forEach((d,i)=>{
+      const colL=wse.getColumn(i+2).letter;
+      const f="COUNTIFS('Base de Dados'!$A$2:$A$"+LAST+",$A"+er+",'Base de Dados'!$B$2:$B$"+LAST+","+colL+"$"+ehr+")";
+      const cell=wse.getCell(er,i+2); cell.value={formula:f};
+      cell.font=font({size:10}); cell.alignment=CEN; cell.border=allBorder();
+      cell.fill=solid(DESF_COLOR[d][1]);
+    });
+    const tc=DESF_ORDER.length+2;
+    const firstL=wse.getColumn(2).letter, lastL=wse.getColumn(tc-1).letter;
+    const tcell=wse.getCell(er,tc); tcell.value={formula:"SUM("+firstL+er+":"+lastL+er+")"};
+    tcell.font=font({size:10,bold:true}); tcell.alignment=CEN; tcell.border=allBorder(); tcell.fill=solid(C.BLUE_L);
+    er++;
+  });
+  const etot=er;
+  wse.getCell(etot,1).value='Total Período';
+  for(let j=2;j<=DESF_ORDER.length+2;j++){
+    const colL=wse.getColumn(j).letter;
+    wse.getCell(etot,j).value={formula:"SUM("+colL+(ehr+1)+":"+colL+(etot-1)+")"};
+  }
+  for(let j=1;j<=DESF_ORDER.length+2;j++){ const cell=wse.getCell(etot,j);
+    cell.font=font({size:10,bold:true,color:{argb:C.WHITE}}); cell.alignment=CEN;
+    cell.fill=solid(C.NAVY); cell.border=allBorder(); }
+
+  // ===================================================================
+  // ABA 4: BASE DE DADOS
+  // ===================================================================
+  const wsd=wb.addWorksheet('Base de Dados',{views:[{state:'frozen',ySplit:1}]});
+  ['Data','Desfecho','RC','Item','Motivo da Conclusão'].forEach((h,i)=>wsd.getCell(1,i+1).value=h);
+  headerRow(wsd,1,1,5);
+  rows.forEach((rec,i)=>{
+    const rrw=i+2;
+    const cd=wsd.getCell(rrw,1); cd.value=rec.data; cd.numFmt='dd/mm/yyyy';
+    wsd.getCell(rrw,2).value=rec.desfecho;
+    wsd.getCell(rrw,3).value=rec.rc;
+    wsd.getCell(rrw,4).value=rec.item;
+    wsd.getCell(rrw,5).value=rec.motivo;
+    for(let c=1;c<=5;c++){ const cell=wsd.getCell(rrw,c);
+      cell.font=font({size:10}); cell.border=allBorder();
+      cell.alignment=(c===1||c===3||c===4)?CEN:LEFT; }
+    const [strong,light]=DESF_COLOR[rec.desfecho]||['FF000000','FFFFFFFF'];
+    wsd.getCell(rrw,2).fill=solid(light); wsd.getCell(rrw,2).font=font({size:10,bold:true,color:{argb:strong}});
+    if(rrw%2===0){ [1,3,4,5].forEach(c=>wsd.getCell(rrw,c).fill=solid(C.GREY_L)); }
+  });
+  wsd.getColumn(1).width=13; wsd.getColumn(2).width=16; wsd.getColumn(3).width=13;
+  wsd.getColumn(4).width=8; wsd.getColumn(5).width=40;
+  wsd.autoFilter='A1:E'+LAST;
+
+  // guarda refs para injeção de gráfico
+  wb._meta={
+    sheets:{ pxm:'Por Desfecho e Motivo', evo:'Evolução Diária' },
+    desf:{ headerRow:hr, first:desfFirst, last:desfTot-1 },
+    mot:{ headerRow:hrm, first:motFirst, last:motTot-1 },
+    evo:{ headerRow:ehr, first:ehr+1, last:etot-1, ncols:DESF_ORDER.length, totalRow:etot },
+    desfColors: DESF_ORDER.map(d=>DESF_COLOR[d][0].slice(2))  // sem 'FF'
+  };
+  return wb;
+}
+
+
+// Injeta gráficos NATIVOS (editáveis) no xlsx gerado pelo ExcelJS.
+// ExcelJS não cria gráfico; aqui adicionamos as partes OOXML via JSZip.
+
+const NS_C = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// título rico
+function titleXml(txt){
+  return '<c:title><c:tx><c:rich>'
+    + '<a:bodyPr rot="0" spcFirstLastPara="1" vertOverflow="ellipsis" vert="horz" wrap="square" anchor="ctr" anchorCtr="1"/>'
+    + '<a:lstStyle/>'
+    + '<a:p><a:pPr><a:defRPr sz="1100" b="1"/></a:pPr>'
+    + '<a:r><a:rPr lang="pt-BR" sz="1100" b="1"/><a:t>'+esc(txt)+'</a:t></a:r></a:p>'
+    + '</c:rich></c:tx><c:overlay val="0"/></c:title><c:autoTitleDeleted val="0"/>';
+}
+const DLBLS = '<c:dLbls><c:showLegendKey val="0"/><c:showVal val="1"/>'
+  + '<c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/>'
+  + '<c:showBubbleSize val="0"/></c:dLbls>';
+
+function serXml(idx, sheet, nameCell, catRange, valRange, colorHex, withDlbls){
+  var sp = colorHex ? '<c:spPr><a:solidFill><a:srgbClr val="'+colorHex+'"/></a:solidFill></c:spPr>' : '';
+  return '<c:ser><c:idx val="'+idx+'"/><c:order val="'+idx+'"/>'
+    + '<c:tx><c:strRef><c:f>'+"'"+sheet+"'"+'!'+nameCell+'</c:f></c:strRef></c:tx>'
+    + sp
+    + (withDlbls?DLBLS:'')
+    + '<c:cat><c:strRef><c:f>'+"'"+sheet+"'"+'!'+catRange+'</c:f></c:strRef></c:cat>'
+    + '<c:val><c:numRef><c:f>'+"'"+sheet+"'"+'!'+valRange+'</c:f></c:numRef></c:val>'
+    + '</c:ser>';
+}
+
+// barChart genérico. dir: 'col'|'bar'; grouping: 'clustered'|'stacked'
+function barChartXml(opts){
+  var sers = opts.series.map(function(s,i){
+    return serXml(i, opts.sheet, s.name, opts.cat, s.val, s.color, !!opts.dlbls);
+  }).join('');
+  var overlap = (opts.grouping==='stacked') ? '<c:overlap val="100"/>' : '<c:gapWidth val="110"/>';
+  var catFmt = opts.catDate
+    ? '<c:numFmt formatCode="dd/mm" sourceLinked="0"/>'
+    : '<c:numFmt formatCode="General" sourceLinked="1"/>';
+  var legend = opts.legend
+    ? '<c:legend><c:legendPos val="'+(opts.legendPos||'b')+'"/><c:overlay val="0"/></c:legend>'
+    : '';
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+   + '<c:chartSpace xmlns:c="'+NS_C+'" '
+   + 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+   + 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+   + '<c:chart>'
+   + titleXml(opts.title)
+   + '<c:plotArea><c:layout/>'
+   + '<c:barChart><c:barDir val="'+opts.dir+'"/><c:grouping val="'+opts.grouping+'"/>'
+   + '<c:varyColors val="0"/>'
+   + sers
+   + overlap
+   + '<c:axId val="111111111"/><c:axId val="222222222"/>'
+   + '</c:barChart>'
+   + '<c:catAx><c:axId val="111111111"/><c:scaling><c:orientation val="minMax"/></c:scaling>'
+   + '<c:delete val="0"/><c:axPos val="'+(opts.dir==='bar'?'l':'b')+'"/>'
+   + catFmt
+   + '<c:tickLblPos val="nextTo"/><c:crossAx val="222222222"/></c:catAx>'
+   + '<c:valAx><c:axId val="222222222"/><c:scaling><c:orientation val="minMax"/></c:scaling>'
+   + '<c:delete val="0"/><c:axPos val="'+(opts.dir==='bar'?'b':'l')+'"/>'
+   + '<c:numFmt formatCode="General" sourceLinked="1"/>'
+   + '<c:tickLblPos val="nextTo"/><c:crossAx val="111111111"/></c:valAx>'
+   + '</c:plotArea>'
+   + legend
+   + '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/>'
+   + '</c:chart></c:chartSpace>';
+}
+
+// anchor de um gráfico (twoCellAnchor) apontando p/ rId do chart
+function anchorXml(fromC,fromR,toC,toR,rId,shapeId,name){
+  return '<xdr:twoCellAnchor>'
+   + '<xdr:from><xdr:col>'+fromC+'</xdr:col><xdr:colOff>0</xdr:colOff>'
+   + '<xdr:row>'+fromR+'</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>'
+   + '<xdr:to><xdr:col>'+toC+'</xdr:col><xdr:colOff>0</xdr:colOff>'
+   + '<xdr:row>'+toR+'</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>'
+   + '<xdr:graphicFrame macro="">'
+   + '<xdr:nvGraphicFramePr><xdr:cNvPr id="'+shapeId+'" name="'+esc(name)+'"/>'
+   + '<xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>'
+   + '<xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm>'
+   + '<a:graphic><a:graphicData uri="'+NS_C+'">'
+   + '<c:chart xmlns:c="'+NS_C+'" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="'+rId+'"/>'
+   + '</a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>';
+}
+function drawingWrap(inner){
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+   + '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" '
+   + 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'+inner+'</xdr:wsDr>';
+}
+function relsWrap(items){
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+   + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+items+'</Relationships>';
+}
+
+// col->letra
+function colL(n){ var s=''; while(n>0){ var m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); } return s; }
+
+async function injectCharts(buffer, meta){
+  const zip = await JSZip.loadAsync(buffer);
+  const S_PXM = meta.sheets.pxm, S_EVO = meta.sheets.evo;
+
+  // ---- chart1: Itens por Desfecho (col, 1 série) ----
+  const d=meta.desf;
+  const chart1 = barChartXml({
+    title:'Itens por Desfecho', dir:'col', grouping:'clustered', dlbls:true, legend:false,
+    sheet:S_PXM, cat:'$A$'+d.first+':$A$'+d.last,
+    series:[{ name:'$B$'+d.headerRow, val:'$B$'+d.first+':$B$'+d.last, color:'4472C4' }]
+  });
+  // ---- chart2: Motivos da Conclusão (bar, 1 série) ----
+  const m=meta.mot;
+  const chart2 = barChartXml({
+    title:'Motivos da Conclusão (frequência)', dir:'bar', grouping:'clustered', dlbls:true, legend:false,
+    sheet:S_PXM, cat:'$A$'+m.first+':$A$'+m.last,
+    series:[{ name:'$B$'+m.headerRow, val:'$B$'+m.first+':$B$'+m.last, color:'4472C4' }]
+  });
+  // ---- chart3: Evolução por dia (col empilhado, N séries) ----
+  const e=meta.evo;
+  const evoSeries=[];
+  for(let i=0;i<e.ncols;i++){
+    const L=colL(i+2); // B..F
+    evoSeries.push({ name:'$'+L+'$'+e.headerRow, val:'$'+L+'$'+e.first+':$'+L+'$'+e.last,
+                     color: meta.desfColors[i] });
+  }
+  const chart3 = barChartXml({
+    title:'Itens por dia e por desfecho', dir:'col', grouping:'stacked', dlbls:false,
+    legend:true, legendPos:'b', catDate:true,
+    sheet:S_EVO, cat:'$A$'+e.first+':$A$'+e.last, series:evoSeries
+  });
+
+  zip.file('xl/charts/chart1.xml', chart1);
+  zip.file('xl/charts/chart2.xml', chart2);
+  zip.file('xl/charts/chart3.xml', chart3);
+
+  // drawing1 (sheet2 = Por Desfecho e Motivo): chart1 + chart2
+  const draw1 = drawingWrap(
+      anchorXml(4,3,12,18,'rId1',2,'Chart 1')
+    + anchorXml(4,19,13,41,'rId2',3,'Chart 2'));
+  zip.file('xl/drawings/drawing1.xml', draw1);
+  zip.file('xl/drawings/_rels/drawing1.xml.rels', relsWrap(
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/>'
+    + '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart2.xml"/>'));
+
+  // drawing2 (sheet3 = Evolução): chart3, abaixo da tabela
+  const er0 = e.totalRow + 1; // 0-indexed ~2 linhas abaixo
+  const draw2 = drawingWrap(anchorXml(0,er0,11,er0+19,'rId1',2,'Chart 3'));
+  zip.file('xl/drawings/drawing2.xml', draw2);
+  zip.file('xl/drawings/_rels/drawing2.xml.rels', relsWrap(
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart3.xml"/>'));
+
+  // liga drawings às sheets (sheet2 e sheet3)
+  async function attach(sheetFile, drawingName){
+    const relPath='xl/worksheets/_rels/'+sheetFile+'.rels';
+    const relFile=zip.file(relPath);
+    if(relFile){
+      let xml=await relFile.async('string');
+      // acha maior rId
+      let max=0; (xml.match(/Id="rId(\d+)"/g)||[]).forEach(s=>{ const n=+s.match(/\d+/)[0]; if(n>max)max=n; });
+      const rid='rId'+(max+1);
+      xml=xml.replace('</Relationships>',
+        '<Relationship Id="'+rid+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/'+drawingName+'"/></Relationships>');
+      zip.file(relPath,xml);
+      return rid;
+    } else {
+      zip.file(relPath, relsWrap('<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/'+drawingName+'"/>'));
+      return 'rId1';
+    }
+  }
+  async function addDrawingEl(sheetFile, rid){
+    const p='xl/worksheets/'+sheetFile;
+    let xml=await zip.file(p).async('string');
+    if(xml.indexOf('<drawing ')===-1){
+      xml=xml.replace('</worksheet>','<drawing r:id="'+rid+'"/></worksheet>');
+      // garante xmlns:r no root (ExcelJS já inclui, mas por segurança)
+      if(xml.indexOf('xmlns:r=')===-1){
+        xml=xml.replace('<worksheet ', '<worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ');
+      }
+      zip.file(p,xml);
+    }
+  }
+  const rid2=await attach('sheet2.xml','drawing1.xml'); await addDrawingEl('sheet2.xml',rid2);
+  const rid3=await attach('sheet3.xml','drawing2.xml'); await addDrawingEl('sheet3.xml',rid3);
+
+  // Content types
+  let ct=await zip.file('[Content_Types].xml').async('string');
+  const overrides=
+     '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>'
+   + '<Override PartName="/xl/drawings/drawing2.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>'
+   + '<Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>'
+   + '<Override PartName="/xl/charts/chart2.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>'
+   + '<Override PartName="/xl/charts/chart3.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>';
+  ct=ct.replace('</Types>', overrides+'</Types>');
+  zip.file('[Content_Types].xml', ct);
+
+  return zip.generateAsync({ type: (typeof window==='undefined')?'nodebuffer':'blob',
+                             mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
+
+async function _gtoGenerateReport(rows, meta){ _gtoRefreshLibs();
+  var wb=buildWorkbook(rows, meta);
+  var buf=await wb.xlsx.writeBuffer();
+  return await injectCharts(buf, wb._meta);
+}
+root._gtoGenerateReport=_gtoGenerateReport;
+root._gtoBuildWorkbook=buildWorkbook;
+})(typeof window!=="undefined"?window:globalThis);
+
 
 function ceDesfechoCopiar(mod){
   var linhas = ceDesfechoLinhas(mod);
