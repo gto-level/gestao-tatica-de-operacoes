@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '05/11 16:20';
+var GTO_BUILD = '05/11 20:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -56944,6 +56944,25 @@ var GNV_SLA_REGRA = {
 function _gnvSlaRegra(fila){
   return GNV_SLA_REGRA[String(fila || '').toUpperCase().trim()] || null;
 }
+
+// ── filas que NÃO dizem nada sobre o Status do Patec ─────────────
+// A fila é onde o item está sendo tratado; o Status do Patec é outra
+// coluna, que vem da planilha. As duas só se encontram num ponto: o
+// acerto de carga deduz "está numa fila de terceiro, então o Patec já
+// saiu daqui". Essa dedução não vale para as filas abaixo, e deixá-las
+// de fora é o que impede a fila de concluir um Patec sozinha.
+//
+//   PARECERISTA          — o Patec ainda depende do parecer
+//   PATEC 100% REPROVADO — fase de ANÁLISE do FAST, criada em nov/2026
+//                          porque o item reprovado tem tratativa
+//                          diferenciada. Apesar do nome, não tem relação
+//                          com o desfecho "100% Reprovado" da conclusão
+//                          nem com o status do mapa do ADLV: é só mais
+//                          uma fila, como Parada Fornecedor ou MDG.
+var _GNV_FILAS_SEM_PALPITE = ['PARECERISTA', 'PATEC 100% REPROVADO'];
+function _gnvFilaSemPalpite(f){
+  return _GNV_FILAS_SEM_PALPITE.indexOf(String(f || '').toUpperCase().trim()) !== -1;
+}
 function _gnvSlaDaRegra(fila, envio, dataSolic){
   var r = _gnvSlaRegra(fila);
   return r ? r.decide(envio, dataSolic) : null;
@@ -57636,13 +57655,13 @@ var _GNV_REGRAS_AJUSTE = [
     testa: function(st, fila){ return !fila && st === 'Patec Finalizado'; },
     poe:   { fila: 'AG. AÇÃO' } },
 
-  // Já está numa fila de terceiro (MDG, parada...): o Patec saiu daqui, só
-  // falta o retorno. Ficam de fora quem está com o parecerista (o Patec ainda
-  // depende do parecer) e quem está em Ag. Ação, que é a fila de entrada e não
-  // diz nada sobre o Patec.
+  // Já está numa fila de terceiro (MDG, parada, CSP...): o Patec saiu daqui,
+  // só falta o retorno. Ficam de fora as filas de _GNV_FILAS_SEM_PALPITE e
+  // Ag. Ação, que é a fila de entrada e não diz nada sobre o Patec.
   { rotulo: 'sem Status do Patec e já em fila de tratamento viraram Patec Finalizado',
     testa: function(st, fila){
-      return !st && !!fila && fila !== 'PARECERISTA' && GOV_NOVA_PRAZOS[fila] !== undefined;
+      return !st && !!fila && !_gnvFilaSemPalpite(fila)
+          && GOV_NOVA_PRAZOS[fila] !== undefined;
     },
     poe:   { statusPatecAuto: 'Patec Finalizado' } }
 ];
@@ -58744,6 +58763,13 @@ function govNovaExportar(){
 var _gnvAcaoCtx = null;   // { chave, tipo, rc, itemRc }
 
 async function _gnvGarantirDados(){
+  // A Governança Nova é SÓ do FAST. Sem esta trava, o Buscar RC do ADLV
+  // chamava isto aqui e lia gov_nova / gov_nova_edit na base do ADLV
+  // (patec-dashboard) a cada busca — duas leituras de coleção à toa,
+  // mais _gnvMigrarFilaPatec e _gnvBackfillFilas, que ESCREVEM. Hoje não
+  // estragava nada porque essas coleções não existem lá, mas é base de
+  // uma frente sendo mexida por código de outra, e basta um dia existir.
+  if (!_gnvEhFast()) return;
   if (_gnvBase.length) return;
   var db = (typeof getDB === 'function') ? getDB() : null;
   if (!db) return;
@@ -58766,6 +58792,8 @@ async function _gnvGarantirDados(){
 
 async function _gnvBuscaAnexar(rcBusca, el){
   if (!el || !rcBusca) return;
+  // no ADLV este bloco não existe — nem o bloco, nem a leitura
+  if (!_gnvEhFast()) return;
   await _gnvGarantirDados();
 
   var todos = _gnvBase.filter(function(r){
@@ -59107,6 +59135,23 @@ function _gnvAcaoPintarSla(){
   }
 }
 
+// Trocar de fila é mandar o item HOJE: zera a cobrança e põe as DUAS
+// datas em hoje.
+//
+// BUG (05/11): só a data da solicitação era zerada; a de envio ficava com
+// a da fila anterior. Num item que estava parado havia dias isso deixava
+// solicitação > envio, e o confirmar barrava com "A data da solicitação
+// não pode ser posterior à data de envio" — a fila NÃO mudava e o item
+// parecia preso no card antigo. Valia para qualquer fila; só ficou
+// visível no Patec 100% Reprovado, onde as duas datas também decidem o
+// prazo e a primeira entrada ainda aparecia como "Tratado".
+// Os dois campos seguem editáveis antes de confirmar.
+function _gnvAcaoRecomecarHoje(){
+  var c = document.getElementById('gnv-acao-cobr');  if (c) c.value = 0;
+  var d = document.getElementById('gnv-acao-solic'); if (d) d.value = _gnvHoje();
+  var e = document.getElementById('gnv-acao-envio'); if (e) e.value = _gnvHoje();
+}
+
 // As duas datas mandam no prazo das filas de regra, então mexer em
 // qualquer uma delas tem de repintar a caixa e a prévia juntas.
 function _gnvAcaoDatas(){
@@ -59265,8 +59310,7 @@ function gnvAcaoTogglePatec(){
     _gnvAcaoCtx.slaDias = null;      // Ag. Ação não tem SLA escolhido
     document.querySelectorAll('#gnv-acao-filas .acao-sel-btn')
       .forEach(function(b){ b.classList.remove('selecionado'); });
-    var c = document.getElementById('gnv-acao-cobr');  if (c) c.value = 0;
-    var d = document.getElementById('gnv-acao-solic'); if (d) d.value = _gnvHoje();
+    _gnvAcaoRecomecarHoje();
     _gnvAcaoPintarSla();
   }
   _gnvAcaoPintarPatec();
@@ -59290,10 +59334,7 @@ function gnvAcaoSelFila(btn){
     : 'Ao escolher uma fila diferente da atual, a cobrança zera e a contagem recomeça hoje — os campos acima continuam editáveis antes de confirmar.';
   // trocou de fila: a cobrança zera e a contagem recomeça hoje (os campos
   // continuam editáveis, então dá para ajustar antes de confirmar)
-  if (nova !== _gnvAcaoCtx.filaAtual) {
-    var c = document.getElementById('gnv-acao-cobr'); if (c) c.value = 0;
-    var d = document.getElementById('gnv-acao-solic'); if (d) d.value = _gnvHoje();
-  }
+  if (nova !== _gnvAcaoCtx.filaAtual) _gnvAcaoRecomecarHoje();
   _gnvAcaoCtx.fila = nova;
   // O SLA pertence à fila: só sobrevive se continuar na MESMA fila de
   // escolha em que foi marcado. Trocar de fila zera — senão um chamado
