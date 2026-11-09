@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '09/11 22:40';
+var GTO_BUILD = '10/11 09:50';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15898,6 +15898,8 @@ function mdDinheiro(v){
 // ── leitura do MAPA ───────────────────────────────────────────────
 function mdLerMapa(linhas, forcar){
   var r = { itens:[], total:0, porStatus:{}, aviso:'', dpvGrupos:0, lidas:0,
+            // colunas que não foram achadas pelo nome e vieram pela letra
+            porLetra:[],
             // o cabeçalho e as linhas cruas ficam guardados: é com eles
             // que a exportação devolve as colunas do arquivo original
             cabecalho:[] };
@@ -15938,7 +15940,13 @@ function mdLerMapa(linhas, forcar){
     // vazio e nada muda nos outros cards.
     neg:      ix(['NEGOCIACAO']),                  // H — a regra dos 2 dias úteis
     fornGanh: ix(['FORNECEDOR_GANHADOR_PATEC']),   // J
-    nmPed:    ix(['NM_PEDIDO'])                    // F
+    nmPed:    ix(['NM_PEDIDO']),                   // F
+    // Y — quantas propostas válidas o item tem. Entrou em 09/11 para o
+    // relatório do Controle de abrir PATEC: é com ela que o comprador
+    // sabe se o item tem concorrência antes de abrir o PATEC.
+    propostas: _cpColOuLetra(cabs, ['NUMERO_PROPOSTAS_VALIDAS','PROPOSTAS_VALIDAS',
+                                    'NUMERO_DE_PROPOSTAS_VALIDAS','PROPOSTAS'],
+                             'Y', 'propostas válidas', r.porLetra)
   };
   r.colunas = col;
 
@@ -16005,6 +16013,7 @@ function mdLerMapa(linhas, forcar){
       forn: col.forn === -1 ? '' : String(l[col.forn] == null ? '' : l[col.forn]).trim(),
       nm: col.nm === -1 ? '' : String(l[col.nm] == null ? '' : l[col.nm]).trim(),
       centro: col.centro === -1 ? '' : String(l[col.centro] == null ? '' : l[col.centro]).trim(),
+      propostas: col.propostas === -1 ? '' : String(l[col.propostas] == null ? '' : l[col.propostas]).trim(),
       valor: col.valor === -1 ? 0 : mdNum(l[col.valor]),
       encIso: encIso, prazoDias: dias,
       prazo: dias == null ? '' : (dias <= MD_PRAZO_VALIDO ? 'Proposta válida' : 'Proposta vencida'),
@@ -20772,7 +20781,10 @@ function _ctrlLinhas(dist, chaves, feitoDe){
       porPessoa[p.nome].recebido++;
       if (feito) porPessoa[p.nome].feito++; else porPessoa[p.nome].falta++;
       itens.push({ nome:p.nome, rc:i.rc, seq:i.seq, statusChave:i.statusChave,
-                   dia:i.dia || 0, sla:i.sla || 0, feito:feito });
+                   dia:i.dia || 0, sla:i.sla || 0, feito:feito,
+                   // colunas do relatório que vai para a equipe
+                   op:i.op || '', itemOp:i.itemOp || '', centro:i.centro || '',
+                   propostas:i.propostas || '' });
     });
   });
   var lista = Object.keys(porPessoa).map(function(k){ return porPessoa[k]; })
@@ -20886,21 +20898,62 @@ async function ctnAbrir(){
 }
 function ctnBaixarExcel(){ _ctrlExcel(_ctnDados, 'Controle_Negociacao_', ctnDataSel()); }
 
+// A data em que o item cai: a distribuição espalha os itens por N dias
+// úteis a partir do dia escolhido, e o item guarda só o número do dia
+// (1, 2, 3...). Para a equipe, "11/11/2026" vale mais do que "Dia 2" —
+// então o número vira data aqui, pela mesma régua de dias úteis do
+// resto do GTO (pula fim de semana e feriado).
+function _ctrlDiaData(base, dia){
+  var n = Math.max(1, Math.round(+dia || 1));
+  if (n <= 1) return base || '';
+  try { return govAddDiasUteis(base, n - 1) || base || ''; }
+  catch (e) { return base || ''; }
+}
+
+// O relatório que o André passa para a equipe. A ordem das colunas é a
+// que ele pediu em 09/11 — é por ela que a equipe lê, então mexer aqui
+// muda o que chega na mão de quem trata.
+var CTRL_EXCEL_COLS = [
+  { t:'Dia',                      v:function(i, d){ return d.dataBR; } },
+  { t:'Comprador',                v:function(i){ return i.nome || ''; } },
+  { t:'Atividade',                v:function(i){ return mdStatusNome(i.statusChave); } },
+  { t:'SLA',                      v:function(i){ return +i.sla || 0; } },
+  { t:'RC',                       v:function(i){ return i.rc || ''; } },
+  { t:'Item',                     v:function(i){ return i.seq || ''; } },
+  { t:'Número da Oportunidade',   v:function(i){ return i.op || ''; } },
+  { t:'Item da OP',               v:function(i){ return i.itemOp || ''; } },
+  { t:'Centro',                   v:function(i){ return i.centro || ''; } },
+  { t:'Número propostas válidas', v:function(i){ return i.propostas === '' ? '' : i.propostas; } },
+  { t:'Situação',                 v:function(i){ return i.feito ? 'Concluído' : 'Em aberto'; } }
+];
+
 function _ctrlExcel(dados, prefixo, data){
   try {
-    if (!dados || !dados.r || !dados.r.itens.length) return;
-    var cab = ['Comprador','Atividade','RC','Item','Dia','SLA','Situação'];
+    if (!dados || !dados.r || !dados.r.itens.length) return null;
+    var cab = CTRL_EXCEL_COLS.map(function(c){ return c.t; });
     var aoa = [cab];
-    dados.r.itens.forEach(function(i){
-      aoa.push([i.nome, mdStatusNome(i.statusChave), i.rc, i.seq,
-                i.dia ? 'Dia ' + i.dia : '', i.sla, i.feito ? 'Concluído' : 'Em aberto']);
+    // em ordem de dia e, dentro do dia, por comprador — é assim que a
+    // equipe trabalha a lista
+    var lista = dados.r.itens.slice().sort(function(a, b){
+      if ((a.dia || 0) !== (b.dia || 0)) return (a.dia || 99) - (b.dia || 99);
+      if (a.nome !== b.nome) return String(a.nome).localeCompare(String(b.nome), 'pt-BR');
+      return String(a.rc).localeCompare(String(b.rc));
+    });
+    lista.forEach(function(i){
+      var iso = _ctrlDiaData(data, i.dia);
+      var ctx = { dataBR: iso ? cpDataBR(iso) : '' };
+      aoa.push(CTRL_EXCEL_COLS.map(function(c){ return c.v(i, ctx); }));
     });
     var ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = cab.map(function(c){ return { wch: Math.max(10, Math.min(30, c.length + 6)) }; });
+    ws['!cols'] = cab.map(function(c){ return { wch: Math.max(10, Math.min(30, c.length + 4)) }; });
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({
+      s:{ r:0, c:0 }, e:{ r:aoa.length - 1, c:cab.length - 1 } }) };
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Controle');
-    XLSX.writeFile(wb, prefixo + String(data || '').replace(/-/g, '') + '.xlsx');
-  } catch (e) { console.warn('_ctrlExcel:', e); }
+    var nome = prefixo + String(data || '').replace(/-/g, '') + '.xlsx';
+    XLSX.writeFile(wb, nome);
+    return { arquivo:nome, linhas:lista.length, cab:cab };
+  } catch (e) { console.warn('_ctrlExcel:', e); return null; }
 }
 
 
@@ -23346,6 +23399,10 @@ async function mdSalvarDia(){
     var d = _mdDist;
     var enxuto = function(i){
       return { rc:i.rc, seq:i.seq, op:i.op, sla:i.sla, tipo:i.tipo, seg:i.seg,
+               // item da OP, centro e propostas válidas entraram em 09/11:
+               // são colunas do relatório que o André passa para a equipe,
+               // e sem elas aqui o Excel sairia vazio nos três campos
+               itemOp:i.itemOp || '', centro:i.centro || '', propostas:i.propostas || '',
                statusChave:i.statusChave, dia:+i.dia || 0, fluxo:i.fluxo, prazo:i.prazo,
                dpv:!!i.dpv, valor:i.valor, foraAtividade:!!i.foraAtividade,
                prioritario:!!i.prioritario,
