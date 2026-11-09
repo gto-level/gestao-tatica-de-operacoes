@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/11 17:05';
+var GTO_BUILD = '10/11 19:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -22810,17 +22810,48 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     var p = res.pessoas[n];
     p.porDia = new Array(nDias).fill(0);
     if (!p.blocos.length) return;
-    var alvo = Math.max(1, Math.ceil(p.n / nDias));
+    // O ALVO DO DIA SE RECALCULA A CADA BLOCO.
+    //
+    // Até 10/11 o alvo era fixo — o total da pessoa dividido pelos
+    // dias — e cada bloco caía no PRIMEIRO dia com espaço. Dois
+    // efeitos ruins:
+    //   · uma oportunidade grande (12 itens com alvo de 11) não
+    //     cabia em dia nenhum, ia para o menos carregado e estourava
+    //     aquele dia;
+    //   · o que sobrava depois dela era empacotado nos dias do
+    //     começo, porque "primeiro dia com espaço" sempre volta ao
+    //     dia 1. O fim da semana ficava vazio.
+    // O André viu isso em 10/11: marcelo tinha 55 RCs de Abrir PATEC
+    // e o relatório saiu 18/16/14/7 — sem insumo a partir de quinta,
+    // em vez dos 11 por dia.
+    //
+    // Agora, antes de cada bloco, o alvo é "o que ainda falta
+    // colocar ÷ dias que ainda estão abaixo da média". Quando um dia
+    // estoura por causa de uma oportunidade indivisível, o alvo dos
+    // outros cai sozinho e o resto se espalha até o último dia, em
+    // vez de empilhar no começo.
+    // A fila é UMA só: a carga do dia do comprador. Separar a fila
+    // por atividade foi testado em 10/11 contra o MAPA 09.11 e saiu
+    // pior — duas atividades com fila própria caem no mesmo dia sem
+    // saber uma da outra, e o relatório de Abrir PATEC do marcelo
+    // ficava 13/15/19/7/0. Com fila única ele fica 12/11/10/11/10.
+    var alvoBase = Math.max(1, Math.ceil(p.n / nDias));
+    var falta = p.n;
     p.blocos.forEach(function(b){
       // o bloco só pode cair dentro dos dias úteis da atividade dele
-      var limite = nDias;
+      var limite = nDias, i;
       (b.statuses || []).forEach(function(ch){ var dd = diasCh(ch); if (dd < limite) limite = dd; });
       if (!limite) limite = nDias;
-      var d = -1, i;
+      var livres = 0;
+      for (i = 0; i < nDias; i++) if (p.porDia[i] < alvoBase) livres++;
+      var alvo = Math.max(1, Math.ceil(falta / Math.max(1, livres)));
+      var d = -1;
       for (i = 0; i < limite; i++) if (p.porDia[i] + b.n <= alvo) { d = i; break; }
+      // bloco maior que o alvo: vai para o dia mais vazio da janela
       if (d === -1) { d = 0; for (i = 1; i < limite; i++) if (p.porDia[i] < p.porDia[d]) d = i; }
       b.itens.forEach(function(it){ it.dia = d + 1; });
       p.porDia[d] += b.n;
+      falta -= b.n;
     });
     p.porDia.forEach(function(v, k){ if (v > cota) res.diasAcima.push({ nome:n, dia:k + 1, n:v }); });
     p.itens.sort(function(a, c){
