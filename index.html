@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/11 13:40';
+var GTO_BUILD = '10/11 17:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -22833,6 +22833,23 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     });
   });
 
+  // ── quem passou da cota da atividade, e por quanto ──────────────
+  // A cota (itens/dia × dias úteis) é ALVO, não teto. A oportunidade
+  // não se divide — é regra do André —, então o último bloco de cada um
+  // entra inteiro, mesmo que cruze a linha. Com blocos de até 12 itens,
+  // quatro pessoas a 25 fecham acima de 100.
+  // Isto era invisível: 4 × 25 + 4 × 25 = 200 de cota e 219 distribuídos,
+  // sem nada na tela explicando a diferença.
+  res.acimaCota = [];
+  (pessoas || []).forEach(function(n){
+    var p = res.pessoas[n];
+    MD_STATUS.forEach(function(x){
+      var tem = p.porStatus[x.chave] || 0;
+      var c = cotaCh(x.chave);
+      if (tem > c) res.acimaCota.push({ nome:n, chave:x.chave, n:tem, cota:c });
+    });
+  });
+
   res.lista = pessoas.map(function(n){ return res.pessoas[n]; });
   res.distribuidos = res.lista.reduce(function(m, p){ return m + p.n; }, 0);
   return res;
@@ -23013,6 +23030,62 @@ function mdExportarDistribuicao(){
   }
 }
 
+// Atividade cuja linha tem MENOS dias úteis que a semana da distribuição.
+//
+// Cada atividade tem a sua janela: um bloco dela só pode cair dentro dos
+// "Dias úteis" da linha dela. Com a semana em 5 e o Abrir PATEC em 4, os
+// itens de Abrir PATEC nunca chegam ao 5º dia — e o relatório sai sem
+// aquele dia, sem nada na tela dizendo por quê. Foi o que o André viu em
+// 10/11: 219 itens de Abrir PATEC espalhados só de 09 a 12/11.
+function mdAvisoDiasCurtos(res){
+  var n = (res && res.dias) || 0;
+  if (!n) return '';
+  var curtas = MD_STATUS.filter(function(x){
+    try {
+      if (!mdItensDaAtividade(x.chave)) return false;
+      if (!mdPessoasDaAtividade(x.chave).length) return false;
+      return mdCotaAtv(x.chave).dias < n;
+    } catch (e) { return false; }
+  });
+  if (!curtas.length) return '';
+  return '<div style="font-size:11px;color:var(--am);margin-top:4px">⏳ '
+    + curtas.map(function(x){
+        var d = mdCotaAtv(x.chave).dias;
+        return '<strong>' + cpEsc(x.nome) + '</strong> ocupa só os ' + d
+             + ' primeiro(s) dia(s)';
+      }).join(' · ')
+    + ' — a linha dessa(s) atividade(s) está com menos <em>dias úteis</em> que a semana de '
+    + n + '. Para espalhar até o último dia, acerte a coluna <strong>Dias úteis</strong> '
+    + 'na tabela de atividades.</div>';
+}
+
+// Quem fechou acima da cota da atividade.
+//
+// A conta que o André fez está certa: 5 itens/dia × 5 dias = 25 por
+// pessoa, 4 pessoas = 100 por atividade. O que a conta não prevê é que
+// a OPORTUNIDADE NÃO SE DIVIDE: quem está em 24 de 25 ainda é candidato,
+// e o bloco inteiro — que pode ter 12 itens — entra nele. Por isso a
+// cota é alvo, não teto, e o total passa um pouco.
+function mdAvisoAcimaCota(res){
+  var l = (res && res.acimaCota) || [];
+  if (!l.length) return '';
+  var porAtv = {};
+  l.forEach(function(x){
+    var o = porAtv[x.chave] || (porAtv[x.chave] = { cota:x.cota, soma:0, quem:[] });
+    o.soma += (x.n - x.cota);
+    o.quem.push(x.nome + ' ' + x.n);
+  });
+  return '<div style="font-size:11px;color:var(--am);margin-top:4px">⚖ Acima da cota: '
+    + Object.keys(porAtv).map(function(ch){
+        var o = porAtv[ch];
+        return '<strong>' + cpEsc(mdStatusNome(ch)) + '</strong> (cota ' + o.cota
+             + ' por pessoa) — ' + cpEsc(o.quem.join(' · '))
+             + ', ' + cpNum(o.soma) + ' a mais no total';
+      }).join(' · ')
+    + '. A <strong>oportunidade não se divide</strong>: ela vai inteira para um comprador, '
+    + 'então o último bloco de cada um entra mesmo cruzando a linha — a cota é alvo, não teto.</div>';
+}
+
 async function mdDistribuir(){
   var st = document.getElementById('md-status');
   var temMapa = !!(_mdBase && _mdBase.itens.length);
@@ -23072,6 +23145,8 @@ async function mdDistribuir(){
     + cpNum(res.fila.length) + ' na fila'
     + (res.semAtividade.length ? ' · ' + cpNum(res.semAtividade.length) + ' sem ninguém na atividade' : '')
     + '.</span>'
+    + mdAvisoDiasCurtos(res)
+    + mdAvisoAcimaCota(res)
     + (res.reapSemMarcacao
         ? '<div style="font-size:11px;color:var(--am);margin-top:4px">♻️ Ninguém está marcado na '
           + 'linha <strong>Reaproveitamento</strong>, então reparti o reap entre todos, como era '
