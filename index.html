@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '09/11 20:15';
+var GTO_BUILD = '09/11 22:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -17188,18 +17188,35 @@ function gpDataSel(){
 }
 
 // Soma dias úteis — sábado e domingo não contam.
+// Os 2 dias úteis da negociação.
+//
+// BUG (09/11): esta conta pulava só sábado e domingo, enquanto o resto
+// do GTO (govAddDiasUteis) também pula a lista de feriados do ADM. Com
+// 20/11 caindo numa sexta feriada, quem negociasse na quarta 18/11 veria
+// "apto a pedido em 20/11" e o item entraria em Emitir pedido um dia
+// antes do devido. Agora as duas contas usam a mesma régua.
+//
+// O try/catch é o mesmo cuidado do resto do arquivo: GOV_FERIADOS é
+// declarado mais abaixo, e uma chamada cedo demais não pode derrubar o
+// cálculo — na falta da lista, pula só o fim de semana, como antes.
+function _gpEhFeriado(iso){
+  try { return GOV_FERIADOS.indexOf(iso) !== -1; } catch (e) { return false; }
+}
 function gpMaisDiasUteis(iso, n){
   if (!iso) return '';
   var d = new Date(iso + 'T12:00:00');
   if (isNaN(d.getTime())) return '';
-  var somados = 0;
-  while (somados < n) {
-    d.setDate(d.getDate() + 1);
+  var somados = 0, guarda = 0;
+  var fmt = function(x){
+    return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0')
+         + '-' + String(x.getDate()).padStart(2, '0');
+  };
+  while (somados < n && guarda < 400) {
+    d.setDate(d.getDate() + 1); guarda++;
     var w = d.getDay();
-    if (w !== 0 && w !== 6) somados++;
+    if (w !== 0 && w !== 6 && !_gpEhFeriado(fmt(d))) somados++;
   }
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
-       + '-' + String(d.getDate()).padStart(2, '0');
+  return fmt(d);
 }
 
 function gpChave(it){ return String(it.rc || '') + '|' + String(it.seq || ''); }
@@ -19336,6 +19353,10 @@ var RJS_CULPA = {
   // 20 - Devolver para complemento de informações · 22 - Proposta inexequível
   '20':'petro', '22':'petro'
 };
+// 09/11: apareceu sem classificação no card do Rejeite Supervisor, com
+// 2 itens. O André classificou como Level.
+// 21 - Parceiro divergente do fornecedor do pedido (empresas distintas)
+RJS_CULPA['21'] = 'level';
 var RJS_CULPA_NOME = { level:'Motivo Level', petro:'Motivo Petrobras', sem:'Sem classificação' };
 
 // O código é o que vem antes do primeiro "-", sem espaços.
