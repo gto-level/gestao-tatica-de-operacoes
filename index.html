@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/11 09:50';
+var GTO_BUILD = '10/11 13:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -16109,6 +16109,20 @@ function mdDrop(e){
   if (f) mdUpload(f);
 }
 
+// Coluna que o MAPA não trouxe com o nome conhecido e foi lida pela
+// LETRA. Isto PRECISA aparecer: a leitura por posição acerta enquanto a
+// planilha não mexer na ordem, e erra calada quando mexer. Até 10/11 o
+// aviso era montado e nunca mostrado — exatamente o pior dos mundos.
+function mdAvisoPorLetra(r){
+  var l = (r && r.porLetra) || [];
+  if (!l.length) return '';
+  return '<div style="margin-top:6px;font-size:11px;color:var(--am);background:var(--amc);'
+    + 'border:1px solid var(--am);border-radius:7px;padding:.5rem .7rem;line-height:1.6">'
+    + '⚠ Não achei pelo nome e li <strong>pela posição</strong>: ' + cpEsc(l.join(' · '))
+    + '. Confira se a coluna é essa mesmo — se o MAPA mudou a ordem das colunas, '
+    + 'o valor vem do lugar errado.</div>';
+}
+
 async function mdUpload(file){
   if (!file) return;
   var st = document.getElementById('md-status');
@@ -16130,7 +16144,7 @@ async function mdUpload(file){
     }).join('');
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ <strong>' + cpEsc(file.name) + '</strong> — aba '
       + cpEsc(r.aba) + ', ' + cpNum(r.lidas) + ' linhas lidas, ' + cpNum(r.total)
-      + ' para a equipe.</span>' + _detAbas;
+      + ' para a equipe.</span>' + _detAbas + mdAvisoPorLetra(r);
     mdRenderResumo();
     mdRender();
   } catch (e) {
@@ -20423,6 +20437,7 @@ async function gpSalvarBase(r, data){
                statusChave:i.statusChave, status:i.status || '', sla:+i.sla || 0,
                seg:i.seg || '', tipo:i.tipo || '', valor:+i.valor || 0,
                acomp:i.acomp || '', nm:i.nm || '', centro:i.centro || '',
+               propostas:i.propostas || '',
                texto:i.texto || '', forn:i.forn || '', prazo:i.prazo || '', dpv:!!i.dpv,
                negociacao:i.negociacao || '', fornGanhador:i.fornGanhador || '',
                nmPedido:i.nmPedido || '', deAba:i.deAba || '' };
@@ -20760,6 +20775,34 @@ function _ctrlDistSalva(data){
   })();
 }
 
+// O MAPA daquele dia, por RC + item, para COMPLETAR o que a
+// distribuição gravada não guardou.
+//
+// Item da OP, centro e nº de propostas válidas só entraram na gravação
+// da distribuição em 09/11. Distribuição salva antes disso não tem
+// esses campos, e o relatório saía com três colunas vazias — foi o que
+// o André viu em 10/11. Em vez de exigir distribuição nova, o controle
+// busca o que falta no MAPA do próprio dia, que já está gravado.
+async function _ctrlIxMapa(data){
+  var ix = {};
+  var por = function(lista){
+    (lista || []).forEach(function(i){
+      var k = String(i.rc || '') + '|' + String(i.seq || '');
+      if (!ix[k]) ix[k] = i;
+    });
+  };
+  // o MAPA carregado agora é o mais novo, então vem primeiro
+  try { if (_mdBase && _mdBase.itens) por(_mdBase.itens); } catch (e) {}
+  try {
+    var db = getDB();
+    if (db) {
+      var doc = await db.collection(GP_COL).doc(data).get();
+      if (doc && doc.exists) por((doc.data() || {}).itens || []);
+    }
+  } catch (e) { console.warn('_ctrlIxMapa:', e); }
+  return ix;
+}
+
 // O que o MAPA de agora ainda traz nos status de abrir PATEC.
 function _ctrlAindaNoMapa(){
   var vivos = {};
@@ -20771,7 +20814,7 @@ function _ctrlAindaNoMapa(){
   return vivos;
 }
 
-function _ctrlLinhas(dist, chaves, feitoDe){
+function _ctrlLinhas(dist, chaves, feitoDe, ixMapa){
   var porPessoa = {}, itens = [];
   (((dist || {}).res || {}).lista || []).forEach(function(p){
     (p.itens || []).forEach(function(i){
@@ -20780,11 +20823,15 @@ function _ctrlLinhas(dist, chaves, feitoDe){
       var feito = !!feitoDe(i);
       porPessoa[p.nome].recebido++;
       if (feito) porPessoa[p.nome].feito++; else porPessoa[p.nome].falta++;
+      // o que a distribuição não guardou vem do MAPA do dia
+      var m = (ixMapa || {})[i.rc + '|' + i.seq] || {};
       itens.push({ nome:p.nome, rc:i.rc, seq:i.seq, statusChave:i.statusChave,
                    dia:i.dia || 0, sla:i.sla || 0, feito:feito,
                    // colunas do relatório que vai para a equipe
-                   op:i.op || '', itemOp:i.itemOp || '', centro:i.centro || '',
-                   propostas:i.propostas || '' });
+                   op:       i.op        || m.op        || '',
+                   itemOp:   i.itemOp    || m.itemOp    || '',
+                   centro:   i.centro    || m.centro    || '',
+                   propostas:i.propostas || m.propostas || '' });
     });
   });
   var lista = Object.keys(porPessoa).map(function(k){ return porPessoa[k]; })
@@ -20850,12 +20897,13 @@ async function ctpAbrir(){
   var box = document.getElementById('ctp-corpo');
   if (box) box.innerHTML = '<div style="font-size:12px;color:var(--tx2)">⏳ Conferindo...</div>';
   var dist = await _ctrlDistSalva(ctpDataSel());
+  var ixMapa = await _ctrlIxMapa(ctpDataSel());
   var vivos = _ctrlAindaNoMapa();
   var temMapa = !!(_mdBase && _mdBase.itens && _mdBase.itens.length);
   var r = _ctrlLinhas(dist, CTRL_PATEC, function(i){
     // saiu do status = concluído. Sem MAPA carregado não dá para dizer.
     return temMapa && !vivos[i.rc + '|' + i.seq];
-  });
+  }, ixMapa);
   _ctpDados = { dist:dist, r:r };
   if (box) {
     box.innerHTML = (!temMapa
@@ -20887,10 +20935,11 @@ async function ctnAbrir(){
     }
   } catch (e) { console.warn('ctnAbrir:', e); }
   var dist = await _ctrlDistSalva(ctnDataSel());
+  var ixMapaN = await _ctrlIxMapa(ctnDataSel());
   var r = _ctrlLinhas(dist, CTRL_NEG, function(i){
     var m = _gpNeg[i.rc + '|' + i.seq];
     return !!(m && m.data);
-  });
+  }, ixMapaN);
   _ctnDados = { dist:dist, r:r };
   var box2 = document.getElementById('ctn-corpo');
   if (box2) box2.innerHTML = _ctrlHtml(r, dist, 'negociação',
@@ -23088,6 +23137,9 @@ function mdRenderResumo(){
     + '(material + centro somando mais de ' + mdDinheiro(MD_LIMITE_DPV) + ') · '
     + '<strong>' + cpNum(pmm) + '</strong> PMM · <strong>' + cpNum(orp) + '</strong> ORP'
     + '</div>';
+  // o aviso de coluna lida pela posição fica aqui também: a faixa de
+  // status some no próximo clique, e este resumo não
+  h += mdAvisoPorLetra(b);
   box.innerHTML = h;
 }
 
