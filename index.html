@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '09/11 15:10';
+var GTO_BUILD = '09/11 18:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -16379,6 +16379,112 @@ function gpSBDesde(i){
 }
 function gpSBDias(i){ return gpDias(gpSBDesde(i)); }
 
+// ══════════════════════════════════════════════════════════════════
+//  DIAS PARADO NOS DEMAIS CARDS — histórico de presença
+//
+//  O Status B já tinha esta regra: a data de entrada é o começo da
+//  SEQUÊNCIA CONTÍNUA atual — saiu da lista e voltou, a conta recomeça
+//  na volta, porque o tempo parado é o de agora.
+//
+//  Lá o histórico vinha de graça (a coleção status_b guarda um doc por
+//  dia). Para Emitir Pedido e Rejeite Supervisor não existe nada disso,
+//  e ler a base inteira de cada dia (6.000 itens por doc) só para saber
+//  quem estava lá seria caro à toa. Então cada card grava um documento
+//  LEVE por dia, só com as chaves — e é dele que sai a conta.
+//
+//  O limite é o mesmo e é honesto: só dá para enxergar até o dia mais
+//  antigo gravado. Quem já estava parado antes do primeiro registro
+//  aparece como "desde o primeiro dia da base", e a tela diz isso.
+// ══════════════════════════════════════════════════════════════════
+var GPP_COL  = 'gp_presenca';
+var GPP_DIAS = 180;       // janela lida; mais que isso não muda decisão
+var _gpp = {};            // card -> { desde:{}, primeiro:'', lido:false }
+
+function _gppVazio(){ return { desde:{}, primeiro:'', lido:false }; }
+function gppDe(card){ return _gpp[card] || (_gpp[card] = _gppVazio()); }
+
+function _gppCorte(){
+  var d = new Date(cpHojeISO() + 'T12:00:00');
+  d.setDate(d.getDate() - GPP_DIAS);
+  return d.toISOString().slice(0, 10);
+}
+
+// Um documento por card por dia. O id é determinístico, então subir a
+// mesma base duas vezes no mesmo dia não cria registro repetido.
+async function gppRegistrar(card, chaves){
+  try {
+    if (!card || !chaves || !chaves.length) return false;
+    var db = getDB(); if (!db) return false;
+    var hoje = cpHojeISO();
+    // chave repetida não ajuda e só engorda o doc
+    var vistas = {}, lista = [];
+    chaves.forEach(function(k){
+      var t = String(k == null ? '' : k).trim();
+      if (!t || vistas[t]) return;
+      vistas[t] = 1; lista.push(t);
+    });
+    if (!lista.length) return false;
+    await db.collection(GPP_COL).doc(card + '_' + hoje.replace(/-/g, '')).set({
+      card: card, data: hoje, chaves: lista, n: lista.length,
+      atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem()
+    });
+    // o que acabou de ser gravado já vale nesta sessão
+    gppDe(card).lido = false;
+    return true;
+  } catch (e) { console.warn('gppRegistrar:', e); return false; }
+}
+
+async function gppCarregar(card){
+  var alvo = gppDe(card);
+  try {
+    var db = getDB(); if (!db) return alvo;
+    var snap = await db.collection(GPP_COL)
+      .where('card', '==', card).where('data', '>=', _gppCorte()).get();
+    var dias = [];
+    snap.forEach(function(doc){
+      var d = doc.data() || {};
+      if (!(d.chaves || []).length) return;
+      var ch = d.chaves;
+      dias.push({ data:String(d.data || ''),
+                  chaves:{ forEach:function(f){ ch.forEach(f); } } });
+    });
+    dias.sort(function(a, b){ return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
+    alvo.desde = dias.length ? _stbDesdeDeDias(dias) : {};
+    alvo.primeiro = dias.length ? dias[0].data : '';
+    alvo.lido = true;
+  } catch (e) {
+    console.warn('gppCarregar:', e);
+    alvo.lido = true;      // sem histórico a coluna fica vazia, não quebra
+  }
+  return alvo;
+}
+
+// A data de entrada de uma chave, pelo histórico do card.
+function gppDesde(card, chave){
+  return (gppDe(card).desde || {})[chave] || '';
+}
+
+// A mais antiga entre o histórico e uma data real que o item já traga.
+// É o que faz o card Emitir Pedido não zerar a conta de quem chegou
+// ali vindo da negociação: a data em que ficou apto é anterior ao
+// primeiro dia da base de presença.
+function gppDesdeCom(card, chave, dataReal){
+  var h = gppDesde(card, chave);
+  var d = String(dataReal || '').slice(0, 10);
+  if (h && d) return h < d ? h : d;
+  return h || d || '';
+}
+
+// A nota de rodapé que explica o alcance — a mesma ideia do Status B.
+function gppNota(card, oQue){
+  var p = gppDe(card).primeiro;
+  if (!p) return 'Os <strong>dias parados</strong> ainda não têm histórico: a contagem '
+    + 'começa no próximo registro desta base.';
+  return 'Os <strong>dias parados</strong> contam desde o primeiro dia em que o item '
+    + 'apareceu ' + (oQue || 'na lista') + ' sem sair mais — a base começa em '
+    + cpDataBR(p) + ', então item mais antigo que isso aparece como dessa data.';
+}
+
 // Leva ele para a aba onde o Status B é tratado de verdade.
 function gpIrStatusB(){
   var it = null;
@@ -16765,6 +16871,9 @@ async function rjsSalvarMedicao(med, arquivo){
     doc.dados.cortou = doc.cortou;
     try {
       await db.collection('config').doc('rejeite_sup_medicao').set(doc.dados);
+      // quem está hoje no Rejeite Supervisor, para o contador de dias parados
+      try { await gppRegistrar('rejsup', itens.map(rjsChaveRc)); }
+      catch (e4) { console.warn('gppRegistrar rejsup:', e4); }
     } catch (e2) {
       _rjsMed.erro = (e2 && e2.message) ? String(e2.message) : 'o banco recusou a gravação';
       console.warn('rjsSalvarMedicao:', e2);
@@ -17288,6 +17397,18 @@ function gpRenderDetalhe(){
   var editavel = (_gpCard === 'negociar' || _gpCard === 'dpv');
   var dePatec  = (_gpCard === 'patec' || _gpCard === 'patecman');
   var semNeg   = gpSemNegociacao(_gpCard);
+  // Dias parado: nos dois de PATEC conta da data de NEGOCIAÇÃO, que é
+  // data real e vale já no primeiro dia; em Emitir Pedido não existe
+  // data de entrada, então vale o histórico de presença — e, para quem
+  // chegou ali vindo da negociação, a data em que ficou apto, quando
+  // for mais antiga que o primeiro dia da base.
+  var temParado = dePatec || _gpCard === 'emitir';
+  var tituloParado = dePatec
+    ? 'Dias corridos desde a data de negociação'
+    : 'Dias corridos desde que o item entrou no card e não saiu mais';
+  var desdeDoItem = function(e){
+    return dePatec ? (e.dataNeg || '') : gppDesdeCom('emitir', e.chave, e.libera);
+  };
 
   var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
     + '<span>' + cpEsc(govNomeCard(_gpCard)) + ' — ' + cpNum(lista.length) + ' RC(s)</span>'
@@ -17305,6 +17426,8 @@ function gpRenderDetalhe(){
     + '<th style="text-align:right">SLA</th><th>Segmento</th>'
     + (dePatec ? '<th>Fornecedor ganhador</th><th>NM do pedido</th>' : '')
     + (semNeg ? '' : '<th>Data da negociação</th><th>Apto a pedido</th>')
+    + (temParado ? '<th>Parado desde</th>'
+        + '<th style="text-align:right" title="' + cpEsc(tituloParado) + '">Dias parado</th>' : '')
     + (editavel ? '<th>Comentário</th>' : '')
     + (semNeg ? '' : '<th>Situação</th>') + '</tr></thead><tbody>';
   lista.forEach(function(x){
@@ -17328,6 +17451,11 @@ function gpRenderDetalhe(){
         + '<td style="font-size:10.5px;font-weight:600;color:' + (e.liberado ? 'var(--vd)' : 'var(--tx2)') + '">'
         +   (e.libera ? cpDataBR(e.libera) : '—') + '</td>';
     }
+    if (temParado) {
+      var dd = desdeDoItem(e);
+      h += '<td style="font-size:10.5px">' + (dd ? cpDataBR(dd) : '—') + '</td>'
+        +  '<td style="text-align:center">' + gpDiasHtml(gpDias(dd)) + '</td>';
+    }
     if (editavel) {
       h += '<td><input type="text" value="' + cpEsc(e.comentario) + '" placeholder="quem está tratando"'
         +  ' onchange="gpTrocarComentario(\'' + cpEsc(e.chave) + '\', this.value)"'
@@ -17336,6 +17464,18 @@ function gpRenderDetalhe(){
     h += (semNeg ? '' : '<td style="font-size:10px">' + gpSelo(e) + '</td>') + '</tr>';
   });
   h += '</tbody></table></div>';
+  if (temParado) {
+    h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:8px">'
+      + (dePatec
+          ? 'Os <strong>dias parados</strong> contam da <strong>data de negociação</strong>, '
+            + 'em dias corridos. Item sem data de negociação fica sem contagem. '
+            + 'Âmbar a partir de 15 dias, vermelho a partir de 30.'
+          : gppNota('emitir', 'neste card')
+            + ' Quem chegou aqui vindo da negociação conta desde o dia em que ficou '
+            + '<strong>apto a pedido</strong>, se for mais antigo. '
+            + 'Âmbar a partir de 15 dias, vermelho a partir de 30.')
+      + '</div>';
+  }
   if (editavel) {
     h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:8px">'
       + 'Digite a data em que negociou. Dois dias úteis depois, o item sai deste card e '
@@ -19312,7 +19452,11 @@ function gpHtmlRejeiteSup(){
       + '</div>'
       + '<div style="overflow:auto;max-height:420px"><table><thead><tr>'
       +   '<th>RC</th><th>Item</th><th>Pedido</th><th>Comprador</th>'
-      +   '<th style="text-align:right">SLA Pedido</th><th>Padrão rejeição</th><th>Justificativa</th>'
+      +   '<th style="text-align:right">SLA Pedido</th>'
+      +   '<th>Parado desde</th>'
+      +   '<th style="text-align:right" title="Dias corridos desde que o item entrou '
+      +     'no card e não saiu mais">Dias parado</th>'
+      +   '<th>Padrão rejeição</th><th>Justificativa</th>'
       + '</tr></thead><tbody>';
     lista.sort(function(a, b){
       return (b.slaPedido == null ? -1 : b.slaPedido) - (a.slaPedido == null ? -1 : a.slaPedido);
@@ -19323,6 +19467,11 @@ function gpHtmlRejeiteSup(){
         + '<td style="font-weight:600">' + cpEsc(l.pedido || '—') + '</td>'
         + '<td style="font-size:10.5px">' + cpEsc(l.comprador || '—') + '</td>'
         + '<td style="text-align:right;font-weight:700">' + rjsNum(l.slaPedido) + '</td>'
+        + (function(){
+            var dd = gppDesde('rejsup', rjsChaveLb(l.rc, l.itemRc));
+            return '<td style="font-size:10.5px">' + (dd ? cpDataBR(dd) : '—') + '</td>'
+                 + '<td style="text-align:center">' + gpDiasHtml(gpDias(dd)) + '</td>';
+          })()
         + '<td style="font-size:10.5px">' + cpEsc(l.padrao || '—') + '</td>'
         + '<td style="font-size:10.5px">' + cpEsc(l.justificativa || '—') + '</td></tr>';
     });
@@ -19333,6 +19482,8 @@ function gpHtmlRejeiteSup(){
   }
 
   h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:10px;line-height:1.7">'
+    + gppNota('rejsup', 'neste card')
+    + ' Âmbar a partir de 15 dias, vermelho a partir de 30.<br>'
     + 'O lado sai do código do <strong>Padrão de Rejeição</strong> da planilha do Rodrigo. '
     + 'São <strong>' + Object.keys(RJS_CULPA).filter(function(k){ return RJS_CULPA[k] === 'level'; }).length
     + ' códigos Level</strong> e <strong>'
@@ -20251,6 +20402,12 @@ async function gpSalvarBase(r, data){
       itens: r.itens.slice(0, 6000).map(enxuto),
       atualizadoEm:new Date().toISOString(), atualizadoPor:cpQuem()
     });
+    // quem está hoje em Emitir Pedido, para o contador de dias parados
+    try {
+      await gppRegistrar('emitir', r.itens
+        .filter(function(i){ return i.statusChave === 'emitir'; })
+        .map(function(i){ return gpChave(i); }));
+    } catch (e2) { console.warn('gppRegistrar emitir:', e2); }
     return true;
   } catch (e) { console.warn('gpSalvarBase:', e); return false; }
 }
@@ -20280,6 +20437,8 @@ async function gpAbrir(){
                    atualizadoEm:M.atualizadoEm || '', atualizadoPor:M.atualizadoPor || '' };
       }
       await gpCarregarResp();
+      // histórico de presença dos dois cards que não têm data própria
+      await Promise.all([gppCarregar('emitir'), gppCarregar('rejsup')]);
       var d4 = await db.collection('config').doc('governanca_cockpit').get();
       if (d4 && d4.exists) {
         var C = d4.data() || {};
