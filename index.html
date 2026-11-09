@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '05/11 20:40';
+var GTO_BUILD = '09/11 15:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15736,14 +15736,20 @@ var MD_STATUS = [
   { chave:'patecgm',   nome:'Abrir PATEC Grupo de Mercadoria Obrigatório', cor:'var(--vd)' },
   { chave:'pateciden', nome:'Abrir PATEC idêntico não',      cor:'var(--azm)' },
   // Esta não vem do MAPA: vem da planilha de rejeitados da Governança.
-  { chave:'rejeitado', nome:'Rejeitado',                     cor:'var(--vm)' }
+  { chave:'rejeitado', nome:'Rejeitado',                     cor:'var(--vm)' },
+  // Nem esta: vem do upload do MAPA de reaproveitamento. Virou linha da
+  // matriz em 09/11 — antes os itens de reap eram repartidos entre TODA
+  // a equipe, sem passar pelas marcações, e não apareciam em linha
+  // nenhuma da tabela.
+  { chave:'reap',      nome:'Reaproveitamento',              cor:'var(--vd)' }
 ];
-// As que o MAPA alimenta; a de rejeitados tem fonte própria.
-function mdStatusDoMapa(ch){ return ch !== 'rejeitado'; }
+// As que o MAPA do dia alimenta; rejeitado e reap têm fonte própria.
+function mdStatusDoMapa(ch){ return ch !== 'rejeitado' && ch !== 'reap'; }
 
 // Quantos itens cada atividade tem hoje, de onde quer que venham.
 function mdItensDaAtividade(ch){
   if (ch === 'rejeitado') return (_gpRej && _gpRej.itens) ? _gpRej.itens.length : 0;
+  if (ch === 'reap') return (_mdrBase && _mdrBase.itens) ? _mdrBase.itens.length : 0;
   var n = 0;
   if (_mdBase && _mdBase.itens) {
     _mdBase.itens.forEach(function(i){ if (i.statusChave === ch) n++; });
@@ -22095,7 +22101,7 @@ function mdLerReap(linhas, loteDigitado, dataLote){
       origem:'reap', lote:lote, dataLote: dataLote || '',
       statusReap: st || '', statusArquivo: stArquivo || '',
       statusMarcado: marcado !== undefined,
-      statusChave:'emitir', status:'Emitir Pedido (reap)',
+      statusChave:'reap', status:'Reaproveitamento',
       rc: rc, seq: pega(l, col.item), op:'', itemOp:'',
       sla: 0, slaAlto:false,
       tipo: (insp === 'L' || insp === 'Q') ? insp : '',
@@ -22473,16 +22479,28 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   });
 
   // ── reap: sem agrupamento nenhum, só quantidade igual ───────────
-  // Aqui não existe oportunidade nem SLA. A única regra que ele pediu é
-  // repartir em partes iguais entre as pessoas selecionadas, dentro da
-  // mesma cota do MAPA do dia.
+  // Aqui não existe oportunidade nem SLA. A regra de repartição que ele
+  // pediu continua a mesma — partes iguais —, o que mudou em 09/11 é
+  // ENTRE QUEM: agora o reap é uma atividade da matriz, então vai só
+  // para quem está marcado na linha Reaproveitamento, com a cota e os
+  // dias úteis daquela linha.
   if (itensReap && itensReap.length) {
-    // "a única regra de agrupamento é a quantidade igual por pessoa
-    // selecionada" — então o reap vai para todo mundo da equipe, sem
-    // olhar a matriz de atividades.
-    var equipeReap = (pessoas || []).slice();
+    // o comprador sem lista salva conta como marcado em tudo — é o mesmo
+    // padrão que a tabela usa ao desenhar as caixinhas
+    var marcadoEm = function(n, ch){
+      var at = atividades && atividades[n];
+      return at ? at.indexOf(ch) !== -1 : true;
+    };
+    var equipeReap = (pessoas || []).filter(function(n){ return marcadoEm(n, 'reap'); });
+    // Ninguém marcado: em vez de deixar o reap do dia sem dono calado,
+    // reparte entre todos como antes e avisa na tela que foi isso.
+    res.reapSemMarcacao = !equipeReap.length;
+    if (res.reapSemMarcacao) equipeReap = (pessoas || []).slice();
+    var cotaReap = cotaCh('reap');
     itensReap.forEach(function(it){
-      var cand = equipeReap.filter(function(n){ return res.pessoas[n].n < semana; });
+      var cand = equipeReap.filter(function(n){
+        return (res.pessoas[n].porStatus.reap || 0) < cotaReap;
+      });
       if (!cand.length) { it.pessoa = ''; it.dia = 0; it.foraAtividade = false; res.fila.push(it); return; }
       var melhor = cand[0];
       cand.forEach(function(n){
@@ -22494,10 +22512,12 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
       it.pessoa = melhor;
       it.foraAtividade = false;
       pr.itens.push(it); pr.n++; pr.reap++;
-      pr.porStatus.emitir = (pr.porStatus.emitir || 0) + 1;
-      if (it.tipo === 'L' || it.tipo === 'Q') { pr.tipo[it.tipo]++; pr.tipoEmitir[it.tipo]++; }
+      pr.porStatus.reap = (pr.porStatus.reap || 0) + 1;
+      // L e Q do reap contam no total da pessoa, mas não nas colunas
+      // "L/Q emissão", que são do Emitir Pedido do MAPA do dia
+      if (it.tipo === 'L' || it.tipo === 'Q') pr.tipo[it.tipo]++;
       pr.blocos.push({ id:'REAP:' + it.rc + '|' + it.seq, itens:[it], n:1, slaMax:0,
-                       porStatus:{ emitir:1 }, statuses:['emitir'], tipoEmitir:it.tipo || '' });
+                       porStatus:{ reap:1 }, statuses:['reap'], tipoEmitir:it.tipo || '' });
       res.reap++;
     });
   }
@@ -22770,6 +22790,10 @@ async function mdDistribuir(){
     + cpNum(res.fila.length) + ' na fila'
     + (res.semAtividade.length ? ' · ' + cpNum(res.semAtividade.length) + ' sem ninguém na atividade' : '')
     + '.</span>'
+    + (res.reapSemMarcacao
+        ? '<div style="font-size:11px;color:var(--am);margin-top:4px">♻️ Ninguém está marcado na '
+          + 'linha <strong>Reaproveitamento</strong>, então reparti o reap entre todos, como era '
+          + 'antes. Marque na tabela quem atua nessa atividade para dirigir os itens.</div>' : '')
     + (_espera ? '<div style="font-size:11px;color:var(--am);margin-top:4px">⏳ '
         + cpNum(_espera) + ' item(ns) de PATEC ficaram de fora por ainda não estarem aptos a '
         + 'pedido (negociação + 2 dias úteis)'
@@ -22796,7 +22820,9 @@ function mdRenderResumo(){
   // dashboard perdeu itens.
   var aptos = mdContaAptos(mdDataSel());
   var h = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem;margin-top:.9rem">';
-  MD_STATUS.forEach(function(x){
+  // este resumo é do MAPA do dia: rejeitado e reap têm fonte própria e
+  // cada um já tem o resumo dele, então apareceriam aqui zerados
+  MD_STATUS.filter(function(x){ return mdStatusDoMapa(x.chave); }).forEach(function(x){
     var n = b.porStatus[x.chave] || 0;
     var sub = cpPctTxt(cpPct(n, b.total)) + ' do total';
     var ap = aptos[x.chave];
@@ -22895,8 +22921,9 @@ function mdRenderEquipe(){
     + '<th style="text-align:right">Semana</th>';
   for (var dd = 1; dd <= nDias; dd++) h += '<th style="text-align:right">Dia ' + dd + '</th>';
   MD_STATUS.forEach(function(x){ h += '<th style="text-align:right">' + cpEsc(x.nome.split(',')[0]) + '</th>'; });
-  h += '<th style="text-align:right" title="Itens vindos do MAPA de reaproveitamento">Reap</th>'
-    + '<th style="text-align:right" title="Itens L em Emitir Pedido">L emissão</th>'
+  // o reap agora é uma coluna como as outras, vinda de MD_STATUS — a
+  // coluna "Reap" separada que existia aqui mostrava o mesmo número duas vezes
+  h += '<th style="text-align:right" title="Itens L em Emitir Pedido">L emissão</th>'
     + '<th style="text-align:right" title="Itens Q em Emitir Pedido">Q emissão</th>'
     + '<th style="text-align:right" title="Itens de atividade que não é dele, que vieram junto com a oportunidade">Fora</th>'
     + '<th style="width:120px">Carga</th></tr></thead><tbody>';
@@ -22915,16 +22942,14 @@ function mdRenderEquipe(){
         + cpNum(p.porStatus[x.chave] || 0) + '</td>';
     });
     var te = p.tipoEmitir || p.tipo || { L:0, Q:0 };
-    h += '<td style="text-align:right;color:' + ((p.reap || 0) ? 'var(--vd);font-weight:700' : 'var(--tx2)') + '">'
-      +   cpNum(p.reap || 0) + '</td>'
-      + '<td style="text-align:right">' + cpNum(te.L) + '</td>'
+    h += '<td style="text-align:right">' + cpNum(te.L) + '</td>'
       + '<td style="text-align:right">' + cpNum(te.Q) + '</td>'
       + '<td style="text-align:right;color:' + ((p.fora || 0) ? 'var(--am);font-weight:700' : 'var(--tx2)') + '">'
       +   cpNum(p.fora || 0) + '</td>'
       + '<td>' + cpBarraSimples(p.n, alvo) + '</td></tr>';
   });
   h += '</tbody><tfoot><tr><td colspan="2">Total</td><td style="text-align:right">' + cpNum(r.distribuidos) + '</td>'
-    + '<td colspan="' + (nDias + MD_STATUS.length + 5) + '"></td></tr></tfoot></table></div></div>';
+    + '<td colspan="' + (nDias + MD_STATUS.length + 4) + '"></td></tr></tfoot></table></div></div>';
   box.innerHTML = h;
 }
 
@@ -23014,7 +23039,9 @@ function mdTexto(){
   if (!_mdDist) return '';
   var d = _mdDist, r = d.res, l = [];
   l.push('DISTRIBUIÇÃO DO MAPA — semana de ' + cpDataBR(d.data));
-  MD_STATUS.forEach(function(x){
+  // d.porStatus é a contagem do MAPA do dia; reap e rejeitado vêm
+  // listados logo abaixo, com a fonte deles
+  MD_STATUS.filter(function(x){ return mdStatusDoMapa(x.chave); }).forEach(function(x){
     l.push('  ' + x.nome + ': ' + cpNum(d.porStatus[x.chave] || 0));
   });
   l.push('  Total: ' + cpNum(d.totalMapa));
