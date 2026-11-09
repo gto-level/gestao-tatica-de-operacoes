@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/11 19:40';
+var GTO_BUILD = '10/11 20:25';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -2890,6 +2890,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
             <div style="display:flex;gap:8px;margin-top:.9rem;flex-wrap:wrap">
               <button class="btn btn-p" onclick="mdDistribuir()">⚖ Distribuir entre a equipe</button>
               <button class="btn btn-s" onclick="mdExportarDistribuicao()">⬇ Exportar MAPA distribuído</button>
+              <button class="btn btn-s" onclick="mdApagarDia()"
+                style="border-color:var(--vm);color:var(--vm)">🗑 Apagar a distribuição deste dia</button>
             </div>
             <div style="font-size:10.5px;color:var(--tx2);margin-top:6px;line-height:1.6">
               A exportação devolve o arquivo com as <strong>colunas originais</strong>, em cinco abas
@@ -23586,6 +23588,62 @@ async function mdSalvarDia(){
     });
     return true;
   } catch (e) { console.warn('mdSalvarDia:', e); return false; }
+}
+
+// APAGAR A DISTRIBUIÇÃO DE UM DIA.
+//
+// Faltava isto. Distribuir de novo na MESMA data sobrescreve (set), mas
+// uma distribuição de teste num dia que ninguém vai usar ficava para
+// sempre: o Monitor da medição varre TODAS as datas do ciclo
+// (monMontarCombinado) e somava o teste junto com a operação. O André
+// esbarrou nisso em 10/11, depois de um dia inteiro de testes.
+//
+// Apaga só o documento daquele dia em distribuicao_mapa. Não toca em
+// nada do que a equipe tratou: as datas de negociação moram em
+// config/governanca_negociacao e o "feito" de Abrir PATEC vem do MAPA.
+async function mdApagarDia(){
+  var data = mdDataSel();
+  var st = document.getElementById('md-status');
+  if (!data) {
+    if (st) st.innerHTML = '<span style="color:var(--am)">Escolha a data antes.</span>';
+    return;
+  }
+  var db = getDB();
+  if (!db) {
+    if (st) st.innerHTML = '<span style="color:var(--vm)">Sem conexão com a base.</span>';
+    return;
+  }
+  var tem = false, quantos = 0;
+  try {
+    var doc = await db.collection(MD_COL).doc(data).get();
+    tem = !!(doc && doc.exists);
+    if (tem) {
+      ((doc.data() || {}).distribuicao || []).forEach(function(p){ quantos += (+p.n || 0); });
+    }
+  } catch (e) { console.warn('mdApagarDia/get:', e); }
+  if (!tem) {
+    if (st) st.innerHTML = '<span style="color:var(--tx2)">Não há distribuição guardada em '
+      + cpDataBR(data) + '.</span>';
+    return;
+  }
+  if (!confirm('Apagar a distribuição de ' + cpDataBR(data) + '?\n\n'
+      + quantos + ' item(ns) distribuído(s) saem do dash e dos relatórios '
+      + 'de controle, e esse dia deixa de contar na medição.\n\n'
+      + 'As datas de negociação já lançadas NÃO são apagadas.')) return;
+  if (st) st.innerHTML = '⏳ Apagando...';
+  try {
+    await db.collection(MD_COL).doc(data).delete();
+  } catch (e) {
+    console.warn('mdApagarDia:', e);
+    if (st) st.innerHTML = '<span style="color:var(--vm)">A base recusou: '
+      + (e && e.message ? e.message : 'erro') + '. Nada foi apagado.</span>';
+    return;
+  }
+  _mdDist = null;
+  mdRender();
+  var st2 = document.getElementById('md-status');
+  if (st2) st2.innerHTML = '<span style="color:var(--vd)">✔ Distribuição de ' + cpDataBR(data)
+    + ' apagada (' + quantos + ' itens). Pode distribuir de novo.</span>';
 }
 
 async function mdCarregarDia(data){
