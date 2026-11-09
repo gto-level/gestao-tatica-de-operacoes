@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '09/11 18:30';
+var GTO_BUILD = '09/11 20:15';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -33002,8 +33002,15 @@ function agrLinha(it, ix, idxs){
             origem: '', spGrupo: '', __tambem: [] };
 
   // ── 1º: XGL e Status B, por RC + item da RC ──
+  //
+  // Só quando ainda estão ABERTOS. Era aqui o erro de 09/11: a RC
+  // 36481451/10 estava concluída no XGL desde 22/07 e, ao mesmo tempo,
+  // viva na carteira (PATEC Finalizado, fila FORNECEDOR, atrasada). O
+  // card parava no XGL e dizia "Concluído → Devolução" — mandava o
+  // André parar de cobrar um item que estava justamente vencendo.
+  // Hit fechado agora é só desempate: vale se a carteira não tiver nada.
   var onde = _agrOndeEsta(rc, itemRc, idxs);
-  if (onde) {
+  var usarOnde = function(){
     o.origem = onde.nome;
     // XGL e Status B vão com o Finalizado, como o André pediu
     o.spGrupo = 'finalizado';
@@ -33011,13 +33018,20 @@ function agrLinha(it, ix, idxs){
     o.__achou = true;
     o.analista = _agrAnalista(onde.r.analista);
     return _agrPreencher(o, onde.m, onde.m.status || '', null);
-  }
+  };
+  if (onde && onde.aberto) return usarOnde();
 
   // ── 2º: a carteira, com a oportunidade ──
   var r = ix[ch]
        || ix[[rc, itemRc, oport].join('|')]
        || ix[[rc, itemRc].join('|')];
+  // Fechado no XGL/Status B e sem par na carteira: aí sim vale o fechado,
+  // que ao menos diz que o item foi concluído em vez de "fora da carteira".
+  if (!r && onde) return usarOnde();
   o.__achou = !!r;
+  // Está nos dois lados: a linha segue a carteira, mas diz que o item
+  // também aparece (concluído) no XGL ou no Status B.
+  if (r && onde) o.__tambem = onde.todos.slice();
   if (!r) {
     // ── 3º: o histórico. Sair da carteira é o que acontece com quem
     // FOI CONCLUÍDO — dizer "fora da carteira" nesse caso é dar alarme
@@ -33497,7 +33511,18 @@ var AGR_CORES = {
 };
 function _agrEtiqueta(x){
   var c = AGR_CORES[x.origem];
-  if (!c) return '';
+  // Linha que veio da carteira não tem cor própria — mas, se a mesma
+  // RC + item também aparece (fechada) no XGL ou no Status B, isso
+  // precisa estar na tela: é o que explica por que o item parece ter
+  // dois destinos. Sem isto a informação se perdia.
+  if (!c) {
+    if (!(x.__tambem && x.__tambem.length)) return '';
+    return ' <span title="Esta RC + item também aparece em: ' + _govPainelEsc(x.__tambem.join(', '))
+      + ', já concluída lá. A linha segue a CARTEIRA, que é onde o item está agora."'
+      + ' style="font-size:9px;font-weight:700;color:var(--tx2);background:var(--cin);'
+      + 'border:1px dashed var(--brd);border-radius:4px;padding:1px 5px;margin-left:4px;'
+      + 'white-space:nowrap">também em ' + _govPainelEsc(x.__tambem.join(' · ')) + '</span>';
+  }
   var tambem = (x.__tambem && x.__tambem.length)
     ? ' Esta RC + item também está em: ' + x.__tambem.join(', ') + '.' : '';
   return ' <span title="Veio do card ' + x.origem + '.' + _govPainelEsc(tambem)
