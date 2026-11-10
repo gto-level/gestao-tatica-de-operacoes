@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 15:20';
+var GTO_BUILD = '11/11 16:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15458,6 +15458,7 @@ async function stbUpload(file){
       i.comentario = a.comentario || '';
       i.nome       = a.nome || '';
       i.conclusao  = a.conclusao || '';
+      i.conclusaoEm = a.conclusaoEm || '';
       if (a.comentario || a.nome || a.marcado) reaproveitados++;
     });
     r.reaproveitados = reaproveitados;
@@ -15565,9 +15566,14 @@ function _stbHtmlLista(suf){
     +   '<button class="btn btn-s" onclick="stbMarcarTodos(true)">Marcar'
     +     (filtrando ? ' os ' + cpNum(vis.length) + ' da tela' : ' todos') + '</button>'
     +   '<button class="btn btn-s" onclick="stbMarcarTodos(false)">Desmarcar</button>'
+    +   '<button class="btn btn-s" onclick="stbRelatorioPatec()" '
+    +     'title="RC, item, oportunidade, item da OP e a data em que foi concluído — '
+    +     'de todos os dias guardados">⬇ Relatório PATEC</button>'
     +   '<button class="btn btn-p" onclick="stbExportar()">⬇ Exportar para o script ('
     +     cpNum(marcados) + ')</button>'
     + '</span></div>'
+    + '<div id="stb-rel-status' + suf + '" style="font-size:11px;min-height:14px;'
+    +   'margin-bottom:.3rem"></div>'
 
     + '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:.8rem">'
     +   '<div><label style="display:block;font-size:10px;color:var(--tx2);font-weight:600;margin-bottom:3px">'
@@ -15711,9 +15717,102 @@ function stbMarcar(k, valor){
   // deixar "Linha duplicada" escrito ali
   if (!valor && _stbDia.itens[k].conclusao === 'Linha duplicada') {
     _stbDia.itens[k].conclusao = '';
+    _stbDia.itens[k].conclusaoEm = '';
   }
   stbRender();
   stbSalvar();
+}
+
+// ── O RELATÓRIO DOS CONCLUÍDOS COMO PATEC (11/11) ────────────────
+// Pedido do André: RC, item, oportunidade, item da oportunidade e a
+// DATA em que o item foi concluído, só dos que ele concluiu como
+// PATEC.
+//
+// Varre TODOS os dias guardados, não só o da tela: item concluído
+// como PATEC sai da BU nos dias seguintes, e um relatório que olhasse
+// só o dia de hoje perderia justamente o que já foi resolvido — que é
+// o que ele quer enxergar. Dedupe por RC+item, ficando com a
+// conclusão mais recente.
+var STB_REL_COLS = [
+  { t:'RC',                      v:function(i){ return i.rc || ''; } },
+  { t:'Item',                    v:function(i){ return i.seq || ''; } },
+  { t:'Oportunidade',            v:function(i){ return i.oport || ''; } },
+  { t:'Item da OP',              v:function(i){ return i.itemOp || ''; } },
+  { t:'Data da conclusão',       v:function(i){ return i.conclusaoEm ? cpDataBR(i.conclusaoEm) : ''; } }
+];
+
+async function stbRelatorioPatec(){
+  var st = document.getElementById('stb-rel-status')
+        || document.getElementById('stb-rel-status-g');
+  var diz = function(h){
+    ['stb-rel-status', 'stb-rel-status-g'].forEach(function(id){
+      var e = document.getElementById(id); if (e) e.innerHTML = h;
+    });
+  };
+  diz('⏳ Juntando os dias...');
+  var achados = {}, dias = 0;
+  try {
+    var db = getDB();
+    if (db) {
+      var snap = await db.collection(STB_COL).get();
+      var docs = [];
+      snap.forEach(function(doc){
+        var d = doc.data() || {};
+        docs.push({ data: String(d.data || doc.id), itens: d.itens || [] });
+      });
+      docs.sort(function(a, b){ return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
+      dias = docs.length;
+      docs.forEach(function(dia){
+        (dia.itens || []).forEach(function(i){
+          if (String(i.conclusao || '').trim() !== 'PATEC') return;
+          // o dia mais recente prevalece, mas a DATA da conclusão é a
+          // que foi carimbada quando ele escolheu — não a do arquivo
+          achados[i.rc + '|' + i.seq] = {
+            rc:i.rc, seq:i.seq, oport:i.oport || '', itemOp:i.itemOp || '',
+            conclusaoEm: i.conclusaoEm || '' };
+        });
+      });
+    }
+  } catch (e) { console.warn('stbRelatorioPatec:', e); }
+  // o que está na tela e ainda não foi gravado entra também
+  ((_stbDia || {}).itens || []).forEach(function(i){
+    if (String(i.conclusao || '').trim() !== 'PATEC') return;
+    achados[i.rc + '|' + i.seq] = {
+      rc:i.rc, seq:i.seq, oport:i.oport || '', itemOp:i.itemOp || '',
+      conclusaoEm: i.conclusaoEm || '' };
+  });
+  var lista = Object.keys(achados).map(function(k){ return achados[k]; });
+  if (!lista.length) {
+    diz('<span style="color:var(--am)">Nenhum item concluído como PATEC ainda.</span>');
+    return null;
+  }
+  lista.sort(function(a, b){
+    if ((a.conclusaoEm || '') !== (b.conclusaoEm || ''))
+      return (b.conclusaoEm || '').localeCompare(a.conclusaoEm || '');
+    return String(a.rc).localeCompare(String(b.rc));
+  });
+  try {
+    var cab = STB_REL_COLS.map(function(c){ return c.t; });
+    var aoa = [cab];
+    lista.forEach(function(i){ aoa.push(STB_REL_COLS.map(function(c){ return c.v(i); })); });
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = cab.map(function(c){ return { wch: Math.max(12, c.length + 4) }; });
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({
+      s:{ r:0, c:0 }, e:{ r:aoa.length - 1, c:cab.length - 1 } }) };
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'PATEC');
+    var nome = 'StatusB_PATEC_' + String(cpHojeISO()).replace(/-/g, '') + '.xlsx';
+    XLSX.writeFile(wb, nome);
+    var semData = lista.filter(function(i){ return !i.conclusaoEm; }).length;
+    diz('<span style="color:var(--vd)">✔ ' + cpNum(lista.length) + ' item(ns) de '
+      + cpNum(dias) + ' dia(s)</span>'
+      + (semData ? ' <span style="color:var(--am)">· ' + cpNum(semData)
+          + ' sem data: foram concluídos antes de eu passar a carimbar a data</span>' : ''));
+    return { arquivo:nome, linhas:lista.length, dias:dias, semData:semData };
+  } catch (e2) {
+    diz('<span style="color:var(--vm)">✗ ' + cpEsc(e2.message) + '</span>');
+    return null;
+  }
 }
 
 // ── A CONCLUSÃO DO STATUS B (11/11) ──────────────────────────────
@@ -15725,9 +15824,16 @@ var STB_CONCLUSOES = ['Linha duplicada', 'Devolução', 'Republicação', 'PATEC
 
 function stbConclusao(k, valor){
   if (!_stbDia || !_stbDia.itens[k]) return;
+  var i = _stbDia.itens[k];
   var v = String(valor == null ? '' : valor).trim();
-  _stbDia.itens[k].conclusao = v;
-  _stbDia.itens[k].marcado = (v === 'Linha duplicada');
+  // A DATA DA CONCLUSÃO (11/11). O André pediu o relatório dos itens
+  // concluídos como PATEC "para eu ter conhecimento de quando o item
+  // foi concluído" — então a data é carimbada aqui, na hora, e não
+  // depois: a planilha do dia seguinte não saberia dizer quando foi.
+  if (v && v !== i.conclusao) i.conclusaoEm = cpHojeISO();
+  if (!v) i.conclusaoEm = '';
+  i.conclusao = v;
+  i.marcado = (v === 'Linha duplicada');
   stbRender();
   stbSalvar();
 }
@@ -15738,11 +15844,12 @@ function stbMarcarTodos(valor){
   if (!_stbDia) return;
   // a caixinha e a Conclusão andam juntas também aqui
   if (valor) stbVisiveis().forEach(function(v){
+    if (v.i.conclusao !== 'Linha duplicada') v.i.conclusaoEm = cpHojeISO();
     v.i.marcado = true; v.i.conclusao = 'Linha duplicada';
   });
   else _stbDia.itens.forEach(function(i){
     i.marcado = false;
-    if (i.conclusao === 'Linha duplicada') i.conclusao = '';
+    if (i.conclusao === 'Linha duplicada') { i.conclusao = ''; i.conclusaoEm = ''; }
   });
   stbRender();
   stbSalvar();
@@ -15809,7 +15916,8 @@ async function stbSalvar(){
                  comentario:String(i.comentario||''), marcado:!!i.marcado,
                  textoBreve:String(i.textoBreve||''), pedido:String(i.pedido||''),
                  oport:String(i.oport||''), itemOp:String(i.itemOp||''),
-                 conclusao:String(i.conclusao||'') };
+                 conclusao:String(i.conclusao||''),
+                 conclusaoEm:String(i.conclusaoEm||'') };
       }),
       atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem()
     });
