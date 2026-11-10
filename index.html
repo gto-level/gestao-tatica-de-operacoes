@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 01:20';
+var GTO_BUILD = '11/11 02:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -2894,9 +2894,14 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 style="border-color:var(--vm);color:var(--vm)">🗑 Apagar a distribuição deste dia</button>
             </div>
             <div style="font-size:10.5px;color:var(--tx2);margin-top:6px;line-height:1.6">
-              A exportação devolve o arquivo com as <strong>colunas originais</strong>, em cinco abas
-              — MAPA, Emitir Pedido PATEC, Emitir Pedido Manual, Negociar e Abrir PATEC — com o
-              <strong>analista</strong> e a <strong>data da distribuição</strong> nas duas primeiras colunas.
+              A exportação devolve <strong>sete abas</strong>. As três de emissão — MAPA,
+              Emitir Pedido PATEC e Emitir Pedido Manual — saem com as <strong>colunas
+              originais</strong> do arquivo, com o <strong>analista</strong> e a
+              <strong>data da distribuição</strong> nas duas primeiras colunas.
+              Negociar, Abrir PATEC, Rejeitado e Reaproveitamento saem no
+              <strong>mesmo padrão do Excel de controle</strong> (Dia, Comprador, Atividade,
+              SLA, RC, Item, Oportunidade, Item da OP, Centro, propostas válidas e Situação),
+              já com o que ficou na fila marcado.
             </div>
             <div style="font-size:10.5px;color:var(--tx2);margin-top:6px;line-height:1.6">
               A mesma oportunidade fica sempre com o mesmo comprador, nunca é dividida ·
@@ -23194,15 +23199,93 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
 var MDX_TIRAR_SEMPRE = ['LOTES'];
 var MDX_TIRAR_PEDIDO = ['NUMERO_SOLICITACAO_MDG', 'MOTIVO_PARADA', 'REVALIDACAO'];
 
+// As três primeiras saem com as COLUNAS ORIGINAIS do arquivo, porque é
+// delas que o comprador trabalha o pedido.
 var MDX_ABAS = [
   { nome:'MAPA',                  chaves:['emitir'],              de:'mapa',     col0:1 },
   { nome:'Emitir Pedido PATEC',   chaves:['patec'],               de:'patec',    col0:0,
     tirar: MDX_TIRAR_PEDIDO },
   { nome:'Emitir Pedido Manual',  chaves:['patecman'],            de:'patecman', col0:0,
-    tirar: MDX_TIRAR_PEDIDO },
-  { nome:'Negociar',              chaves:['negociar','dpv'],      de:'mapa',     col0:1 },
-  { nome:'Abrir PATEC',           chaves:['patecgm','pateciden'], de:'mapa',     col0:1 }
+    tirar: MDX_TIRAR_PEDIDO }
 ];
+
+// ── ABAS NO PADRÃO DO EXCEL DE CONTROLE (11/11) ──────────────────
+// Pedido do André: Negociar e Abrir PATEC saíam com as colunas
+// originais do MAPA, largas e diferentes do Controle de Negociação /
+// Controle Abrir PATEC que a equipe já usa. Agora saem nas MESMAS 11
+// colunas daqueles relatórios — e entram também Rejeitado e
+// Reaproveitamento, que não tinham aba nenhuma.
+//
+// Rejeitado vem da planilha de rejeitados da Governança e o reap do
+// MAPA de reaproveitamento: nenhum dos dois tem "colunas originais"
+// nesta exportação, então este é o único formato possível para eles.
+var MDX_ABAS_CTRL = [
+  { nome:'Negociar',         chaves: CTRL_NEG },
+  { nome:'Abrir PATEC',      chaves: CTRL_PATEC },
+  { nome:'Rejeitado',        chaves:['rejeitado'] },
+  { nome:'Reaproveitamento', chaves:['reap'] }
+];
+
+// "Situação" por aba. Só Negociar e Abrir PATEC têm como saber se o
+// item já foi tratado; Rejeitado e Reap não têm sinal nenhum, então
+// saem em aberto — é o que são no momento da distribuição.
+function mdxFeitoDe(chaves){
+  if (chaves === CTRL_PATEC) {
+    var vivos = _ctrlAindaNoMapa();
+    var temMapa = !!(_mdBase && _mdBase.itens && _mdBase.itens.length);
+    return function(i){ return temMapa && !vivos[i.rc + '|' + i.seq]; };
+  }
+  if (chaves === CTRL_NEG) {
+    return function(i){
+      var m = (typeof _gpNeg !== 'undefined' ? _gpNeg : {})[i.rc + '|' + i.seq];
+      return !!(m && m.data);
+    };
+  }
+  return function(){ return false; };
+}
+
+// As linhas de uma aba de controle: o que foi distribuído mais o que
+// ficou na fila. A fila entra marcada, em vez de sumir da planilha —
+// senão o Excel não fecha com o total do dia.
+function mdxLinhasCtrl(chaves){
+  var feitoDe = mdxFeitoDe(chaves), fora = [];
+  var pega = function(i, nome){
+    if (chaves.indexOf(i.statusChave) === -1) return;
+    fora.push({ nome:nome, rc:i.rc, seq:i.seq, statusChave:i.statusChave,
+                dia:i.dia || 0, sla:i.sla || 0, feito:!!feitoDe(i),
+                op:i.op || '', itemOp:i.itemOp || '', centro:i.centro || '',
+                propostas:i.propostas === undefined ? '' : i.propostas });
+  };
+  var r = (_mdDist && _mdDist.res) || {};
+  (r.lista || []).forEach(function(p){
+    (p.itens || []).forEach(function(i){ pega(i, p.nome); });
+  });
+  (r.fila || []).forEach(function(i){ pega(i, '(na fila)'); });
+  (r.semAtividade || []).forEach(function(i){ pega(i, '(sem ninguém na atividade)'); });
+  fora.sort(function(a, b){
+    if ((a.dia || 0) !== (b.dia || 0)) return (a.dia || 99) - (b.dia || 99);
+    if (a.nome !== b.nome) return String(a.nome).localeCompare(String(b.nome), 'pt-BR');
+    return String(a.rc).localeCompare(String(b.rc));
+  });
+  return fora;
+}
+
+// A planilha da aba, nas mesmas colunas do Excel de controle.
+function mdxAbaCtrl(chaves, base){
+  var linhas = mdxLinhasCtrl(chaves);
+  var cab = CTRL_EXCEL_COLS.map(function(c){ return c.t; });
+  var aoa = [cab];
+  linhas.forEach(function(i){
+    var iso = _ctrlDiaData(base, i.dia);
+    var ctx = { dataBR: iso ? cpDataBR(iso) : '' };
+    aoa.push(CTRL_EXCEL_COLS.map(function(c){ return c.v(i, ctx); }));
+  });
+  var ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = cab.map(function(c){ return { wch: Math.max(10, Math.min(30, c.length + 4)) }; });
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({
+    s:{ r:0, c:0 }, e:{ r:Math.max(1, aoa.length) - 1, c:cab.length - 1 } }) };
+  return { ws:ws, n:linhas.length, colunas:cab.length };
+}
 
 // ── a coluna ORP/PMM ─────────────────────────────────────────────
 // Sai do N_ACOMPANHAMENTO: quando ele traz PMM (PMM, PMM NINEX,
@@ -23337,6 +23420,13 @@ function mdExportarDistribuicao(){
       });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(corpo), g.nome);
       resumo.push({ aba:g.nome, n:linhas.length, colunas:corpo[0].length });
+    });
+
+    // e as que saem no padrão do Excel de controle
+    MDX_ABAS_CTRL.forEach(function(g){
+      var a = mdxAbaCtrl(g.chaves, mdxDataDist());
+      XLSX.utils.book_append_sheet(wb, a.ws, g.nome);
+      resumo.push({ aba:g.nome, n:a.n, colunas:a.colunas, padrao:'controle' });
     });
 
     var nome = 'MAPA_distribuido_' + String(mdxDataDist()).replace(/-/g, '') + '.xlsx';
