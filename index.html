@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/11 23:40';
+var GTO_BUILD = '11/11 01:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15904,6 +15904,48 @@ function mdCotaAtv(ch){
                           : Math.max(1, Math.min(7, Math.round(+_mdCfg.dias || 5)));
   return { porDia: porDia, dias: dias, semana: porDia * dias, proprio: proprio };
 }
+// ── CAPACIDADE POR COMPRADOR (10/11) ─────────────────────────────
+// Pedido do André: a Rhayanne está em curva de aprendizagem e ele
+// precisa diminuir a produção dela — "e separa o restante para a
+// equipe de forma igual".
+//
+// É um percentual por pessoa, 100% = capacidade cheia. Vale em TODAS
+// as filas em que ela atua, e o que ela deixa de fazer NÃO vira fila:
+// é absorvido por quem está em 100%, em partes iguais. A meta do time
+// não muda, só a repartição dela.
+//
+// Percentual, e não um número de itens, porque acompanha sozinho
+// quando ele mexer no padrão de itens/dia.
+function mdCapPct(n){
+  var v = Math.round(+((_mdCfg.capacidade || {})[n]) || 0);
+  if (!v) return 100;
+  return Math.max(1, Math.min(200, v));
+}
+function mdTemCapReduzida(){
+  var c = _mdCfg.capacidade || {}, achou = false;
+  Object.keys(c).forEach(function(n){ if (mdCapPct(n) !== 100) achou = true; });
+  return achou;
+}
+// Reparte uma capacidade base entre `nomes`, honrando o % de cada um:
+// quem está reduzido recebe menos e a diferença se divide em PARTES
+// IGUAIS entre quem está em 100% ou mais. Se TODOS estiverem
+// reduzidos não há quem absorva, e aí o que sobra fica mesmo na fila.
+function mdRepartirCap(base, nomes){
+  var out = {}, sobra = 0, cheios = [];
+  (nomes || []).forEach(function(n){
+    var f = mdCapPct(n) / 100;
+    out[n] = base * f;
+    if (f < 1) sobra += base * (1 - f);
+    else cheios.push(n);
+  });
+  if (sobra > 0 && cheios.length) {
+    var add = sobra / cheios.length;
+    cheios.forEach(function(n){ out[n] += add; });
+  }
+  Object.keys(out).forEach(function(n){ out[n] = Math.max(1, Math.round(out[n])); });
+  return out;
+}
+
 function mdPessoasDaAtividade(ch){
   var alvo = mdAtvDe(ch), out = [];
   (_mdCfg.pessoas || []).forEach(function(n){
@@ -16247,6 +16289,30 @@ function mdPintarAtividades(){
     + '<th style="text-align:right" title="Itens/dia × dias úteis">Dá para fazer</th>'
     + '<th>Cabe?</th></tr></thead><tbody>';
 
+  // CAPACIDADE DO COMPRADOR — a primeira linha da tabela.
+  // 100% é cheio. Quem está em curva de aprendizagem entra com menos, e
+  // o que ele deixa de fazer é absorvido por quem está em 100%, em
+  // partes iguais, em todas as filas em que ele atua.
+  h += '<tr style="background:var(--cin)">'
+    + '<td style="font-weight:700;font-size:11px" title="100% = capacidade cheia. '
+    +   'Quem fica abaixo recebe menos em todas as filas, e a diferença se divide '
+    +   'em partes iguais entre quem está em 100%.">⚖️ Capacidade (%)</td>'
+    + '<td></td>';
+  nomes.forEach(function(n, i2){
+    var pct = mdCapPct(n);
+    h += '<td style="text-align:center"><input type="number" min="1" max="200" step="5"'
+      + ' id="md-cap-' + i2 + '" value="' + (pct === 100 ? '' : pct) + '" placeholder="100"'
+      + ' onchange="mdSalvarEquipe()" title="' + cpEsc(n) + ' — em branco é 100%"'
+      + ' style="width:54px;font-size:11px;padding:2px 4px;text-align:right;border-radius:6px;'
+      +   'border:1px solid ' + (pct === 100 ? 'var(--brd)' : 'var(--am)') + ';'
+      +   (pct === 100 ? '' : 'font-weight:700;color:var(--am)') + '"></td>';
+  });
+  h += '<td colspan="6" style="font-size:10px;color:var(--tx2)">'
+    + (mdTemCapReduzida()
+        ? 'quem está abaixo de 100% recebe menos, e a diferença vai para os demais'
+        : 'todos em capacidade cheia')
+    + '</td></tr>';
+
   MD_ATIVIDADES.forEach(function(x){
     var itens = mdItensDaAtividade(x.chave);
     var cota  = mdCotaAtv(x.chave);
@@ -16258,8 +16324,14 @@ function mdPintarAtividades(){
       if (marcado) quem.push(n);
     });
     var porPessoa = quem.length ? Math.ceil(itens / quem.length) : 0;   // o que cabe a cada um
-    var capacidadePessoa = cota.semana;                                 // o que cada um dá conta
-    var capacidade = quem.length * capacidadePessoa;
+    var capacidadePessoa = cota.semana;                                 // o padrão da linha
+    // a capacidade do time é a SOMA das capacidades individuais: com
+    // alguém reduzido, a diferença vai para quem está em 100% e o total
+    // não muda — mas se TODOS estiverem reduzidos, o total cai mesmo, e
+    // o "Cabe?" tem de dizer isso
+    var mapaCap = mdRepartirCap(capacidadePessoa, quem);
+    var capacidade = 0;
+    quem.forEach(function(n){ capacidade += (mapaCap[n] || 0); });
     var cabe = itens <= capacidade;
     h += '<tr>'
       + '<td style="font-weight:600;color:' + x.cor + ';font-size:11px">' + cpEsc(x.nome) + '</td>'
@@ -16311,6 +16383,18 @@ function mdQuadroDaTela(){
   return out;
 }
 
+function mdCapDaTela(nomes){
+  var out = {};
+  (nomes || []).forEach(function(n, i){
+    var el = document.getElementById('md-cap-' + i);
+    var v = el ? String(el.value == null ? '' : el.value).trim() : '';
+    if (!v) return;                       // em branco = 100%, não guardo
+    var pct = Math.max(1, Math.min(200, Math.round(+v) || 100));
+    if (pct !== 100) out[n] = pct;
+  });
+  return out;
+}
+
 function mdAtividadesDaTela(nomes){
   var out = {};
   nomes.forEach(function(n, i){
@@ -16336,6 +16420,7 @@ async function mdSalvarEquipe(){
     cotaSemana: 0,   // deixou de ser digitada: é itens/dia × dias úteis
     dias: Math.max(1, Math.min(7, Math.round(+(document.getElementById('md-dias') || {}).value || 5))),
     porAtividade: Object.keys(quadroAntes).length ? quadroAntes : (_mdCfg.porAtividade || {}),
+    capacidade: mdCapDaTela(nomes),
     dataDist: mdDataSel()
   };
   _mdCfg.cotaSemana = (_mdCfg.cotaDia || 10) * (_mdCfg.dias || 5);
@@ -22784,6 +22869,36 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   // divide; é a mesma regra da cota das linhas.
   var metaEmissao = Math.max(1, cota * Math.max(1, Math.min(7, Math.round(+dias || 5))));
   res.metaEmissao = metaEmissao;
+  // quem atua em cada fila, pelas marcações desta rodada
+  var quemNa = function(ch){
+    var alvo = mdAtvDe(ch);
+    return (pessoas || []).filter(function(n){
+      return mdAtvNorm(atividades[n]).indexOf(alvo) !== -1;
+    });
+  };
+  // A capacidade de cada um, fila a fila: o % do comprador aplicado e a
+  // diferença repartida entre quem está cheio. Calculado uma vez, aqui,
+  // para a conta não mudar no meio da distribuição.
+  var cotaPes = {};
+  MD_ATIVIDADES.forEach(function(x){
+    cotaPes[x.chave] = mdRepartirCap(cotaCh(x.chave), quemNa(x.chave));
+  });
+  var cotaDe = function(n, ch){
+    var m = cotaPes[mdAtvDe(ch)];
+    var v = m ? m[n] : 0;
+    return v || cotaCh(ch);
+  };
+  // a meta da emissão segue a mesma régua, entre quem atua em alguma
+  // das quatro
+  var equipeEmissao = (pessoas || []).filter(function(n){
+    var at = mdAtvNorm(atividades[n]), tem = false;
+    MD_EMISSAO.forEach(function(ch){ if (at.indexOf(mdAtvDe(ch)) !== -1) tem = true; });
+    return tem;
+  });
+  var metaPes = mdRepartirCap(metaEmissao, equipeEmissao);
+  var metaDe = function(n){ return metaPes[n] || metaEmissao; };
+  res.metaPessoa = metaPes;
+  res.capReduzida = mdTemCapReduzida();
   (pessoas || []).forEach(function(n){
     res.pessoas[n] = { nome:n, itens:[], blocos:[], n:0, porDia:new Array(nDias).fill(0),
                        porStatus:{}, tipo:{ L:0, Q:0 }, tipoEmitir:{ L:0, Q:0 }, fora:0, reap:0,
@@ -22854,14 +22969,14 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     var cand = quemFaz.filter(function(n){
       var at = mdAtvNorm(atividades[n]), p = res.pessoas[n], temEspaco = false;
       // a meta de emissão é teto das quatro somadas
-      if (b.__etapa && p.emissao >= metaEmissao) return false;
+      if (b.__etapa && p.emissao >= metaDe(n)) return false;
       (b.statuses || []).forEach(function(ch){
         if (temEspaco) return;
         var a = mdAtvDe(ch);
         if (at.indexOf(a) === -1) return;
         var tem = 0;
         mdStatusDaAtv(a).forEach(function(s){ tem += (p.porStatus[s] || 0); });
-        if (tem < cotaCh(a)) temEspaco = true;
+        if (tem < cotaDe(n, a)) temEspaco = true;
       });
       return temEspaco;
     });
@@ -22942,13 +23057,12 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     // reparte entre todos como antes e avisa na tela que foi isso.
     res.reapSemMarcacao = !equipeReap.length;
     if (res.reapSemMarcacao) equipeReap = (pessoas || []).slice();
-    var cotaReap = cotaCh('reap');
     itensReap.forEach(function(it){
       var cand = equipeReap.filter(function(n){
         // o reap é a última etapa da emissão: respeita a cota da linha
-        // E a meta das quatro somadas
-        if (res.pessoas[n].emissao >= metaEmissao) return false;
-        return (res.pessoas[n].porStatus.reap || 0) < cotaReap;
+        // E a meta das quatro somadas, as duas já com o % da pessoa
+        if (res.pessoas[n].emissao >= metaDe(n)) return false;
+        return (res.pessoas[n].porStatus.reap || 0) < cotaDe(n, 'reap');
       });
       if (!cand.length) { it.pessoa = ''; it.dia = 0; it.foraAtividade = false; res.fila.push(it); return; }
       // partes iguais DENTRO da fila do reap; o total só desempata
@@ -23049,7 +23163,7 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     MD_ATIVIDADES.forEach(function(x){
       var tem = 0;
       mdStatusDaAtv(x.chave).forEach(function(sc){ tem += (p.porStatus[sc] || 0); });
-      var c = cotaCh(x.chave);
+      var c = cotaDe(n, x.chave);
       if (tem > c) res.acimaCota.push({ nome:n, chave:x.chave, n:tem, cota:c });
     });
   });
@@ -23277,9 +23391,10 @@ function mdAvisoDiasCurtos(res){
 // explicação — foi o erro que já apareceu três vezes neste módulo.
 function mdAvisoMeta(res){
   if (!res || !res.metaEmissao) return '';
+  var metaDe = function(n){ return ((res.metaPessoa || {})[n]) || res.metaEmissao; };
   var cheios = [], naFila = 0;
   (res.lista || []).forEach(function(p){
-    if ((p.emissao || 0) >= res.metaEmissao) cheios.push(p.nome + ' ' + p.emissao);
+    if ((p.emissao || 0) >= metaDe(p.nome)) cheios.push(p.nome + ' ' + p.emissao);
   });
   (res.fila || []).forEach(function(it){
     if (MD_EMISSAO.indexOf(it.statusChave) !== -1) naFila++;
@@ -23291,7 +23406,28 @@ function mdAvisoMeta(res){
     + (cheios.length ? ' · fecharam a meta: <strong>' + cpEsc(cheios.join(' · ')) + '</strong>' : '')
     + (naFila ? ' · <strong style="color:var(--am)">' + cpNum(naFila) + ' item(ns) de emissão na fila</strong> '
         + 'por não haver mais quem receba' : '')
-    + '. A ordem é PATEC e PATEC Manual primeiro, em partes iguais, depois Emitir Pedido e por fim o reap.</div>';
+    + '. A ordem é PATEC e PATEC Manual primeiro, em partes iguais, depois Emitir Pedido e por fim o reap.'
+    + mdAvisoCapacidade(res)
+    + '</div>';
+}
+
+// Quem está com capacidade reduzida, e para onde foi a diferença.
+// Sem isto, a meta de uma pessoa sair diferente da dos outros vira
+// mistério na hora de conferir o Excel.
+function mdAvisoCapacidade(res){
+  if (!res || !res.capReduzida) return '';
+  var meta = res.metaEmissao, mp = res.metaPessoa || {};
+  var menos = [], mais = [];
+  Object.keys(mp).forEach(function(n){
+    var pct = mdCapPct(n);
+    if (pct < 100) menos.push(cpEsc(n) + ' ' + pct + '% (meta ' + mp[n] + ')');
+    else if (mp[n] > meta) mais.push(cpEsc(n) + ' ' + mp[n]);
+  });
+  if (!menos.length) return '';
+  return '<br>⚖️ <strong>Capacidade reduzida</strong>: ' + menos.join(' · ')
+    + (mais.length
+        ? '. A diferença foi dividida em partes iguais entre ' + mais.join(' · ') + '.'
+        : '. Ninguém está em 100% para absorver, então o que sobrou ficou na fila.');
 }
 
 function mdAvisoAcimaCota(res){
@@ -23748,7 +23884,8 @@ async function mdCarregarCfg(){
         ats[n] = mdAtvNorm(d.atividades[n]);
       });
       _mdCfg = { pessoas:d.pessoas||[], qtdPessoas:+d.qtdPessoas||0, atividades:ats,
-                 porAtividade:d.porAtividade||{}, dataDist:d.dataDist||'',
+                 porAtividade:d.porAtividade||{}, capacidade:d.capacidade||{},
+                 dataDist:d.dataDist||'',
                  cotaDia:+d.cotaDia||0, cotaSemana:+d.cotaSemana||0, dias:+d.dias||5 };
     }
   } catch (e) { console.warn('mdCarregarCfg:', e); }
