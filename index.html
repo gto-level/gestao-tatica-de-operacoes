@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 02:40';
+var GTO_BUILD = '11/11 05:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -13392,9 +13392,13 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
   var iItRej = (iIt !== -1) ? iIt
              : _colOuLetra(['LINHAREQUISICAO','LINHA_REQUISICAO'],
                  { tem:['REQUISIC','LINHA'] }, 7, 'H · LINHAREQUISICAO');
+  // A oportunidade (F) entrou em 11/11: é uma das colunas que o André
+  // quer na tela de rejeitados, buscada pelo pedido.
+  var iOpRej = _colOuLetra(['OPORTUNIDADE','NUMERO_OPORTUNIDADE','NUM_OPORTUNIDADE','OPORT'],
+                 { tem:['OPORTUNID'], naoTem:['ITEM','LINHA'] }, 5, 'F · OPORTUNIDADE');
   r.rejSupCols = { chave:iCh, pedido:iPdRej, linhaPedido:iLnPd, rc:iRcRej, itemRc:iItRej,
-                   criacao:iDt, status:iSt, elimPedido:iElPed, elimItem:iElIt,
-                   comprador:iQuem };
+                   oport:iOpRej, criacao:iDt, status:iSt, elimPedido:iElPed,
+                   elimItem:iElIt, comprador:iQuem };
   r.rejSupPos = _posUsadas;
   r.rejSupParciais = _parciais;
 
@@ -13556,7 +13560,7 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
           r.rejSupTotal++;
           if (r.rejSup.length < 8000) {
             r.rejSup.push({
-              rc: rcR, itemRc: itR,
+              rc: rcR, itemRc: itR, oport: pR(iOpRej),
               pedido: pR(iPdRej), itemPedido: pR(iLnPd),
               chaveComprador: pR(iCh), comprador: nomeB,
               dataPedido: iDt === -1 ? '' : cpDataISO(lb[iDt]),
@@ -15780,9 +15784,18 @@ function mdAtvNorm(lista){
   return out;
 }
 
+// REJEITADO SAIU DA DISTRIBUIÇÃO em 11/11. A regra do André passou a
+// ser "quem criou o pedido é o responsável por tratar o rejeite": o
+// dono vem do cruzamento com a medição, na tela de rejeitados, e não
+// de repartir entre a equipe. O status continua existindo em
+// MD_STATUS (um item antigo guardado ainda o tem), só não é mais uma
+// LINHA que se marca na tabela.
+var MD_FORA_DA_DISTRIBUICAO = ['rejeitado'];
+
 var MD_ATIVIDADES = (function(){
   var out = [], posto = false;
   MD_STATUS.forEach(function(x){
+    if (MD_FORA_DA_DISTRIBUICAO.indexOf(x.chave) !== -1) return;
     if (MD_ABRIR_MEMBROS.indexOf(x.chave) === -1) { out.push(x); return; }
     if (posto) return;
     posto = true;
@@ -16338,8 +16351,23 @@ function mdPintarAtividades(){
     var capacidade = 0;
     quem.forEach(function(n){ capacidade += (mapaCap[n] || 0); });
     var cabe = itens <= capacidade;
+    // Rejeitado e Reaproveitamento não vêm do MAPA do dia. Quando estão
+    // em zero, a linha diz de onde eles viriam — senão o comprador
+    // marca a caixinha, não recebe nada e não sabe por quê. Foi
+    // exatamente a dúvida do André em 11/11: "como eu faço para
+    // distribuir os rejeitados?".
+    var fonte = '';
+    if (!itens && x.chave === 'rejeitado') {
+      fonte = 'vem da planilha <strong>Rejeite Fornecedor</strong>, na Governança — '
+            + 'sem ela subida, não há o que distribuir';
+    } else if (!itens && x.chave === 'reap') {
+      fonte = 'vem do <strong>upload do MAPA de reaproveitamento</strong>, logo abaixo';
+    }
     h += '<tr>'
-      + '<td style="font-weight:600;color:' + x.cor + ';font-size:11px">' + cpEsc(x.nome) + '</td>'
+      + '<td style="font-weight:600;color:' + x.cor + ';font-size:11px">' + cpEsc(x.nome)
+      +   (fonte ? '<div style="font-weight:500;font-size:9.5px;color:var(--tx2);'
+                 + 'margin-top:2px;line-height:1.35">↳ ' + fonte + '</div>' : '')
+      + '</td>'
       + '<td style="text-align:right;font-weight:700">' + cpNum(itens) + '</td>';
     nomes.forEach(function(n, i2){
       var marcado = (_mdCfg.atividades && _mdCfg.atividades[n])
@@ -17009,7 +17037,8 @@ function rjsDeduzirMedicao(rejSup){
     var k = rjsChaveRc(o);
     if (vistos[k]) { vistos[k].linhas++; return; }
     var novo = {
-      rc:o.rc || '', itemRc:o.itemRc || '', pedido:o.pedido || '',
+      rc:o.rc || '', itemRc:o.itemRc || '', oport:o.oport || '',
+      pedido:o.pedido || '',
       itemPedido:o.itemPedido || '', chaveComprador:o.chaveComprador || '',
       comprador:o.comprador || '', dataPedido:o.dataPedido || '', linhas:1,
       bruto:o.bruto || []
@@ -17163,7 +17192,8 @@ function rjsEnxugarMedicao(m){
   var orig = m.itens || [];
   var avisos = [];
   var magros = orig.map(function(o){
-    return { rc:o.rc, itemRc:o.itemRc, pedido:o.pedido, itemPedido:o.itemPedido,
+    return { rc:o.rc, itemRc:o.itemRc, oport:o.oport || '',
+             pedido:o.pedido, itemPedido:o.itemPedido,
              chaveComprador:o.chaveComprador, comprador:o.comprador,
              dataPedido:o.dataPedido, linhas:o.linhas, bruto:[] };
   });
@@ -17727,7 +17757,250 @@ function rjResumoHTML(itens){
     + '<div>Por motivo: ' + topo(porMotivo) + '</div></div>';
 }
 
+// ══════════════════════════════════════════════════════════════════
+// REJEITE JÁ NASCE COM DONO (11/11)
+//
+// Regra do André: "quem criou o pedido é o responsável por tratar o
+// rejeite". O pedido é a chave — um PROCV entre a planilha de rejeite
+// fornecedor (coluna B, pedido) e a medição do Rejeite Supervisor
+// (coluna D, pedido), que traz quem criou.
+//
+// Antes, a coluna da tela era "Responsável do grupo", que é o dono do
+// GRUPO de compras, não quem fez o pedido — e a distribuição repartia
+// os rejeitados entre a equipe como se não tivessem dono.
+//
+// O cruzamento é feito na HORA DE DESENHAR, não no upload: assim, subir
+// a medição depois da planilha de rejeitados já acerta a tela, sem ter
+// de subir os rejeitados de novo.
+// ══════════════════════════════════════════════════════════════════
+
+// pedido → as linhas da medição daquele pedido (uma por RC+item)
+function rjIxPedido(){
+  var ix = {};
+  ((_rjsMed && _rjsMed.itens) || []).forEach(function(o){
+    var p = _rjsN(o.pedido);
+    if (!p) return;
+    (ix[p] || (ix[p] = [])).push(o);
+  });
+  return ix;
+}
+
+// item da oportunidade, do levelboard (AF), pela chave RC|item
+function rjItemOp(rc, item){
+  try {
+    var v = ((_rjsSla && _rjsSla.itens) || {})[rjsChaveLb(rc, item)];
+    return (v && v[2] != null) ? String(v[2]) : '';
+  } catch (e) { return ''; }
+}
+
+// AS LINHAS DA TELA — uma por ITEM, não por pedido.
+// Um pedido pode ter várias RCs; as colunas RC, Item, Oportunidade e
+// Item da OP são de item, então a linha é o item. Pedido que a medição
+// não conhece vira UMA linha, com as colunas vazias e marcada.
+function rjLinhasItens(itens){
+  var ix = rjIxPedido(), out = [], semDono = 0, pedSemDono = {};
+  (itens || []).forEach(function(i){
+    var ped = _rjsN(i.pedido);
+    var med = ix[ped] || [];
+    var base = function(o){
+      return {
+        rc: o ? o.rc : '', itemRc: o ? o.itemRc : '', oport: o ? o.oport : '',
+        itemOp: o ? rjItemOp(o.rc, o.itemRc) : '',
+        pedido: i.pedido, comprador: o ? (o.comprador || '') : '',
+        sla: +i.dias || 0,
+        // o que a tela antiga mostrava, guardado para o resumo e o Excel
+        grupo: i.grupo || '', resp: i.resp || '', forn: i.forn || '',
+        tipo: i.tipo || '', dataRej: i.dataRej || '', envios: +i.envios || 0,
+        prazo: i.prazo || '', motivoRej: i.motivo || '',
+        semDono: !o || !o.comprador
+      };
+    };
+    if (!med.length) {
+      semDono++; pedSemDono[ped] = 1;
+      out.push(base(null));
+      return;
+    }
+    med.forEach(function(o){
+      var l = base(o);
+      if (l.semDono) { semDono++; pedSemDono[ped] = 1; }
+      out.push(l);
+    });
+  });
+  out.sort(function(a, b){
+    if ((b.sla || 0) !== (a.sla || 0)) return (b.sla || 0) - (a.sla || 0);
+    return String(a.pedido).localeCompare(String(b.pedido));
+  });
+  out.__semDono = semDono;
+  out.__pedSemDono = Object.keys(pedSemDono).length;
+  return out;
+}
+
+// ── a tratativa do comprador: motivo e conclusão ─────────────────
+// Guardados por pedido + RC + item, em config/rejeite_tratativa. O
+// motivo é condição da conclusão: sem justificativa escrita, o campo
+// de conclusão fica travado — foi o que o André pediu.
+var RJ_CONCLUSOES = ['Ajustado', 'Republicado', 'Devolvido', 'PATEC'];
+var _rjTrat = { itens:{}, atualizadoEm:'', atualizadoPor:'' };
+
+function rjChaveTrat(l){
+  return _rjsN(l.pedido) + '|' + _rjsN(l.rc) + '|' + _rjsN(l.itemRc);
+}
+function rjTrat(l){ return _rjTrat.itens[rjChaveTrat(l)] || { motivo:'', conclusao:'' }; }
+
+async function rjCarregarTratativas(){
+  try {
+    var db = getDB(); if (!db) return;
+    var d = await db.collection('config').doc('rejeite_tratativa').get();
+    if (d && d.exists) {
+      var T = d.data() || {};
+      _rjTrat = { itens:T.itens || {}, atualizadoEm:T.atualizadoEm || '',
+                  atualizadoPor:T.atualizadoPor || '' };
+    }
+  } catch (e) { console.warn('rjCarregarTratativas:', e); }
+}
+
+async function rjGravarTratativas(){
+  try {
+    var db = getDB(); if (!db) return false;
+    _rjTrat.atualizadoEm = new Date().toISOString();
+    _rjTrat.atualizadoPor = cpQuem();
+    await db.collection('config').doc('rejeite_tratativa').set(_rjTrat);
+    return true;
+  } catch (e) { console.warn('rjGravarTratativas:', e); return false; }
+}
+
+// guarda o que o comprador digitou e redesenha, para a conclusão
+// destravar no mesmo instante em que o motivo é escrito
+var _rjLinhasAtual = [];
+async function rjSalvarTrat(idx, campo, valor){
+  var l = _rjLinhasAtual[idx];
+  if (!l) return;
+  var k = rjChaveTrat(l);
+  var o = _rjTrat.itens[k] || (_rjTrat.itens[k] = { motivo:'', conclusao:'' });
+  o[campo] = String(valor == null ? '' : valor).trim();
+  // conclusão sem motivo não existe: se o motivo for apagado, a
+  // conclusão cai junto, senão ficaria um "Ajustado" sem justificativa
+  if (campo === 'motivo' && !o.motivo) o.conclusao = '';
+  var ok = await rjGravarTratativas();
+  rjDesenhar();
+  var st = document.getElementById('rj-trat-status');
+  if (st) {
+    st.innerHTML = ok
+      ? '<span style="color:var(--vd)">✔ guardado</span>'
+      : '<span style="color:var(--vm)">✗ a base recusou — o que você digitou NÃO foi guardado</span>';
+    if (ok) setTimeout(function(){ var e2 = document.getElementById('rj-trat-status');
+                                   if (e2) e2.innerHTML = ''; }, 2500);
+  }
+}
+
+// ── a tabela nova: uma linha por item ────────────────────────────
+var RJ_COLS = [
+  { t:'RC',          v:function(l){ return l.rc; } },
+  { t:'Item',        v:function(l){ return l.itemRc; } },
+  { t:'Oportunidade',v:function(l){ return l.oport; } },
+  { t:'Item da OP',  v:function(l){ return l.itemOp; } },
+  { t:'Pedido',      v:function(l){ return l.pedido; } },
+  { t:'Comprador',   v:function(l){ return l.comprador; } },
+  { t:'SLA Pedido',  v:function(l){ return +l.sla || 0; } },
+  { t:'Motivo',      v:function(l){ return rjTrat(l).motivo; } },
+  { t:'Conclusão',   v:function(l){ return rjTrat(l).conclusao; } }
+];
+
+// A grade é a mesma nas duas abas; o que muda são as colunas de
+// contexto do fim — o motivo da recusa no Fornecedor, o padrão e a
+// justificativa no Supervisor. Elas NÃO estavam na lista que o André
+// passou, mas sem elas o comprador não sabe por que o item foi
+// rejeitado — é o dado que ele precisa para tratar.
+function rjGradeHTML(L, extras, idPrefixo){
+  _rjLinhasAtual = L;
+  if (!L.length) return '';
+  var cols = RJ_COLS.slice(0, 7).concat(extras || [])
+             .concat(RJ_COLS.slice(7));
+  var h = '';
+  if (L.__semDono) {
+    h += '<div class="al al-a" style="font-size:11.5px;margin-top:.6rem">⚠ <strong>'
+      + cpNum(L.__semDono) + ' linha(s)</strong> em ' + cpNum(L.__pedSemDono)
+      + ' pedido(s) sem comprador: o pedido não foi achado na medição do Rejeite '
+      + 'Supervisor. Suba a medição do dia — é dela que vem quem criou o pedido.</div>';
+  }
+  h += '<div id="rj-trat-status" style="font-size:11px;margin-top:.4rem;min-height:14px"></div>'
+    + '<div style="overflow:auto;max-height:520px;margin-top:.4rem"><table><thead><tr>'
+    + cols.map(function(c){ return '<th>' + cpEsc(c.t) + '</th>'; }).join('')
+    + '</tr></thead><tbody>';
+  L.forEach(function(l, idx){
+    var t = rjTrat(l);
+    var velho = (+l.sla || 0) >= 3;
+    var temMotivo = !!t.motivo;
+    h += '<tr' + (velho ? ' style="background:var(--vmc)"' : '') + '>'
+      + '<td style="font-weight:600">' + cpEsc(l.rc || '—') + '</td>'
+      + '<td>' + cpEsc(l.itemRc || '—') + '</td>'
+      + '<td style="font-size:10.5px">' + cpEsc(l.oport || '—') + '</td>'
+      + '<td>' + cpEsc(l.itemOp || '—') + '</td>'
+      + '<td style="font-weight:700;color:var(--az)">' + cpEsc(l.pedido) + '</td>'
+      + '<td style="font-size:10.5px' + (l.semDono ? ';color:var(--vm);font-weight:700' : '') + '">'
+      +   (l.comprador ? cpEsc(l.comprador) : '<span title="pedido não achado na medição">sem comprador</span>')
+      + '</td>'
+      + '<td style="text-align:right;font-weight:700;color:' + (velho ? 'var(--vm)' : 'var(--tx)') + '">'
+      +   cpNum(l.sla) + '</td>'
+      + (extras || []).map(function(c){
+          return '<td style="font-size:10.5px">' + cpEsc(c.v(l) || '—') + '</td>';
+        }).join('')
+      + '<td><input type="text" value="' + cpEsc(t.motivo) + '" placeholder="por que foi tratado assim"'
+      +   ' onchange="rjSalvarTrat(' + idx + ', \'motivo\', this.value)"'
+      +   ' style="width:210px;font-size:11px;padding:3px 6px;border-radius:6px;'
+      +     'border:1px solid ' + (temMotivo ? 'var(--vd)' : 'var(--brd)') + '"></td>'
+      + '<td><select onchange="rjSalvarTrat(' + idx + ', \'conclusao\', this.value)"'
+      +   (temMotivo ? '' : ' disabled')
+      +   ' title="' + (temMotivo ? 'como foi concluído' : 'escreva o motivo antes de concluir') + '"'
+      +   ' style="font-size:11px;padding:3px 6px;border-radius:6px;border:1px solid var(--brd);'
+      +     (temMotivo ? '' : 'background:var(--cin);color:var(--tx2);cursor:not-allowed') + '">'
+      +   '<option value="">' + (temMotivo ? '— escolha —' : 'escreva o motivo') + '</option>'
+      +   RJ_CONCLUSOES.map(function(o){
+            return '<option value="' + cpEsc(o) + '"'
+                 + (t.conclusao === o ? ' selected' : '') + '>' + cpEsc(o) + '</option>';
+          }).join('')
+      + '</select></td></tr>';
+  });
+  return h + '</tbody></table></div>';
+}
+
+// Fornecedor: as linhas saem do cruzamento com a medição.
+var RJ_EXTRA_FORN = [
+  { t:'Motivo da recusa', v:function(l){ return l.motivoRej || ''; } }
+];
 function rjTabelaHTML(itens){
+  return rjGradeHTML(rjLinhasItens(itens), RJ_EXTRA_FORN, 'f');
+}
+
+// Supervisor: as linhas já vêm da medição, com o comprador certo.
+// O padrão e a justificativa vêm da planilha do Rodrigo e ficam no fim,
+// pelo mesmo motivo do motivo da recusa no Fornecedor.
+var RJ_EXTRA_SUP = [
+  { t:'Padrão rejeição', v:function(l){ return l.padrao || ''; } },
+  { t:'Justificativa',   v:function(l){ return l.justificativa || ''; } }
+];
+function rjsLinhasGrade(linhas){
+  var out = (linhas || []).map(function(l){
+    return {
+      rc:l.rc || '', itemRc:l.itemRc || '', oport:l.oport || '',
+      itemOp: rjItemOp(l.rc, l.itemRc),
+      pedido:l.pedido || '', comprador:l.comprador || '',
+      sla: +l.slaPedido || 0,
+      padrao:l.padrao || '', justificativa:l.justificativa || '',
+      semDono: !l.comprador
+    };
+  });
+  out.sort(function(a, b){
+    if ((b.sla || 0) !== (a.sla || 0)) return (b.sla || 0) - (a.sla || 0);
+    return String(a.pedido).localeCompare(String(b.pedido));
+  });
+  out.__semDono = out.filter(function(l){ return l.semDono; }).length;
+  out.__pedSemDono = Object.keys(out.filter(function(l){ return l.semDono; })
+    .reduce(function(m, l){ m[l.pedido] = 1; return m; }, {})).length;
+  return out;
+}
+
+function rjTabelaAntigaHTML(itens){
   if (!itens.length) return '';
   var h = '<div style="overflow:auto;max-height:520px;margin-top:.8rem"><table><thead><tr>'
     + '<th>Pedido</th><th>Grupo</th><th>Responsável do grupo</th><th>Fornecedor</th>'
@@ -17819,8 +18092,15 @@ async function rjAbrir(){
         db.collection('config').doc('governanca_rejeitados').get(),
         db.collection('config').doc('rejeite_sup_medicao').get(),
         db.collection('config').doc('rejeite_sup_sla').get(),
-        db.collection('config').doc('rejeite_sup_rodrigo').get()
+        db.collection('config').doc('rejeite_sup_rodrigo').get(),
+        // o que o comprador já escreveu em Motivo e Conclusão
+        db.collection('config').doc('rejeite_tratativa').get()
       ]);
+      if (docs[4] && docs[4].exists) {
+        var T = docs[4].data() || {};
+        _rjTrat = { itens:T.itens || {}, atualizadoEm:T.atualizadoEm || '',
+                    atualizadoPor:T.atualizadoPor || '' };
+      }
       if (docs[0] && docs[0].exists) {
         var R = docs[0].data() || {};
         _gpRej = { itens:R.itens || [], arquivo:R.arquivo || '', aba:R.aba || '',
@@ -18079,7 +18359,8 @@ function rjsMontar(){
     var c  = cock[_rjsN(o.pedido)] || null;
     var m  = mot[kPed] || null;
     return {
-      rc:o.rc, itemRc:o.itemRc, pedido:o.pedido, itemPedido:o.itemPedido,
+      rc:o.rc, itemRc:o.itemRc, oport:o.oport || '',
+      pedido:o.pedido, itemPedido:o.itemPedido,
       chaveComprador:o.chaveComprador, comprador:o.comprador,
       dataPedido:o.dataPedido,
       slaPedido: c ? c.sla : null,
@@ -20032,30 +20313,10 @@ function rjSupervisorHTML(){
          + 'color:var(--tx2)">conferir as colunas que eu li na medição</summary>'
          + rjsFunilHTML() + '</details>'
        : '');
-    h += '<div style="overflow:auto;max-height:520px;margin-top:.9rem"><table><thead><tr>'
-      + RJS_COLS.map(function(c){
-          var num = ['slaPedido','slaRc','idas'].indexOf(c[1]) !== -1;
-          return '<th' + (num ? ' style="text-align:right"' : '') + '>' + cpEsc(c[0]) + '</th>';
-        }).join('')
-      + '</tr></thead><tbody>';
-    r.linhas.forEach(function(l){
-      var velho = (l.slaPedido || 0) >= 10;
-      h += '<tr' + (velho ? ' style="background:var(--vmc)"' : '') + '>'
-        + '<td style="font-weight:700;color:var(--az)">' + cpEsc(l.rc) + '</td>'
-        + '<td>' + cpEsc(l.itemRc || '—') + '</td>'
-        + '<td style="font-weight:600">' + cpEsc(l.pedido || '—') + '</td>'
-        + '<td>' + cpEsc(l.itemPedido || '—') + '</td>'
-        + '<td style="font-size:10.5px">' + cpEsc(l.chaveComprador || '—') + '</td>'
-        + '<td style="font-size:10.5px">' + cpEsc(l.comprador || '—') + '</td>'
-        + '<td>' + (l.dataPedido ? cpDataBR(l.dataPedido) : '—') + '</td>'
-        + '<td style="text-align:right;font-weight:700;color:' + (velho ? 'var(--vm)' : 'var(--tx)') + '">'
-        +   rjsNum(l.slaPedido) + '</td>'
-        + '<td style="text-align:right">' + rjsNum(l.slaRc) + '</td>'
-        + '<td style="text-align:right">' + rjsNum(l.idas) + '</td>'
-        + '<td style="font-size:10.5px">' + cpEsc(l.padrao || '—') + '</td>'
-        + '<td style="font-size:10.5px">' + cpEsc(l.justificativa || '—') + '</td></tr>';
-    });
-    h += '</tbody></table></div>';
+    // Desde 11/11 as duas abas mostram as MESMAS colunas: o André quer
+    // a mesma leitura nos dois lados. Aqui o comprador já vem certo da
+    // medição, então não há PROCV a fazer — é só a mesma grade.
+    h += rjGradeHTML(rjsLinhasGrade(r.linhas), RJ_EXTRA_SUP, 's');
   }
 
   // ── os que saíram da medição ──────────────────────────────────
@@ -20475,7 +20736,17 @@ function gpLerLevelboard(linhas){
               nm: ix(['NM_PEDIDO']),
               // o Rejeite Supervisor usa estas duas (BO e AM)
               sla: ix(['SLA_DIAS','SLA_DIA','SLA']),
-              idas: ix(['QTD_IDAS_LEVEL','QTD_IDAS','IDAS_LEVEL']) };
+              idas: ix(['QTD_IDAS_LEVEL','QTD_IDAS','IDAS_LEVEL']),
+              // ITEM DA OPORTUNIDADE (AF) — entrou em 11/11 para a tela
+              // de rejeitados. Pelo nome primeiro; se a coluna ITEM já
+              // tiver virado o SEQ (quando não existe SEQ), cai na
+              // letra AF, e a leitura registra que foi pela letra.
+              itemOp: -1 };
+  var iSeqNome = _cpAchaCol(cabs, ['SEQ']);
+  var iItNome  = _cpAchaCol(cabs, ['ITEM','ITEM_OPORTUNIDADE','ITEM_DA_OPORTUNIDADE','ITEM_OP']);
+  if (iItNome !== -1 && iItNome !== col.seq) col.itemOp = iItNome;
+  else if (iSeqNome !== -1 && iItNome !== -1) col.itemOp = iItNome;
+  if (col.itemOp === -1 && cabs.length > 31) { col.itemOp = 31; r.itemOpPorLetra = true; }
   r.colunas = col;
   if (col.rc === -1) { r.aviso = 'Não achei a coluna RC no levelboard.'; return r; }
   var pega = function(l, j){ return j === -1 ? '' : String(l[j] == null ? '' : l[j]).trim(); };
@@ -20491,11 +20762,15 @@ function gpLerLevelboard(linhas){
     // quase toda linha do levelboard, e enfiá-los no doc da negociação
     // estouraria o limite de 1 MB do Firestore. Aqui fica só o essencial.
     var slaT  = pega(l, col.sla), idasT = pega(l, col.idas);
-    if (slaT !== '' || idasT !== '') {
+    var itOpT = pega(l, col.itemOp);
+    if (slaT !== '' || idasT !== '' || itOpT !== '') {
       var kS = rjsChaveLb(rc, pega(l, col.seq));
       if (!r.sla[kS]) {
+        // o terceiro lugar é o item da oportunidade; quem lê SLA e idas
+        // usa [0] e [1] e não enxerga diferença
         r.sla[kS] = [ slaT === '' ? null : (mdNum(slaT) || 0),
-                      idasT === '' ? null : (mdNum(idasT) || 0) ];
+                      idasT === '' ? null : (mdNum(idasT) || 0),
+                      itOpT === '' ? null : itOpT ];
         r.comSla++;
       }
     }
@@ -20810,16 +21085,19 @@ function gpCopiar(){
 function gpBaixarExcel(){
   try {
     if (_gpCard === 'rejeitados') {
-      var cabR = ['Pedido','Contrato','Grupo comprador','Gerência','Gerência do grupo',
-                  'Responsável do grupo','Fornecedor','Tipo de pedido','Menor data remessa',
-                  'Nº itens','Data da rejeição','Dias rejeitado','Nº envios Ariba',
-                  'Prazo recusa','Motivo recusa','Responsável'];
+      // Mesmas colunas da tela desde 11/11 — uma linha por ITEM, com o
+      // comprador vindo do cruzamento com a medição e com o que o
+      // comprador já escreveu em Motivo e Conclusão.
+      var cabR = ['RC','Item','Oportunidade','Item da OP','Pedido','Comprador',
+                  'SLA Pedido','Motivo da recusa','Motivo','Conclusão',
+                  'Grupo','Fornecedor','Rejeitado em','Prazo recusa'];
       var aoaR = [cabR];
-      _gpRej.itens.forEach(function(i){
-        aoaR.push([i.pedido, i.contrato, i.grupo, i.gerencia, i.gerGrupo, i.resp, i.forn, i.tipo,
-                   i.remessa ? cpDataBR(i.remessa) : '', i.nItens,
-                   i.dataRej ? cpDataBR(i.dataRej) : '', i.dias, i.envios,
-                   i.prazo, i.motivo, i.quem]);
+      rjLinhasItens(rjItens()).forEach(function(l){
+        var t = rjTrat(l);
+        aoaR.push([l.rc, l.itemRc, l.oport, l.itemOp, l.pedido,
+                   l.comprador || '(sem comprador)', +l.sla || 0,
+                   l.motivoRej, t.motivo, t.conclusao,
+                   l.grupo, l.forn, l.dataRej ? cpDataBR(l.dataRej) : '', l.prazo]);
       });
       var wsR = XLSX.utils.aoa_to_sheet(aoaR);
       wsR['!cols'] = cabR.map(function(c){ return { wch: Math.max(10, Math.min(30, c.length + 4)) }; });
@@ -23219,10 +23497,12 @@ var MDX_ABAS = [
 // Rejeitado vem da planilha de rejeitados da Governança e o reap do
 // MAPA de reaproveitamento: nenhum dos dois tem "colunas originais"
 // nesta exportação, então este é o único formato possível para eles.
+// A aba Rejeitado saiu em 11/11, junto com a linha da distribuição:
+// o rejeite não é mais repartido aqui, então esta planilha não tem o
+// que dizer sobre ele. Quem manda nele é a tela de rejeitados.
 var MDX_ABAS_CTRL = [
   { nome:'Negociar',         chaves: CTRL_NEG },
   { nome:'Abrir PATEC',      chaves: CTRL_PATEC },
-  { nome:'Rejeitado',        chaves:['rejeitado'] },
   { nome:'Reaproveitamento', chaves:['reap'] }
 ];
 
@@ -23542,6 +23822,11 @@ function mdAvisoAcimaCota(res){
 
 async function mdDistribuir(){
   var st = document.getElementById('md-status');
+  // rejeitados, datas de negociação e levelboard, recém-lidos: alguém
+  // pode ter subido a planilha em outra aba desde que esta abriu
+  if (st) st.innerHTML = '⏳ Conferindo as bases da Governança...';
+  await mdCarregarBasesGov();
+  mdPintarAtividades();
   var temMapa = !!(_mdBase && _mdBase.itens.length);
   var temReap = !!(_mdrBase && _mdrBase.itens.length);
   if (!temMapa && !temReap && !(_gpRej && _gpRej.itens && _gpRej.itens.length)) {
@@ -23568,9 +23853,10 @@ async function mdDistribuir(){
   var itensMapa = temMapa
     ? _mdBase.itens.filter(function(it){ return mdEntraNaDistribuicao(it, _diaDist); })
     : [];
-  // os rejeitados da Governança entram como mais uma atividade
-  var temRej = !!(_gpRej && _gpRej.itens && _gpRej.itens.length);
-  if (temRej) itensMapa = itensMapa.concat(mdItensRejeitados());
+  // Os rejeitados NÃO entram mais aqui: desde 11/11 cada rejeite já
+  // nasce com dono — quem criou o pedido —, e isso é resolvido na tela
+  // de rejeitados, pelo cruzamento com a medição.
+  var temRej = false;
   var itensReap = temReap ? _mdrBase.itens : [];
   itensMapa.forEach(function(it){ if (!it.origem) it.origem = 'mapa'; });
   var res = mdCalcular(itensMapa, _mdCfg.pessoas, _mdCfg.atividades,
@@ -24103,14 +24389,57 @@ async function mdCarregarDia(data){
   } catch (e) { console.warn('mdCarregarDia:', e); _mdDist = null; }
 }
 
+// AS BASES DA GOVERNANÇA DE QUE A DISTRIBUIÇÃO DEPENDE (11/11).
+//
+// Bug achado quando o André perguntou como distribuir os rejeitados: a
+// linha Rejeitado existia na tabela, mas SEMPRE aparecia com 0 itens e
+// nenhum rejeitado entrava na distribuição. A base deles (_gpRej) só
+// era lida dentro do gpAbrir — a aba Governança de pedidos. Quem
+// abrisse a Distribuição do MAPA direto distribuía sem eles e sem
+// nenhum aviso.
+//
+// E não era só o rejeitado. _gpNeg (as datas de negociação digitadas)
+// e _gpLb (o levelboard) nascem vazios e vêm do mesmo lugar — e são
+// eles que dizem se um item de PATEC ou PATEC Manual já cumpriu os 2
+// dias úteis. Sem eles, item apto ficava de fora como "sem data de
+// negociação".
+//
+// Agora a distribuição carrega as três por conta própria, ao abrir e
+// de novo na hora de distribuir — porque alguém pode ter subido a
+// planilha de rejeitados em outra aba no meio do caminho.
+async function mdCarregarBasesGov(){
+  try {
+    var db = getDB(); if (!db) return;
+    var d = await Promise.all([
+      db.collection('config').doc('governanca_rejeitados').get(),
+      db.collection('config').doc('governanca_negociacao').get(),
+      db.collection('config').doc('governanca_levelboard').get()
+    ]);
+    if (d[0] && d[0].exists) {
+      var R = d[0].data() || {};
+      _gpRej = { itens:R.itens || [], arquivo:R.arquivo || '', aba:R.aba || '',
+                 lidas:+R.lidas || 0, fora:+R.fora || 0, grupos:R.grupos || {},
+                 atualizadoEm:R.atualizadoEm || '', atualizadoPor:R.atualizadoPor || '' };
+    }
+    if (d[1] && d[1].exists) _gpNeg = (d[1].data() || {}).itens || {};
+    if (d[2] && d[2].exists) {
+      var L = d[2].data() || {};
+      _gpLb = { itens:L.itens || {}, arquivo:L.arquivo || '', lidas:+L.lidas || 0,
+                uteis:+L.uteis || 0, atualizadoEm:L.atualizadoEm || '' };
+    }
+  } catch (e) { console.warn('mdCarregarBasesGov:', e); }
+}
+
 async function mdAbrir(){
   await mdPrioCarregar();
   await mdrCarregarLotes();
   await mdrCarregarStatusManual();
+  await mdCarregarBasesGov();
   var el = document.getElementById('md-data');
   if (el && !el.value) el.value = cpHojeISO();
   await mdCarregarCfg();
   mdPintarCfg();
+  mdPintarAtividades();
   await mdCarregarDia(mdDataSel());
   mdRender();
 }
