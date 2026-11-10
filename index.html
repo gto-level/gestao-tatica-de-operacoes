@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 06:40';
+var GTO_BUILD = '11/11 09:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15344,7 +15344,16 @@ function stbLerBU(linhas){
     aa: ix(['ANALISTA_AUTOMATICO']), acomp: ix(['N_ACOMPANHAMENTO','NUMERO_ACOMPANHAMENTO']),
     texto: ix(['TEXTO_BREVE']),
     ped: _cpColOuLetra(cabs, ['NUMERO_PEDIDO','PEDIDO','NUM_PEDIDO','NUMERO_DO_PEDIDO',
-                              'PEDIDO_DE_COMPRAS','PEDIDO_COMPRAS'], 'BD', 'Pedido', r.porLetra)
+                              'PEDIDO_DE_COMPRAS','PEDIDO_COMPRAS'], 'BD', 'Pedido', r.porLetra),
+    // A OPORTUNIDADE e o ITEM DA OP (AO e AP) entraram em 11/11: a tela
+    // de rejeitados passou a tirar RC, item, oportunidade e item da OP
+    // daqui, da BU, e não mais da medição e do levelboard. A BU é a
+    // mesma planilha do Status B e cobre o histórico — o levelboard é a
+    // carteira de hoje e deixava 93 de 93 linhas sem o item da OP.
+    oport:  _cpColOuLetra(cabs, ['NUMERO_OPORTUNIDADE','OPORTUNIDADE','NUM_OPORTUNIDADE'],
+                          'AO', 'Número da oportunidade', r.porLetra),
+    itemOp: _cpColOuLetra(cabs, ['ITEM_OPORTUNIDADE','ITEM_DA_OPORTUNIDADE','ITEM_OP'],
+                          'AP', 'Item da oportunidade', r.porLetra)
   };
   r.colunas = col;
   r.cabPedido = (col.ped >= 0 && cabs[col.ped]) ? cabs[col.ped] : '';
@@ -15354,10 +15363,30 @@ function stbLerBU(linhas){
   }
 
   var pega = function(l, j){ return j === -1 ? '' : String(l[j] == null ? '' : l[j]).trim(); };
+  // o índice que a tela de rejeitados usa: pedido → RC, item,
+  // oportunidade e item da OP. Vale para TODA linha da BU que tenha
+  // pedido, não só as de Status B.
+  r.pedIx = {}; r.pedIxLinhas = 0;
   for (var b = iCab + 1; b < linhas.length; b++) {
     var l = linhas[b] || [];
     if (col.rc !== -1 && !String(l[col.rc] == null ? '' : l[col.rc]).trim()) continue;
     r.lidas++;
+    (function(){
+      var pd = _rjsN(pega(l, col.ped));
+      if (!pd) return;
+      var _rc = _rjsN(pega(l, col.rc)), _sq = _rjsN(pega(l, col.seq));
+      // item da OP vem 0 quando o item não veio de oportunidade
+      var _io = _rjsN(pega(l, col.itemOp));
+      if (_io === '0') _io = '';
+      var _op = _rjsN(pega(l, col.oport));
+      if (_op === '0') _op = '';
+      var lst = r.pedIx[pd] || (r.pedIx[pd] = []);
+      for (var z = 0; z < lst.length; z++) {
+        if (lst[z][0] === _rc && lst[z][1] === _sq) return;
+      }
+      lst.push([_rc, _sq, _op, _io]);
+      r.pedIxLinhas++;
+    })();
     var cart = cpNormCab(pega(l, col.carteira));
     var st   = cpNormCab(pega(l, col.statusRc));
     var aa   = cpNormCab(pega(l, col.aa));
@@ -15410,6 +15439,8 @@ async function stbUpload(file){
     // inclusive de dias anteriores, senão o comentário de cobrança se
     // perderia justamente no item que ninguém tratou.
     var antes = {};
+    // o índice da BU que alimenta a tela de rejeitados
+    try { await rjSalvarBuIx(r); } catch (e9) { console.warn('stbUpload/buIx:', e9); }
     var herdados = await stbPreenchidosAnteriores(stbDataSel());
     Object.keys(herdados).forEach(function(k){ antes[k] = herdados[k]; });
     ((_stbDia || {}).itens || []).forEach(function(i){ antes[i.rc + '|' + i.seq] = i; });
@@ -16290,6 +16321,17 @@ async function mdUpload(file){
       _mdBase = null; mdRenderResumo(); return;
     }
     _mdBase = r;
+    // o MAPA também sabe o item da oportunidade de cada RC: vai para o
+    // mesmo mapa acumulado que alimenta a coluna Item da OP do rejeite
+    try {
+      var _io = {};
+      (r.itens || []).forEach(function(i){
+        if (!i.rc) return;
+        if (!i.itemOp && !i.op) return;
+        _io[rjsChaveLb(i.rc, i.seq)] = [i.itemOp || '', i.op || ''];
+      });
+      if (Object.keys(_io).length) await rjAcumularItemOp(_io);
+    } catch (e4) { console.warn('mdUpload/itemOp:', e4); }
     _mdDist = null;
     await gpSalvarBase(r, mdDataSel());
     mdPintarAtividades();
@@ -16863,6 +16905,171 @@ async function rjSalvarPedIx(med, arquivo){
     _rjPedIx.erro = (e && e.message) ? e.message : 'não consegui gravar';
     return false;
   }
+}
+
+// ── O ITEM DA OPORTUNIDADE ACUMULA (11/11) ───────────────────────
+// O levelboard é a carteira de HOJE: 5.272 linhas, que cobrem 21 das
+// 93 RCs rejeitadas do André. Rejeite é de pedido antigo, que já saiu
+// da carteira — então substituir o mapa a cada upload deixa a coluna
+// quase sempre vazia, que foi o que ele viu.
+//
+// Aqui o mapa SOMA: cada levelboard subido acrescenta as RCs novas e
+// mantém as que já estavam. Em poucos dias a cobertura fecha sozinha.
+// Chave RC|item, valor [item da OP, número da oportunidade].
+var RJIO_PARTE = 700000;
+var RJIO_DOC = 'rejeite_item_op';
+var RJIO_MAX = 300000;
+var _rjItemOp = { itens:null, n:0, novos:0, atualizadoEm:'', erro:'' };
+
+async function rjCarregarItemOp(forcar){
+  if (_rjItemOp.itens && !forcar) return _rjItemOp;
+  try {
+    var db = getDB(); if (!db) { _rjItemOp.itens = _rjItemOp.itens || {}; return _rjItemOp; }
+    var doc = await db.collection('config').doc(RJIO_DOC).get();
+    if (!doc || !doc.exists) { _rjItemOp.itens = {}; return _rjItemOp; }
+    var d = doc.data() || {};
+    var n = Math.max(0, Math.round(+d.partes || 0));
+    var partes = await Promise.all((function(){
+      var out = [];
+      for (var j = 0; j < n; j++) out.push(db.collection('config').doc(RJIO_DOC + '_' + j).get());
+      return out;
+    })());
+    var txt = partes.map(function(p){
+      return (p && p.exists) ? ((p.data() || {}).t || '') : '';
+    }).join('');
+    var ix = {};
+    txt.split('\n').forEach(function(l){
+      if (!l) return;
+      var c = l.split(',');
+      ix[c[0]] = [c[1] || '', c[2] || ''];
+    });
+    _rjItemOp = { itens:ix, n:Object.keys(ix).length, novos:0,
+                  atualizadoEm:d.atualizadoEm || '', erro:'' };
+  } catch (e) {
+    console.warn('rjCarregarItemOp:', e);
+    _rjItemOp.itens = _rjItemOp.itens || {};
+    _rjItemOp.erro = (e && e.message) ? e.message : 'não consegui ler';
+  }
+  return _rjItemOp;
+}
+
+// soma o que veio no levelboard de agora ao que já estava guardado
+async function rjAcumularItemOp(mapaNovo){
+  try {
+    if (!mapaNovo || !Object.keys(mapaNovo).length) return false;
+    await rjCarregarItemOp();
+    var ix = _rjItemOp.itens || (_rjItemOp.itens = {});
+    var novos = 0;
+    Object.keys(mapaNovo).forEach(function(k){
+      var v = mapaNovo[k];
+      var tinha = ix[k];
+      // o levelboard de hoje manda: se o valor mudou, vale o novo
+      if (!tinha) {
+        if (Object.keys(ix).length >= RJIO_MAX) return;
+        novos++;
+      }
+      ix[k] = v;
+    });
+    var linhas = Object.keys(ix).map(function(k){
+      return k + ',' + (ix[k][0] || '') + ',' + (ix[k][1] || '');
+    });
+    var txt = linhas.join('\n'), partes = [];
+    for (var i = 0; i < txt.length; i += RJIO_PARTE) partes.push(txt.slice(i, i + RJIO_PARTE));
+    var db = getDB(); if (!db) return false;
+    await Promise.all(partes.map(function(t, j){
+      return db.collection('config').doc(RJIO_DOC + '_' + j).set({ t:t });
+    }));
+    await db.collection('config').doc(RJIO_DOC).set({
+      v:1, partes: partes.length, n: linhas.length, novos: novos,
+      atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem()
+    });
+    _rjItemOp.n = linhas.length;
+    _rjItemOp.novos = novos;
+    _rjItemOp.atualizadoEm = new Date().toISOString();
+    return true;
+  } catch (e) {
+    console.warn('rjAcumularItemOp:', e);
+    _rjItemOp.erro = (e && e.message) ? e.message : 'não consegui gravar';
+    return false;
+  }
+}
+
+// ── O ÍNDICE DA BU (11/11) ───────────────────────────────────────
+// A pedido do André, RC, item, oportunidade e item da OP da tela de
+// rejeitados passam a vir da BU — a mesma planilha que ele sobe para o
+// Status B —, pela chave do pedido (BU: A, B, AO, AP e BD).
+//
+// Era a saída para o buraco do item da OP: o levelboard é a carteira de
+// hoje e cobria 21 das 93 linhas; a BU cobre 59 dos 61 pedidos dele, com
+// oportunidade e item da OP em 52. A medição e o levelboard continuam
+// como reserva, para o que a BU não tiver.
+//
+// Na BU dele: 59 mil linhas, 33 mil com pedido, 28 mil pedidos
+// distintos — 1,1 MB, duas partes.
+var RJBU_PARTE = 700000;
+var RJBU_DOC = 'rejeite_bu_ix';
+var _rjBuIx = { itens:null, n:0, pedidos:0, arquivo:'', atualizadoEm:'', erro:'' };
+
+async function rjSalvarBuIx(r){
+  try {
+    if (!r || !r.pedIx || !Object.keys(r.pedIx).length) return false;
+    var linhas = [];
+    Object.keys(r.pedIx).forEach(function(p){
+      r.pedIx[p].forEach(function(t){
+        linhas.push(p + ',' + t[0] + ',' + t[1] + ',' + t[2] + ',' + t[3]);
+      });
+    });
+    var txt = linhas.join('\n'), partes = [];
+    for (var i = 0; i < txt.length; i += RJBU_PARTE) partes.push(txt.slice(i, i + RJBU_PARTE));
+    var db = getDB(); if (!db) return false;
+    await Promise.all(partes.map(function(t, j){
+      return db.collection('config').doc(RJBU_DOC + '_' + j).set({ t:t });
+    }));
+    await db.collection('config').doc(RJBU_DOC).set({
+      v:1, partes: partes.length, n: linhas.length,
+      pedidos: Object.keys(r.pedIx).length,
+      atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem()
+    });
+    _rjBuIx = { itens:null, n:linhas.length, pedidos:Object.keys(r.pedIx).length,
+                arquivo:'', atualizadoEm:new Date().toISOString(), erro:'' };
+    return true;
+  } catch (e) {
+    console.warn('rjSalvarBuIx:', e);
+    _rjBuIx.erro = (e && e.message) ? e.message : 'não consegui gravar';
+    return false;
+  }
+}
+
+async function rjCarregarBuIx(forcar){
+  if (_rjBuIx.itens && !forcar) return _rjBuIx;
+  try {
+    var db = getDB(); if (!db) { _rjBuIx.itens = _rjBuIx.itens || {}; return _rjBuIx; }
+    var doc = await db.collection('config').doc(RJBU_DOC).get();
+    if (!doc || !doc.exists) { _rjBuIx.itens = {}; return _rjBuIx; }
+    var d = doc.data() || {};
+    var n = Math.max(0, Math.round(+d.partes || 0));
+    var partes = await Promise.all((function(){
+      var out = [];
+      for (var j = 0; j < n; j++) out.push(db.collection('config').doc(RJBU_DOC + '_' + j).get());
+      return out;
+    })());
+    var txt = partes.map(function(p){
+      return (p && p.exists) ? ((p.data() || {}).t || '') : '';
+    }).join('');
+    var ix = {};
+    txt.split('\n').forEach(function(l){
+      if (!l) return;
+      var c = l.split(',');
+      (ix[c[0]] || (ix[c[0]] = [])).push([c[1] || '', c[2] || '', c[3] || '', c[4] || '']);
+    });
+    _rjBuIx = { itens:ix, n:+d.n || 0, pedidos:+d.pedidos || 0, arquivo:d.arquivo || '',
+                atualizadoEm:d.atualizadoEm || '', erro:'' };
+  } catch (e) {
+    console.warn('rjCarregarBuIx:', e);
+    _rjBuIx.itens = _rjBuIx.itens || {};
+    _rjBuIx.erro = (e && e.message) ? e.message : 'não consegui ler';
+  }
+  return _rjBuIx;
 }
 
 async function rjCarregarPedIx(forcar){
@@ -17714,7 +17921,9 @@ async function gpAbrirCard(ch){
   // quando alguém abre o card que precisa dele, e uma vez por sessão
   if (_gpCard === 'rejeitados' || _gpCard === 'rejsup') {
     if (!_rjPedIx.itens) {
+      await rjCarregarBuIx();
       await rjCarregarPedIx();
+      await rjCarregarItemOp();
       await rjCarregarTratativas();
       gpRender();
     }
@@ -17907,13 +18116,34 @@ function rjResumoHTML(itens){
 // assim. O _rjsMed continua valendo como reforço.
 function rjIxPedido(){
   var ix = {};
-  // 1) o índice novo, de todas as linhas da medição
-  Object.keys((_rjPedIx && _rjPedIx.itens) || {}).forEach(function(p){
-    ix[p] = (_rjPedIx.itens[p] || []).map(function(t){
-      return { rc:t[0], itemRc:t[1], oport:t[2], comprador:'' };
+  // 1) a BU manda: é de lá que vêm RC, item, oportunidade e item da OP
+  //    desde 11/11 (colunas A, B, AO, AP, pela chave do pedido em BD)
+  Object.keys((_rjBuIx && _rjBuIx.itens) || {}).forEach(function(p){
+    ix[p] = (_rjBuIx.itens[p] || []).map(function(t){
+      return { rc:t[0], itemRc:t[1], oport:t[2], itemOp:t[3], comprador:'', de:'BU' };
     });
   });
-  // 2) o do Rejeite Supervisor por cima: ali o comprador vem da linha
+  // 2) a medição completa: o pedido que a BU não tem, e a oportunidade
+  //    que a BU deixou em branco mas a medição conhece
+  Object.keys((_rjPedIx && _rjPedIx.itens) || {}).forEach(function(p){
+    var daMed = _rjPedIx.itens[p] || [];
+    if (ix[p] && ix[p].length) {
+      ix[p].forEach(function(x){
+        if (x.oport) return;
+        for (var i = 0; i < daMed.length; i++) {
+          if (_rjsN(daMed[i][0]) === _rjsN(x.rc) && _rjsN(daMed[i][1]) === _rjsN(x.itemRc)) {
+            if (daMed[i][2]) x.oport = daMed[i][2];
+            return;
+          }
+        }
+      });
+      return;
+    }
+    ix[p] = daMed.map(function(t){
+      return { rc:t[0], itemRc:t[1], oport:t[2], itemOp:'', comprador:'', de:'medição' };
+    });
+  });
+  // 3) o do Rejeite Supervisor por cima: ali o comprador vem da linha
   ((_rjsMed && _rjsMed.itens) || []).forEach(function(o){
     var p = _rjsN(o.pedido);
     if (!p) return;
@@ -17929,7 +18159,7 @@ function rjIxPedido(){
     if (!achou) lista.push({ rc:o.rc, itemRc:o.itemRc, oport:o.oport || '',
                              comprador:o.comprador || '' });
   });
-  // 3) e quem emitiu o pedido fecha o que ficou sem nome
+  // 4) e quem emitiu o pedido fecha o que ficou sem nome
   var porPed = (_gpResp && _gpResp.mapaPed) ? _gpResp.mapaPed : {};
   Object.keys(ix).forEach(function(p){
     var nome = porPed[p] || '';
@@ -17947,13 +18177,22 @@ function rjCompradorDoPedido(ped){
   return porPed[_rjsN(ped)] || '';
 }
 
-// item da oportunidade, do levelboard (AF), pela chave RC|item
-function rjItemOp(rc, item){
+// Item da oportunidade e número da oportunidade, pela chave RC|item.
+// Primeiro o mapa que ACUMULA levelboards; depois o levelboard de hoje,
+// que também guarda o item no terceiro lugar do SLA.
+function rjItemOpPar(rc, item){
+  var k = rjsChaveLb(rc, item);
   try {
-    var v = ((_rjsSla && _rjsSla.itens) || {})[rjsChaveLb(rc, item)];
-    return (v && v[2] != null) ? String(v[2]) : '';
-  } catch (e) { return ''; }
+    var a = ((_rjItemOp && _rjItemOp.itens) || {})[k];
+    if (a && (a[0] || a[1])) return [a[0] || '', a[1] || ''];
+  } catch (e) {}
+  try {
+    var v = ((_rjsSla && _rjsSla.itens) || {})[k];
+    if (v && v[2] != null) return [String(v[2]), ''];
+  } catch (e2) {}
+  return ['', ''];
 }
+function rjItemOp(rc, item){ return rjItemOpPar(rc, item)[0]; }
 
 // AS LINHAS DA TELA — uma por ITEM, não por pedido.
 // Um pedido pode ter várias RCs; as colunas RC, Item, Oportunidade e
@@ -17966,14 +18205,17 @@ function rjLinhasItens(itens){
     var med = ix[ped] || [];
     var base = function(o){
       return {
-        rc: o ? o.rc : '', itemRc: o ? o.itemRc : '', oport: o ? o.oport : '',
-        itemOp: o ? rjItemOp(o.rc, o.itemRc) : '',
+        rc: o ? o.rc : '', itemRc: o ? o.itemRc : '',
+        // sem oportunidade na medição, vale a do levelboard
+        oport: o ? (o.oport || rjItemOpPar(o.rc, o.itemRc)[1]) : '',
+        itemOp: o ? (o.itemOp || rjItemOpPar(o.rc, o.itemRc)[0]) : '',
         pedido: i.pedido, comprador: o ? (o.comprador || '') : '',
         sla: +i.dias || 0,
         // o que a tela antiga mostrava, guardado para o resumo e o Excel
         grupo: i.grupo || '', resp: i.resp || '', forn: i.forn || '',
         tipo: i.tipo || '', dataRej: i.dataRej || '', envios: +i.envios || 0,
         prazo: i.prazo || '', motivoRej: i.motivo || '',
+        de: o ? (o.de || '') : '',
         semDono: !o || !o.comprador
       };
     };
@@ -18099,10 +18341,15 @@ function rjGradeHTML(L, extras, idPrefixo){
   if (_semOp || _semIt) {
     h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:.4rem;line-height:1.6">ℹ '
       + (_semOp ? '<strong>' + cpNum(_semOp) + '</strong> linha(s) sem <strong>Oportunidade</strong>: '
-                + 'a medição não traz esse campo para elas — é pedido que não veio de uma oportunidade. ' : '')
+                + 'o item não veio de uma oportunidade — a BU traz o campo vazio para ele. ' : '')
       + (_semIt ? '<strong>' + cpNum(_semIt) + '</strong> linha(s) sem <strong>Item da OP</strong>: '
-                + 'a RC não está no levelboard atual, que é a carteira de hoje — rejeite de pedido '
-                + 'antigo já saiu dela. Suba um levelboard mais abrangente se precisar dessa coluna.' : '')
+                + (_rjBuIx && _rjBuIx.pedidos
+                    ? 'a BU não traz oportunidade para esses itens — é item que não veio de uma '
+                      + 'oportunidade. (BU com ' + cpNum(_rjBuIx.pedidos) + ' pedido(s).)'
+                    : '<strong style="color:var(--am)">Ainda não li nenhuma BU nesta base.</strong> '
+                      + 'Suba a BU em Controle de Pedidos › Status B — é dela que vêm RC, item, '
+                      + 'oportunidade e item da OP.')
+                : '')
       + '</div>';
   }
   h += '<div id="rj-trat-status" style="font-size:11px;margin-top:.4rem;min-height:14px"></div>'
@@ -18164,8 +18411,9 @@ var RJ_EXTRA_SUP = [
 function rjsLinhasGrade(linhas){
   var out = (linhas || []).map(function(l){
     return {
-      rc:l.rc || '', itemRc:l.itemRc || '', oport:l.oport || '',
-      itemOp: rjItemOp(l.rc, l.itemRc),
+      rc:l.rc || '', itemRc:l.itemRc || '',
+      oport: l.oport || rjItemOpPar(l.rc, l.itemRc)[1],
+      itemOp: rjItemOpPar(l.rc, l.itemRc)[0],
       pedido:l.pedido || '', comprador:l.comprador || '',
       sla: +l.slaPedido || 0,
       padrao:l.padrao || '', justificativa:l.justificativa || '',
@@ -18286,7 +18534,9 @@ async function rjAbrir(){
       // o que faz o rejeite nascer com dono: quem emitiu cada pedido e
       // o índice pedido → RC, item e oportunidade
       await gpCarregarResp();
+      await rjCarregarBuIx(true);
       await rjCarregarPedIx(true);
+      await rjCarregarItemOp(true);
       if (docs[0] && docs[0].exists) {
         var R = docs[0].data() || {};
         _gpRej = { itens:R.itens || [], arquivo:R.arquivo || '', aba:R.aba || '',
@@ -20933,7 +21183,12 @@ function gpLerLevelboard(linhas){
   if (iItNome !== -1 && iItNome !== col.seq) col.itemOp = iItNome;
   else if (iSeqNome !== -1 && iItNome !== -1) col.itemOp = iItNome;
   if (col.itemOp === -1 && cabs.length > 31) { col.itemOp = 31; r.itemOpPorLetra = true; }
+  // o NÚMERO da oportunidade (AE) vem junto: ele tapa parte das linhas
+  // em que a medição não traz a oportunidade
+  col.oport = _cpAchaCol(cabs, ['NUMERO_OPORTUNIDADE','OPORTUNIDADE','NUM_OPORTUNIDADE']);
+  if (col.oport === -1 && cabs.length > 30) { col.oport = 30; r.oportPorLetra = true; }
   r.colunas = col;
+  r.itemOp = {};      // rc|item -> [item da OP, número da oportunidade]
   if (col.rc === -1) { r.aviso = 'Não achei a coluna RC no levelboard.'; return r; }
   var pega = function(l, j){ return j === -1 ? '' : String(l[j] == null ? '' : l[j]).trim(); };
   for (var b = iCab + 1; b < linhas.length; b++) {
@@ -20948,7 +21203,10 @@ function gpLerLevelboard(linhas){
     // quase toda linha do levelboard, e enfiá-los no doc da negociação
     // estouraria o limite de 1 MB do Firestore. Aqui fica só o essencial.
     var slaT  = pega(l, col.sla), idasT = pega(l, col.idas);
-    var itOpT = pega(l, col.itemOp);
+    var itOpT = pega(l, col.itemOp), opT = pega(l, col.oport);
+    if (itOpT !== '' || opT !== '') {
+      r.itemOp[rjsChaveLb(rc, pega(l, col.seq))] = [itOpT, opT];
+    }
     if (slaT !== '' || idasT !== '' || itOpT !== '') {
       var kS = rjsChaveLb(rc, pega(l, col.seq));
       if (!r.sla[kS]) {
@@ -20992,6 +21250,9 @@ async function gpUploadLevelboard(file){
               atualizadoEm:new Date().toISOString(), atualizadoPor:cpQuem() };
     var ok = await gpGravarLb();
     var okSla = await rjsGravarSla(r, file.name);
+    // o item da oportunidade SOMA ao que já estava: o levelboard de
+    // hoje não cobre rejeite de pedido antigo
+    var okIo = await rjAcumularItemOp(r.itemOp);
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ <strong>' + cpEsc(file.name) + '</strong> — '
       + cpNum(r.lidas) + ' linhas, ' + cpNum(r.uteis) + ' com negociação/fornecedor/NM'
       + (ok ? '.' : ' <span style="color:var(--am)">(não consegui gravar no Firebase)</span>')
