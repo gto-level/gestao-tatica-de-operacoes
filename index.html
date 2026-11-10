@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 14:30';
+var GTO_BUILD = '11/11 15:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15457,6 +15457,7 @@ async function stbUpload(file){
       i.acomp      = a.acomp || i.acomp;
       i.comentario = a.comentario || '';
       i.nome       = a.nome || '';
+      i.conclusao  = a.conclusao || '';
       if (a.comentario || a.nome || a.marcado) reaproveitados++;
     });
     r.reaproveitados = reaproveitados;
@@ -15609,14 +15610,15 @@ function _stbHtmlLista(suf){
     + '<div style="overflow:auto;max-height:560px"><table>'
     + '<thead><tr><th style="text-align:center">Linha duplicada</th><th>RC</th><th>Item</th>'
     + '<th>Oportunidade</th><th>Item da OP</th>'
-    + '<th>Grupo Comprador</th>'
-    // vinham só no card da Governança; agora a tabela é uma só
+    // Grupo Comprador saiu em 11/11: é sempre o mesmo (L19) e só
+    // ocupava espaço. O arquivo do script continua levando a coluna.
     + '<th>Analista do pedido</th>'
     + '<th style="text-align:center">Em B desde</th>'
     + '<th style="text-align:center">Dias parado</th>'
     + '<th title="Quem vai tratar — só aparece aqui no painel">Nome</th>'
     + '<th title="Só aparece aqui no painel — não entra no arquivo do script">Comentário</th>'
-    + '<th>Nº Acompanhamento</th><th>Novo item</th><th>Texto</th></tr></thead><tbody>';
+    + '<th>Nº Acompanhamento</th><th>Conclusão</th><th>Novo item</th><th>Texto</th>'
+    + '</tr></thead><tbody>';
 
   vis.forEach(function(v){
     var i = v.i, k = v.k;
@@ -15627,7 +15629,6 @@ function _stbHtmlLista(suf){
       + '<td style="font-weight:600">' + cpEsc(i.seq) + '</td>'
       + '<td style="font-size:10.5px">' + cpEsc(i.oport || '—') + '</td>'
       + '<td>' + cpEsc(i.itemOp || '—') + '</td>'
-      + '<td style="color:var(--tx2)">' + STB_GRUPO + '</td>'
       + (function(){
           var ri = {}, dt = '';
           try { ri = gpRespInfo(i.rc, i.seq, i.pedido) || {}; } catch (e) {}
@@ -15657,6 +15658,19 @@ function _stbHtmlLista(suf){
       +   'background:' + ((i.comentario || '') ? 'var(--amc)' : '#fff') + '"></td>'
       + '<td><input type="text" value="' + cpEsc(i.acomp) + '" onchange="stbCampo(' + k + ', \'acomp\', this.value)"'
       +   ' style="width:120px;font-size:11.5px;padding:3px 6px;border:1px solid var(--brd);border-radius:5px"></td>'
+      + '<td><select onchange="stbConclusao(' + k + ', this.value)"'
+      +   ' style="font-size:11px;padding:3px 6px;border-radius:6px;border:1.5px solid '
+      +     ((i.conclusao || '') ? 'var(--vd)' : 'var(--brd)') + ';font-weight:'
+      +     ((i.conclusao || '') ? '700' : '400') + '">'
+      +   '<option value="">— escolha —</option>'
+      +   (i.conclusao && STB_CONCLUSOES.indexOf(i.conclusao) === -1
+          ? '<option value="' + cpEsc(i.conclusao) + '" selected>' + cpEsc(i.conclusao)
+            + ' (não está mais na lista)</option>' : '')
+      +   STB_CONCLUSOES.map(function(o){
+            return '<option value="' + cpEsc(o) + '"'
+                 + (i.conclusao === o ? ' selected' : '') + '>' + cpEsc(o) + '</option>';
+          }).join('')
+      + '</select></td>'
       + '<td><input type="text" value="' + cpEsc(i.novoItem) + '" onchange="stbCampo(' + k + ', \'novoItem\', this.value)"'
       +   ' style="width:70px;font-size:11.5px;padding:3px 6px;border:1px solid var(--brd);border-radius:5px;font-weight:700"></td>'
       + '<td style="font-size:10.5px;color:var(--tx2);white-space:normal;min-width:330px" data-stbtxt="' + k + '">'
@@ -15693,6 +15707,27 @@ function stbCampo(k, campo, valor){
 function stbMarcar(k, valor){
   if (!_stbDia || !_stbDia.itens[k]) return;
   _stbDia.itens[k].marcado = !!valor;
+  // a caixinha e a Conclusão andam juntas: desmarcar à mão não pode
+  // deixar "Linha duplicada" escrito ali
+  if (!valor && _stbDia.itens[k].conclusao === 'Linha duplicada') {
+    _stbDia.itens[k].conclusao = '';
+  }
+  stbRender();
+  stbSalvar();
+}
+
+// ── A CONCLUSÃO DO STATUS B (11/11) ──────────────────────────────
+// Pedido do André. "Linha duplicada" é a mesma coisa que a caixinha
+// que escolhe o item para o arquivo do script, então as duas andam
+// juntas: escolher marca, escolher qualquer outra desmarca — porque
+// devolução, republicação e PATEC não vão para o script.
+var STB_CONCLUSOES = ['Linha duplicada', 'Devolução', 'Republicação', 'PATEC'];
+
+function stbConclusao(k, valor){
+  if (!_stbDia || !_stbDia.itens[k]) return;
+  var v = String(valor == null ? '' : valor).trim();
+  _stbDia.itens[k].conclusao = v;
+  _stbDia.itens[k].marcado = (v === 'Linha duplicada');
   stbRender();
   stbSalvar();
 }
@@ -15701,8 +15736,14 @@ function stbMarcar(k, valor){
 // marca só os itens dela.
 function stbMarcarTodos(valor){
   if (!_stbDia) return;
-  if (valor) stbVisiveis().forEach(function(v){ v.i.marcado = true; });
-  else _stbDia.itens.forEach(function(i){ i.marcado = false; });
+  // a caixinha e a Conclusão andam juntas também aqui
+  if (valor) stbVisiveis().forEach(function(v){
+    v.i.marcado = true; v.i.conclusao = 'Linha duplicada';
+  });
+  else _stbDia.itens.forEach(function(i){
+    i.marcado = false;
+    if (i.conclusao === 'Linha duplicada') i.conclusao = '';
+  });
   stbRender();
   stbSalvar();
 }
@@ -15767,7 +15808,8 @@ async function stbSalvar(){
                  acomp:String(i.acomp||''), nome:String(i.nome||''),
                  comentario:String(i.comentario||''), marcado:!!i.marcado,
                  textoBreve:String(i.textoBreve||''), pedido:String(i.pedido||''),
-                 oport:String(i.oport||''), itemOp:String(i.itemOp||'') };
+                 oport:String(i.oport||''), itemOp:String(i.itemOp||''),
+                 conclusao:String(i.conclusao||'') };
       }),
       atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem()
     });
@@ -15796,7 +15838,8 @@ async function stbPreenchidosAnteriores(data){
       (dia.itens || []).forEach(function(i){
         // só herda o que você realmente mexeu: comentário ou marcação.
         // O nº de acompanhamento sozinho não conta — ele já vem da BU.
-        if (!(i.comentario || '').trim() && !(i.nome || '').trim() && !i.marcado) return;
+        if (!(i.comentario || '').trim() && !(i.nome || '').trim() && !i.marcado
+            && !(i.conclusao || '').trim()) return;
         out[i.rc + '|' + i.seq] = i;   // o dia mais recente prevalece
       });
     });
