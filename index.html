@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 09:10';
+var GTO_BUILD = '11/11 10:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15406,7 +15406,11 @@ function stbLerBU(linhas){
       comentario: '',          // só do dash — nunca vai para o script
       marcado: false,
       textoBreve: pega(l, col.texto),
-      pedido: stbInt(l[col.ped])
+      pedido: stbInt(l[col.ped]),
+      // a oportunidade e o item dela, das colunas AO e AP — o André
+      // pediu as quatro colunas no Status B em 11/11
+      oport: (function(v){ return (v === '0') ? '' : v; })(_rjsN(pega(l, col.oport))),
+      itemOp: (function(v){ return (v === '0') ? '' : v; })(_rjsN(pega(l, col.itemOp)))
     });
   }
   if (!r.itens.length && !r.aviso) {
@@ -15578,6 +15582,7 @@ function stbRenderLista(){
 
     + '<div style="overflow:auto;max-height:560px"><table>'
     + '<thead><tr><th style="text-align:center">Linha duplicada</th><th>RC</th><th>Item</th>'
+    + '<th>Oportunidade</th><th>Item da OP</th>'
     + '<th>Grupo Comprador</th>'
     + '<th title="Quem vai tratar — só aparece aqui no painel">Nome</th>'
     + '<th title="Só aparece aqui no painel — não entra no arquivo do script">Comentário</th>'
@@ -15590,6 +15595,8 @@ function stbRenderLista(){
       +   (i.marcado ? ' checked' : '') + ' style="width:16px;height:16px;cursor:pointer"></td>'
       + '<td style="font-weight:700;color:var(--az)">' + cpEsc(i.rc) + '</td>'
       + '<td style="font-weight:600">' + cpEsc(i.seq) + '</td>'
+      + '<td style="font-size:10.5px">' + cpEsc(i.oport || '—') + '</td>'
+      + '<td>' + cpEsc(i.itemOp || '—') + '</td>'
       + '<td style="color:var(--tx2)">' + STB_GRUPO + '</td>'
       + '<td><input type="text" value="' + cpEsc(i.nome || '') + '" placeholder="nome"'
       +   ' onchange="stbCampo(' + k + ', \'nome\', this.value)" list="stb-nomes"'
@@ -15707,7 +15714,8 @@ async function stbSalvar(){
         return { rc:String(i.rc||''), seq:String(i.seq||''), novoItem:String(i.novoItem||''),
                  acomp:String(i.acomp||''), nome:String(i.nome||''),
                  comentario:String(i.comentario||''), marcado:!!i.marcado,
-                 textoBreve:String(i.textoBreve||''), pedido:String(i.pedido||'') };
+                 textoBreve:String(i.textoBreve||''), pedido:String(i.pedido||''),
+                 oport:String(i.oport||''), itemOp:String(i.itemOp||'') };
       }),
       atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem()
     });
@@ -17030,8 +17038,9 @@ async function rjSalvarBuIx(r){
       pedidos: Object.keys(r.pedIx).length,
       atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem()
     });
-    _rjBuIx = { itens:null, n:linhas.length, pedidos:Object.keys(r.pedIx).length,
+    _rjBuIx = { itens:r.pedIx, n:linhas.length, pedidos:Object.keys(r.pedIx).length,
                 arquivo:'', atualizadoEm:new Date().toISOString(), erro:'' };
+    _rjBuRc = null;
     return true;
   } catch (e) {
     console.warn('rjSalvarBuIx:', e);
@@ -17064,6 +17073,7 @@ async function rjCarregarBuIx(forcar){
     });
     _rjBuIx = { itens:ix, n:+d.n || 0, pedidos:+d.pedidos || 0, arquivo:d.arquivo || '',
                 atualizadoEm:d.atualizadoEm || '', erro:'' };
+    _rjBuRc = null;
   } catch (e) {
     console.warn('rjCarregarBuIx:', e);
     _rjBuIx.itens = _rjBuIx.itens || {};
@@ -18180,8 +18190,32 @@ function rjCompradorDoPedido(ped){
 // Item da oportunidade e número da oportunidade, pela chave RC|item.
 // Primeiro o mapa que ACUMULA levelboards; depois o levelboard de hoje,
 // que também guarda o item no terceiro lugar do SLA.
+// O índice da BU, virado do avesso: RC|item → [item da OP, oportunidade].
+// É assim que o Rejeite Supervisor usa a BU — lá a linha já vem com RC e
+// item da medição, e a chave do pedido não ajuda.
+var _rjBuRc = null;
+function rjBuPorRcItem(){
+  if (_rjBuRc) return _rjBuRc;
+  var out = {};
+  var ix = (_rjBuIx && _rjBuIx.itens) || {};
+  Object.keys(ix).forEach(function(p){
+    (ix[p] || []).forEach(function(t){
+      var k = rjsChaveLb(t[0], t[1]);
+      if (!k || out[k]) return;
+      if (!t[2] && !t[3]) return;
+      out[k] = [t[3] || '', t[2] || ''];   // [item da OP, oportunidade]
+    });
+  });
+  _rjBuRc = out;
+  return out;
+}
+
 function rjItemOpPar(rc, item){
   var k = rjsChaveLb(rc, item);
+  try {
+    var bu = rjBuPorRcItem()[k];
+    if (bu && (bu[0] || bu[1])) return [bu[0] || '', bu[1] || ''];
+  } catch (e0) {}
   try {
     var a = ((_rjItemOp && _rjItemOp.itens) || {})[k];
     if (a && (a[0] || a[1])) return [a[0] || '', a[1] || ''];
