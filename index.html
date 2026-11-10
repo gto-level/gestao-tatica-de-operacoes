@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/11 20:25';
+var GTO_BUILD = '10/11 22:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15748,13 +15748,57 @@ var MD_STATUS = [
 // As que o MAPA do dia alimenta; rejeitado e reap têm fonte própria.
 function mdStatusDoMapa(ch){ return ch !== 'rejeitado' && ch !== 'reap'; }
 
+// ── ABRIR PATEC UNIFICADO (10/11) ────────────────────────────────
+// Pedido do André: na hora de distribuir ele quer UMA linha, não duas.
+//
+// O que virou um só foi a LINHA DA DISTRIBUIÇÃO — uma marcação de quem
+// atua, um itens/dia, uma cota. O item continua carregando o status
+// que veio do MAPA, então o Excel de controle, as colunas do resultado
+// e os cards da Governança seguem dizendo qual dos dois é cada um.
+//
+// Daí as duas listas: MD_STATUS é o que o item É; MD_ATIVIDADES é como
+// a equipe se organiza para tratar.
+var MD_ABRIR_UNI = 'patecabrir';
+var MD_ABRIR_MEMBROS = ['patecgm', 'pateciden'];
+
+// o status do item → a linha de distribuição dele
+function mdAtvDe(ch){ return MD_ABRIR_MEMBROS.indexOf(ch) !== -1 ? MD_ABRIR_UNI : ch; }
+// a linha de distribuição → os status que ela cobre
+function mdStatusDaAtv(ch){ return ch === MD_ABRIR_UNI ? MD_ABRIR_MEMBROS.slice() : [ch]; }
+// listas gravadas antes de 10/11 têm 'patecgm'/'pateciden' soltos
+function mdAtvNorm(lista){
+  var out = [];
+  (lista || []).forEach(function(ch){
+    var a = mdAtvDe(ch);
+    if (out.indexOf(a) === -1) out.push(a);
+  });
+  return out;
+}
+
+var MD_ATIVIDADES = (function(){
+  var out = [], posto = false;
+  MD_STATUS.forEach(function(x){
+    if (MD_ABRIR_MEMBROS.indexOf(x.chave) === -1) { out.push(x); return; }
+    if (posto) return;
+    posto = true;
+    out.push({ chave: MD_ABRIR_UNI, nome: 'Abrir PATEC Unificado', cor: 'var(--vd)' });
+  });
+  return out;
+})();
+function mdAtvNome(ch){
+  for (var i = 0; i < MD_ATIVIDADES.length; i++)
+    if (MD_ATIVIDADES[i].chave === ch) return MD_ATIVIDADES[i].nome;
+  return mdStatusNome(ch);
+}
+
 // Quantos itens cada atividade tem hoje, de onde quer que venham.
 function mdItensDaAtividade(ch){
   if (ch === 'rejeitado') return (_gpRej && _gpRej.itens) ? _gpRej.itens.length : 0;
   if (ch === 'reap') return (_mdrBase && _mdrBase.itens) ? _mdrBase.itens.length : 0;
-  var n = 0;
+  // a linha unificada conta os dois Abrir PATEC juntos
+  var quais = mdStatusDaAtv(ch), n = 0;
   if (_mdBase && _mdBase.itens) {
-    _mdBase.itens.forEach(function(i){ if (i.statusChave === ch) n++; });
+    _mdBase.itens.forEach(function(i){ if (quais.indexOf(i.statusChave) !== -1) n++; });
   }
   return n;
 }
@@ -15834,7 +15878,25 @@ var _mdCfg  = { pessoas:[], atividades:{}, cotaDia:0, cotaSemana:0, dias:5, porA
 // O comprador faz X itens por dia, durante Y dias úteis. A cota da
 // semana é a multiplicação dos dois — não é um número que ele digita.
 function mdCotaAtv(ch){
-  var c = (_mdCfg.porAtividade || {})[ch] || {};
+  var pa = _mdCfg.porAtividade || {};
+  var c = pa[mdAtvDe(ch)] || {};
+  // MIGRAÇÃO (10/11): quem já tinha as duas linhas de Abrir PATEC
+  // ajustadas (5/dia cada) não pode perder metade da capacidade ao
+  // virar uma linha só. Sem valor próprio para a linha unificada,
+  // somam-se os itens/dia das duas antigas e vale o maior prazo.
+  if (mdAtvDe(ch) === MD_ABRIR_UNI && !(+c.porDia > 0) && !(+c.dias > 0)) {
+    var soma = 0, prazo = 0;
+    MD_ABRIR_MEMBROS.forEach(function(m){
+      var v = pa[m] || {};
+      if (+v.porDia > 0) soma += Math.round(+v.porDia);
+      if (+v.dias > 0 && Math.round(+v.dias) > prazo) prazo = Math.round(+v.dias);
+    });
+    if (soma > 0 || prazo > 0) {
+      c = {};
+      if (soma > 0) c.porDia = soma;
+      if (prazo > 0) c.dias = prazo;
+    }
+  }
   var proprio = { porDia: Math.round(+c.porDia || 0) > 0, dias: Math.round(+c.dias || 0) > 0 };
   var padraoDia = Math.round(+_mdCfg.cotaDia || 0);
   var porDia = proprio.porDia ? Math.round(+c.porDia) : (padraoDia > 0 ? padraoDia : 10);
@@ -15843,9 +15905,11 @@ function mdCotaAtv(ch){
   return { porDia: porDia, dias: dias, semana: porDia * dias, proprio: proprio };
 }
 function mdPessoasDaAtividade(ch){
-  var out = [];
+  var alvo = mdAtvDe(ch), out = [];
   (_mdCfg.pessoas || []).forEach(function(n){
-    if ((_mdCfg.atividades[n] || []).indexOf(ch) !== -1) out.push(n);
+    // mdAtvNorm cobre as marcações gravadas antes de 10/11, quando os
+    // dois Abrir PATEC eram linhas separadas
+    if (mdAtvNorm(_mdCfg.atividades[n]).indexOf(alvo) !== -1) out.push(n);
   });
   return out;
 }
@@ -16183,13 +16247,13 @@ function mdPintarAtividades(){
     + '<th style="text-align:right" title="Itens/dia × dias úteis">Dá para fazer</th>'
     + '<th>Cabe?</th></tr></thead><tbody>';
 
-  MD_STATUS.forEach(function(x){
+  MD_ATIVIDADES.forEach(function(x){
     var itens = mdItensDaAtividade(x.chave);
     var cota  = mdCotaAtv(x.chave);
     var quem  = [];
     nomes.forEach(function(n){
       var marcado = (_mdCfg.atividades && _mdCfg.atividades[n])
-        ? _mdCfg.atividades[n].indexOf(x.chave) !== -1
+        ? mdAtvNorm(_mdCfg.atividades[n]).indexOf(x.chave) !== -1
         : true;   // comprador novo começa atuando em tudo
       if (marcado) quem.push(n);
     });
@@ -16202,7 +16266,7 @@ function mdPintarAtividades(){
       + '<td style="text-align:right;font-weight:700">' + cpNum(itens) + '</td>';
     nomes.forEach(function(n, i2){
       var marcado = (_mdCfg.atividades && _mdCfg.atividades[n])
-        ? _mdCfg.atividades[n].indexOf(x.chave) !== -1 : true;
+        ? mdAtvNorm(_mdCfg.atividades[n]).indexOf(x.chave) !== -1 : true;
       h += '<td style="text-align:center"><input type="checkbox" id="md-at-' + i2 + '-' + x.chave + '"'
         + (marcado ? ' checked' : '') + ' onchange="mdSalvarEquipe()"'
         + ' style="width:16px;height:16px;cursor:pointer"></td>';
@@ -16232,7 +16296,7 @@ function mdPintarAtividades(){
 
 function mdQuadroDaTela(){
   var out = {};
-  MD_STATUS.forEach(function(x){
+  MD_ATIVIDADES.forEach(function(x){
     var s1 = document.getElementById('md-dia-' + x.chave);
     var d1 = document.getElementById('md-dias-' + x.chave);
     var vS = s1 ? String(s1.value == null ? '' : s1.value).trim() : '';
@@ -16251,7 +16315,7 @@ function mdAtividadesDaTela(nomes){
   var out = {};
   nomes.forEach(function(n, i){
     var lista = [];
-    MD_STATUS.forEach(function(x){
+    MD_ATIVIDADES.forEach(function(x){
       var el = document.getElementById('md-at-' + i + '-' + x.chave);
       if (el && el.checked) lista.push(x.chave);
     });
@@ -22689,9 +22753,13 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   }
 
   // quantos itens do bloco esse comprador realmente faz
+  // a linha de distribuição pode cobrir mais de um status: o Abrir
+  // PATEC Unificado responde pelos dois que vêm do MAPA
   var cobre = function(nome, b){
-    var at = atividades[nome] || [], c = 0;
-    at.forEach(function(ch){ c += (b.porStatus[ch] || 0); });
+    var at = mdAtvNorm(atividades[nome]), c = 0;
+    at.forEach(function(ch){
+      mdStatusDaAtv(ch).forEach(function(s){ c += (b.porStatus[s] || 0); });
+    });
     return c;
   };
 
@@ -22703,14 +22771,20 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
                                     res.semAtividade.push(it); });
       return;
     }
-    // cabe se, nas atividades deste bloco que são dele, ainda há espaço
+    // cabe se, nas atividades deste bloco que são dele, ainda há espaço.
+    // Conta por LINHA de distribuição, não por status: no Abrir PATEC
+    // Unificado o que vale é a soma dos dois contra a cota da linha.
     var cand = quemFaz.filter(function(n){
-      for (var i = 0; i < b.statuses.length; i++) {
-        var ch = b.statuses[i];
-        if ((atividades[n] || []).indexOf(ch) === -1) continue;
-        if ((res.pessoas[n].porStatus[ch] || 0) < cotaCh(ch)) return true;
-      }
-      return false;
+      var at = mdAtvNorm(atividades[n]), p = res.pessoas[n], temEspaco = false;
+      (b.statuses || []).forEach(function(ch){
+        if (temEspaco) return;
+        var a = mdAtvDe(ch);
+        if (at.indexOf(a) === -1) return;
+        var tem = 0;
+        mdStatusDaAtv(a).forEach(function(s){ tem += (p.porStatus[s] || 0); });
+        if (tem < cotaCh(a)) temEspaco = true;
+      });
+      return temEspaco;
     });
     if (!cand.length) {
       b.itens.forEach(function(it){ it.pessoa = ''; it.dia = 0; it.foraAtividade = false;
@@ -22742,11 +22816,11 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     });
 
     var pm = res.pessoas[melhor];
-    var at = atividades[melhor] || [];
+    var at = mdAtvNorm(atividades[melhor]);
     pm.blocos.push(b);
     b.itens.forEach(function(it){
       it.pessoa = melhor;
-      it.foraAtividade = at.indexOf(it.statusChave) === -1;
+      it.foraAtividade = at.indexOf(mdAtvDe(it.statusChave)) === -1;
       pm.itens.push(it); pm.n++;
       pm.porStatus[it.statusChave] = (pm.porStatus[it.statusChave] || 0) + 1;
       if (it.tipo === 'L' || it.tipo === 'Q') {
@@ -22873,11 +22947,15 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   // quatro pessoas a 25 fecham acima de 100.
   // Isto era invisível: 4 × 25 + 4 × 25 = 200 de cota e 219 distribuídos,
   // sem nada na tela explicando a diferença.
+  // A comparação é por LINHA de distribuição, não por status: a cota do
+  // Abrir PATEC Unificado vale para os dois juntos. Conferir um de cada
+  // vez nunca acusaria o estouro — 27 + 27 contra uma cota de 50.
   res.acimaCota = [];
   (pessoas || []).forEach(function(n){
     var p = res.pessoas[n];
-    MD_STATUS.forEach(function(x){
-      var tem = p.porStatus[x.chave] || 0;
+    MD_ATIVIDADES.forEach(function(x){
+      var tem = 0;
+      mdStatusDaAtv(x.chave).forEach(function(sc){ tem += (p.porStatus[sc] || 0); });
       var c = cotaCh(x.chave);
       if (tem > c) res.acimaCota.push({ nome:n, chave:x.chave, n:tem, cota:c });
     });
@@ -23073,7 +23151,7 @@ function mdExportarDistribuicao(){
 function mdAvisoDiasCurtos(res){
   var n = (res && res.dias) || 0;
   if (!n) return '';
-  var curtas = MD_STATUS.filter(function(x){
+  var curtas = MD_ATIVIDADES.filter(function(x){
     try {
       if (!mdItensDaAtividade(x.chave)) return false;
       if (!mdPessoasDaAtividade(x.chave).length) return false;
@@ -23111,7 +23189,7 @@ function mdAvisoAcimaCota(res){
   return '<div style="font-size:11px;color:var(--am);margin-top:4px">⚖ Acima da cota: '
     + Object.keys(porAtv).map(function(ch){
         var o = porAtv[ch];
-        return '<strong>' + cpEsc(mdStatusNome(ch)) + '</strong> (cota ' + o.cota
+        return '<strong>' + cpEsc(mdAtvNome(ch)) + '</strong> (cota ' + o.cota
              + ' por pessoa) — ' + cpEsc(o.quem.join(' · '))
              + ', ' + cpNum(o.soma) + ' a mais no total';
       }).join(' · ')
@@ -23135,7 +23213,7 @@ async function mdDistribuir(){
     }
     await mdSalvarEquipe();
   }
-  var temAlguem = MD_STATUS.some(function(x){ return mdPessoasDaAtividade(x.chave).length > 0; });
+  var temAlguem = MD_ATIVIDADES.some(function(x){ return mdPessoasDaAtividade(x.chave).length > 0; });
   if (!temAlguem) {
     if (st) st.innerHTML = '<span style="color:var(--vm)">Marque na tabela quem atua em cada atividade.</span>';
     return;
@@ -23321,7 +23399,7 @@ function mdRenderEquipe(){
     + '<th style="text-align:right" title="Itens de atividade que não é dele, que vieram junto com a oportunidade">Fora</th>'
     + '<th style="width:120px">Carga</th></tr></thead><tbody>';
   r.lista.forEach(function(p){
-    var ats = (d.atividades[p.nome] || []).map(function(c){ return mdStatusNome(c).split(',')[0]; });
+    var ats = mdAtvNorm(d.atividades[p.nome]).map(function(c){ return mdAtvNome(c).split(',')[0]; });
     h += '<tr><td style="font-weight:600">' + cpEsc(p.nome) + '</td>'
       + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(ats.join(' · ') || '—') + '</td>'
       + '<td style="text-align:right;font-weight:700">' + cpNum(p.n) + '</td>';
@@ -23545,7 +23623,13 @@ async function mdCarregarCfg(){
     var doc = await db.collection('config').doc('distribuicao_mapa_cfg').get();
     if (doc && doc.exists) {
       var d = doc.data() || {};
-      _mdCfg = { pessoas:d.pessoas||[], qtdPessoas:+d.qtdPessoas||0, atividades:d.atividades||{},
+      // as marcações gravadas antes de 10/11 trazem os dois Abrir PATEC
+      // separados; aqui já entram como a linha unificada
+      var ats = {};
+      Object.keys(d.atividades || {}).forEach(function(n){
+        ats[n] = mdAtvNorm(d.atividades[n]);
+      });
+      _mdCfg = { pessoas:d.pessoas||[], qtdPessoas:+d.qtdPessoas||0, atividades:ats,
                  porAtividade:d.porAtividade||{}, dataDist:d.dataDist||'',
                  cotaDia:+d.cotaDia||0, cotaSemana:+d.cotaSemana||0, dias:+d.dias||5 };
     }
