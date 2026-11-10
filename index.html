@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 12:45';
+var GTO_BUILD = '11/11 14:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15519,14 +15519,40 @@ function stbRenderResumo(){
     + '</div>';
 }
 
+// A MESMA PLANILHA NAS DUAS TELAS (11/11).
+//
+// O André pediu a tabela do Controle de Pedidos › Status B igualzinha
+// dentro da Governança, com filtros e exportação. Em vez de manter
+// duas tabelas parecidas — que foi o que deu errado antes —, a lista é
+// UMA função, desenhada nos dois lugares. Os ids levam um sufixo por
+// tela, senão o filtro de uma mexeria na outra.
+var STB_ALVOS = [ { id:'stb-lista', suf:'' }, { id:'gp-sb-lista', suf:'-g' } ];
+
 function stbRenderLista(){
-  var box = document.getElementById('stb-lista');
-  if (!box) return;
-  if (!_stbDia || !(_stbDia.itens || []).length) { box.innerHTML = ''; return; }
+  STB_ALVOS.forEach(function(a){
+    var box = document.getElementById(a.id);
+    if (!box) return;
+    box.innerHTML = (!_stbDia || !(_stbDia.itens || []).length) ? '' : _stbHtmlLista(a.suf);
+  });
+}
+
+function _stbHtmlLista(suf){
+  suf = suf || '';
   var d = _stbDia;
   var marcados = d.itens.filter(function(i){ return i.marcado; }).length;
 
   var vis = stbVisiveis();
+  // o mais parado em cima — é por onde se começa. Era a ordem do card
+  // da Governança e passou a valer nas duas telas, já que a lista é a
+  // mesma; quem não tem histórico de entrada vai para o fim.
+  vis = vis.slice().sort(function(a, b){
+    var da = null, db2 = null;
+    try { da = gpSBDias(a.i); } catch (e) {}
+    try { db2 = gpSBDias(b.i); } catch (e2) {}
+    if (da !== db2) return (db2 == null ? -1 : db2) - (da == null ? -1 : da);
+    return String(a.i.rc).localeCompare(String(b.i.rc))
+        || String(a.i.seq).localeCompare(String(b.i.seq));
+  });
   var nomes = stbNomes();
   var filtrando = !!(_stbFiltroNome || _stbBusca);
 
@@ -15560,7 +15586,7 @@ function stbRenderLista(){
     +     '</select></div>'
     +   '<div><label style="display:block;font-size:10px;color:var(--tx2);font-weight:600;margin-bottom:3px">'
     +     'BUSCAR</label>'
-    +     '<input type="text" id="stb-busca" value="' + cpEsc(_stbBusca) + '" placeholder="RC, nome, comentário"'
+    +     '<input type="text" id="stb-busca' + suf + '" value="' + cpEsc(_stbBusca) + '" placeholder="RC, nome, comentário"'
     +       ' oninput="stbBuscar(this.value)" style="width:200px;font-size:12.5px;padding:5px 9px;'
     +       'border:1.5px solid var(--brd);border-radius:6px"></div>'
     +   (filtrando ? '<button class="btn btn-s" onclick="stbLimparFiltro()">✕ Limpar filtro</button>' : '')
@@ -15572,9 +15598,9 @@ function stbRenderLista(){
     +   'background:var(--cin);border:1px solid var(--brd);border-radius:8px;padding:9px 11px">'
     +   '<div><label style="display:block;font-size:10px;color:var(--tx2);font-weight:600;margin-bottom:3px">'
     +     'NÚMERO DE ACOMPANHAMENTO — APLICAR A TODOS</label>'
-    +     '<input type="text" id="stb-acomp-todos" placeholder="." '
+    +     '<input type="text" id="stb-acomp-todos' + suf + '" placeholder="." '
     +       'style="width:190px;font-size:12.5px;padding:5px 9px;border:1.5px solid var(--brd);border-radius:6px"></div>'
-    +   '<button class="btn btn-s" onclick="stbAplicarAcomp()">Aplicar</button>'
+    +   '<button class="btn btn-s" onclick="stbAplicarAcomp(\'' + suf + '\')">Aplicar</button>'
     +   '<div style="font-size:10.5px;color:var(--tx2);flex:1;min-width:220px">'
     +     'O <strong>novo item</strong> já vem sugerido como o próximo (10 → 20). '
     +     'Altere onde precisar: é ele que fecha o texto.</div>'
@@ -15584,6 +15610,10 @@ function stbRenderLista(){
     + '<thead><tr><th style="text-align:center">Linha duplicada</th><th>RC</th><th>Item</th>'
     + '<th>Oportunidade</th><th>Item da OP</th>'
     + '<th>Grupo Comprador</th>'
+    // vinham só no card da Governança; agora a tabela é uma só
+    + '<th>Analista do pedido</th>'
+    + '<th style="text-align:center">Em B desde</th>'
+    + '<th style="text-align:center">Dias parado</th>'
     + '<th title="Quem vai tratar — só aparece aqui no painel">Nome</th>'
     + '<th title="Só aparece aqui no painel — não entra no arquivo do script">Comentário</th>'
     + '<th>Nº Acompanhamento</th><th>Novo item</th><th>Texto</th></tr></thead><tbody>';
@@ -15598,8 +15628,27 @@ function stbRenderLista(){
       + '<td style="font-size:10.5px">' + cpEsc(i.oport || '—') + '</td>'
       + '<td>' + cpEsc(i.itemOp || '—') + '</td>'
       + '<td style="color:var(--tx2)">' + STB_GRUPO + '</td>'
+      + (function(){
+          var ri = {}, dt = '';
+          try { ri = gpRespInfo(i.rc, i.seq, i.pedido) || {}; } catch (e) {}
+          try { dt = gpSBDesde(i); } catch (e2) {}
+          var dias = '';
+          try { dias = gpDiasHtml(gpSBDias(i)); } catch (e3) { dias = '—'; }
+          return '<td style="font-size:10.5px;font-weight:600'
+               +   (ri.nome ? '' : ';color:var(--tx2);font-weight:400') + '">'
+               +   cpEsc(ri.nome || '—')
+               +   (ri.via === 'rcitem'
+                     ? ' <span title="O pedido da BU não bateu com o da medição; '
+                       + 'o nome veio por RC + item." style="font-size:9px;font-weight:700;'
+                       + 'color:var(--am);background:var(--amc);border-radius:4px;'
+                       + 'padding:1px 5px;white-space:nowrap">RC+item</span>' : '')
+               + '</td>'
+               + '<td style="text-align:center;font-size:10.5px">'
+               +   (dt ? cpDataBR(dt) : '<span style="color:var(--tx2)">—</span>') + '</td>'
+               + '<td style="text-align:center">' + dias + '</td>';
+        })()
       + '<td><input type="text" value="' + cpEsc(i.nome || '') + '" placeholder="nome"'
-      +   ' onchange="stbCampo(' + k + ', \'nome\', this.value)" list="stb-nomes"'
+      +   ' onchange="stbCampo(' + k + ', \'nome\', this.value)" list="stb-nomes' + suf + '"'
       +   ' style="width:130px;font-size:11.5px;padding:3px 6px;border:1px solid var(--brd);border-radius:5px;'
       +   'font-weight:600;background:' + ((i.nome || '') ? 'var(--azc)' : '#fff') + '"></td>'
       + '<td><input type="text" value="' + cpEsc(i.comentario || '') + '" placeholder="o que falta"'
@@ -15610,13 +15659,13 @@ function stbRenderLista(){
       +   ' style="width:120px;font-size:11.5px;padding:3px 6px;border:1px solid var(--brd);border-radius:5px"></td>'
       + '<td><input type="text" value="' + cpEsc(i.novoItem) + '" onchange="stbCampo(' + k + ', \'novoItem\', this.value)"'
       +   ' style="width:70px;font-size:11.5px;padding:3px 6px;border:1px solid var(--brd);border-radius:5px;font-weight:700"></td>'
-      + '<td style="font-size:10.5px;color:var(--tx2);white-space:normal;min-width:330px" id="stb-txt-' + k + '">'
+      + '<td style="font-size:10.5px;color:var(--tx2);white-space:normal;min-width:330px" data-stbtxt="' + k + '">'
       +   cpEsc(stbTextoDe(i.seq, i.novoItem)) + '</td>'
       + '</tr>';
   });
 
   h += '</tbody></table></div>'
-    + '<datalist id="stb-nomes">' + nomes.map(function(n){ return '<option value="' + cpEsc(n) + '">'; }).join('') + '</datalist>'
+    + '<datalist id="stb-nomes' + suf + '">' + nomes.map(function(n){ return '<option value="' + cpEsc(n) + '">'; }).join('') + '</datalist>'
     + (vis.length ? '' : '<div style="font-size:12px;color:var(--tx2);padding:14px 2px">'
         + 'Nenhum item com esse filtro.</div>')
     + '<div style="font-size:10.5px;color:var(--tx2);margin-top:8px">'
@@ -15624,7 +15673,7 @@ function stbRenderLista(){
     + '<strong>RC · Item · Grupo Comprador · Número de Acompanhamento · Título · Texto</strong>. '
     + 'O <strong>nome e o comentário ficam só aqui</strong> — não entram no arquivo.</div>'
     + '</div>';
-  box.innerHTML = h;
+  return h;
 }
 
 // ── edição ────────────────────────────────────────────────────────
@@ -15632,8 +15681,11 @@ function stbCampo(k, campo, valor){
   if (!_stbDia || !_stbDia.itens[k]) return;
   _stbDia.itens[k][campo] = String(valor || '').trim();
   if (campo === 'novoItem') {
-    var td = document.getElementById('stb-txt-' + k);
-    if (td) td.textContent = stbTextoDe(_stbDia.itens[k].seq, _stbDia.itens[k].novoItem);
+    // as duas telas desenham a mesma lista: atualiza as duas células
+    var txt = stbTextoDe(_stbDia.itens[k].seq, _stbDia.itens[k].novoItem);
+    Array.prototype.forEach.call(
+      document.querySelectorAll('[data-stbtxt="' + k + '"]'),
+      function(td){ td.textContent = txt; });
   }
   stbSalvar();
 }
@@ -15655,9 +15707,9 @@ function stbMarcarTodos(valor){
   stbSalvar();
 }
 
-function stbAplicarAcomp(){
+function stbAplicarAcomp(suf){
   if (!_stbDia) return;
-  var el = document.getElementById('stb-acomp-todos');
+  var el = document.getElementById('stb-acomp-todos' + (suf || ''));
   var v = el ? String(el.value || '').trim() : '';
   if (!v) return;
   stbVisiveis().forEach(function(x){ x.i.acomp = v; });
@@ -16579,66 +16631,9 @@ var _gpCockPsmv = cpNormCab('Em liberação');   // o card abre já nele
 var _gpSB = { itens:[], data:'', arquivo:'', lidas:0, emTratativa:0, statusB:0,
               desde:{}, primeiroDia:'', atualizadoEm:'', atualizadoPor:'' };
 
-// ── EDITAR O STATUS B DIRETO DA GOVERNANÇA (11/11) ───────────────
-// Pedido do André: as tabelas do Status B e do Rejeite Supervisor
-// precisam vir IGUAIS para a Governança — até agora ela mostrava os
-// dados sem deixar mexer, e ele tinha de pular para a outra aba só
-// para escrever um nome.
-//
-// Grava no MESMO documento do dia (status_b/<data>) que a aba Status B
-// usa, e, se a aba estiver com o mesmo dia carregado, as duas cópias
-// andam juntas — senão uma sobrescreveria a outra na próxima gravação.
-async function gpSBSalvar(){
-  try {
-    var db = getDB(); if (!db || !_gpSB.data) return false;
-    await db.collection(STB_COL).doc(_gpSB.data).set({
-      data: _gpSB.data, arquivo: _gpSB.arquivo || '', lidas: +_gpSB.lidas || 0,
-      emTratativa: +_gpSB.emTratativa || 0, statusB: +_gpSB.statusB || 0,
-      eliminado: +_gpSB.eliminado || 0,
-      itens: (_gpSB.itens || []).slice(0, 5000).map(function(i){
-        return { rc:String(i.rc||''), seq:String(i.seq||''), novoItem:String(i.novoItem||''),
-                 acomp:String(i.acomp||''), nome:String(i.nome||''),
-                 comentario:String(i.comentario||''), marcado:!!i.marcado,
-                 textoBreve:String(i.textoBreve||''), pedido:String(i.pedido||''),
-                 oport:String(i.oport||''), itemOp:String(i.itemOp||'') };
-      }),
-      atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem()
-    });
-    return true;
-  } catch (e) { console.warn('gpSBSalvar:', e); return false; }
-}
-
-function _gpSBEco(i, campo){
-  if (!_stbDia || _stbDia.data !== _gpSB.data) return;
-  (_stbDia.itens || []).forEach(function(x){
-    if (String(x.rc) === String(i.rc) && String(x.seq) === String(i.seq)) x[campo] = i[campo];
-  });
-}
-
-async function gpSBCampo(idx, campo, valor){
-  var i = (_gpSB.itens || [])[idx];
-  if (!i) return;
-  i[campo] = String(valor == null ? '' : valor);
-  _gpSBEco(i, campo);
-  var ok = await gpSBSalvar();
-  var st = document.getElementById('gp-sb-status');
-  if (st) {
-    st.innerHTML = ok ? '<span style="color:var(--vd)">✔ guardado</span>'
-      : '<span style="color:var(--vm)">✗ a base recusou — NÃO foi guardado</span>';
-    if (ok) setTimeout(function(){ if (st) st.innerHTML = ''; }, 2500);
-  }
-}
-
-async function gpSBMarcar(idx, marcado){
-  var i = (_gpSB.itens || [])[idx];
-  if (!i) return;
-  i.marcado = !!marcado;
-  _gpSBEco(i, 'marcado');
-  var ok = await gpSBSalvar();
-  gpRender();
-  var st = document.getElementById('gp-sb-status');
-  if (st && !ok) st.innerHTML = '<span style="color:var(--vm)">✗ a base recusou — NÃO foi guardado</span>';
-}
+// A edição do Status B na Governança virou a MESMA lista da aba
+// (11/11): um só caminho de gravação, em vez de duas cópias que
+// podiam se sobrescrever. Ver STB_ALVOS e _stbHtmlLista.
 
 function gpSBPendentes(){
   return (_gpSB.itens || []).filter(function(i){ return !i.marcado; });
@@ -17999,6 +17994,17 @@ async function gpAbrirCard(ch){
       gpRender();
     }
   }
+  // O Status B da Governança desenha a MESMA lista da aba, então
+  // precisa do dia carregado em _stbDia — quem entra direto pela
+  // Governança não passou pela aba.
+  if (_gpCard === 'statusb') {
+    if (!_stbDia || !(_stbDia.itens || []).length) {
+      var dia = (_gpSB && _gpSB.data) ? _gpSB.data : stbDataSel();
+      try { await stbCarregar(dia); } catch (e) { console.warn('gpAbrirCard/statusb:', e); }
+      gpRender();
+    }
+    stbRenderLista();
+  }
 }
 
 function gpRenderDetalhe(){
@@ -18009,7 +18015,12 @@ function gpRenderDetalhe(){
   if (_gpCard === 'rejsup')     { box.innerHTML = gpHtmlRejeiteSup();  return; }
   if (_gpCard === 'cockpit')    { box.innerHTML = gpHtmlCockpit();    return; }
   if (_gpCard === 'memorizados'){ box.innerHTML = gpHtmlMemorizados(); return; }
-  if (_gpCard === 'statusb')    { box.innerHTML = gpHtmlStatusB();     return; }
+  if (_gpCard === 'statusb') {
+    box.innerHTML = gpHtmlStatusB();
+    // o container existe só agora: a lista compartilhada entra nele
+    try { stbRenderLista(); } catch (e) { console.warn('gpRenderDetalhe/statusb:', e); }
+    return;
+  }
   var lista = [];
   gpItens().forEach(function(it){
     var e = gpEstado(it);
@@ -18454,13 +18465,17 @@ var RJ_COLS = [
 // justificativa no Supervisor. Elas NÃO estavam na lista que o André
 // passou, mas sem elas o comprador não sabe por que o item foi
 // rejeitado — é o dado que ele precisa para tratar.
-function rjGradeHTML(L, extras, idPrefixo){
+// extrasNoFim: no Rejeite Supervisor o André quer Motivo e Conclusão
+// logo depois de SLA Pedido, e o padrão/justificativa no fim. No
+// Fornecedor o motivo da RECUSA fica antes, colado no SLA.
+function rjGradeHTML(L, extras, idPrefixo, extrasNoFim){
   var pref = idPrefixo || 'f';
   _rjLinhas[pref] = L;
   _rjLinhasAtual = L;
   if (!L.length) return '';
-  var cols = RJ_COLS.slice(0, 7).concat(extras || [])
-             .concat(RJ_COLS.slice(7));
+  var cols = extrasNoFim
+    ? RJ_COLS.slice(0, 7).concat(RJ_COLS.slice(7)).concat(extras || [])
+    : RJ_COLS.slice(0, 7).concat(extras || []).concat(RJ_COLS.slice(7));
   var h = '';
   if (L.__semDono) {
     h += '<div class="al al-a" style="font-size:11.5px;margin-top:.6rem">⚠ <strong>'
@@ -18509,9 +18524,9 @@ function rjGradeHTML(L, extras, idPrefixo){
       + '</td>'
       + '<td style="text-align:right;font-weight:700;color:' + (velho ? 'var(--vm)' : 'var(--tx)') + '">'
       +   cpNum(l.sla) + '</td>'
-      + (extras || []).map(function(c){
+      + (extrasNoFim ? '' : (extras || []).map(function(c){
           return '<td style="font-size:10.5px">' + cpEsc(c.v(l) || '—') + '</td>';
-        }).join('')
+        }).join(''))
       + '<td><input type="text" value="' + cpEsc(t.motivo) + '" placeholder="por que foi tratado assim"'
       +   ' oninput="rjMotivoDigitando(\'' + pref + '\', ' + idx + ', this)"'
       +   ' onchange="rjSalvarTrat(\'' + pref + '\', ' + idx + ', \'motivo\', this.value)"'
@@ -18533,7 +18548,11 @@ function rjGradeHTML(L, extras, idPrefixo){
             return '<option value="' + cpEsc(o) + '"'
                  + (t.conclusao === o ? ' selected' : '') + '>' + cpEsc(o) + '</option>';
           }).join('')
-      + '</select></td></tr>';
+      + '</select></td>'
+      + (extrasNoFim ? (extras || []).map(function(c){
+          return '<td style="font-size:10.5px">' + cpEsc(c.v(l) || '—') + '</td>';
+        }).join('') : '')
+      + '</tr>';
   });
   return h + '</tbody></table></div>';
 }
@@ -18566,7 +18585,9 @@ var RJ_EXTRA_SUP_GOV = RJ_EXTRA_SUP.concat([
 function rjsLinhasGrade(linhas){
   var out = (linhas || []).map(function(l){
     return {
-      rc:l.rc || '', itemRc:l.itemRc || '',
+      // a medição manda a RC como 0036932094 e o item como 00010; a
+      // tela mostra sem os zeros, que foi o que o André pediu em 11/11
+      rc:_rjsN(l.rc) || '', itemRc:_rjsN(l.itemRc) || '',
       oport: l.oport || rjItemOpPar(l.rc, l.itemRc)[1],
       itemOp: rjItemOpPar(l.rc, l.itemRc)[0],
       pedido:l.pedido || '', comprador:l.comprador || '',
@@ -20527,7 +20548,7 @@ function gpHtmlRejeiteSup(){
       // tinha de pular para a outra aba para escrever.
       // O prefixo 'gs' é próprio deste card: duas grades desenhadas na
       // mesma página não podem dividir a lista de linhas.
-      + rjGradeHTML(rjsLinhasGrade(lista), RJ_EXTRA_SUP_GOV, 'gs')
+      + rjGradeHTML(rjsLinhasGrade(lista), RJ_EXTRA_SUP_GOV, 'gs', true)
       + '</div>';
   } else {
     h += '<div style="font-size:11.5px;color:var(--tx2);margin-top:.8rem">'
@@ -20889,7 +20910,7 @@ function rjSupervisorHTML(){
     // Desde 11/11 as duas abas mostram as MESMAS colunas: o André quer
     // a mesma leitura nos dois lados. Aqui o comprador já vem certo da
     // medição, então não há PROCV a fazer — é só a mesma grade.
-    h += rjGradeHTML(rjsLinhasGrade(r.linhas), RJ_EXTRA_SUP, 's');
+    h += rjGradeHTML(rjsLinhasGrade(r.linhas), RJ_EXTRA_SUP, 's', true);
   }
 
   // ── os que saíram da medição ──────────────────────────────────
@@ -21062,81 +21083,10 @@ function gpHtmlStatusB(){
     + Object.keys(porNome).sort(function(a, b){ return porNome[b] - porNome[a]; })
         .map(function(k){ return cpEsc(k) + ' <strong>' + porNome[k] + '</strong>'; }).join(' · ')
     + '</div>';
-  // as mesmas colunas da aba Status B, e editáveis — era só leitura
-  h += '<div id="gp-sb-status" style="font-size:11px;min-height:14px;margin-bottom:.3rem"></div>'
-    + '<div style="overflow:auto;max-height:520px"><table><thead><tr>'
-    + '<th style="text-align:center">Linha duplicada</th>'
-    + '<th>RC</th><th>Item</th><th>Oportunidade</th><th>Item da OP</th>'
-    + '<th>Novo item</th><th>Pedido eliminado</th>'
-    + '<th>Analista do pedido</th>'
-    + '<th style="text-align:center">Em B desde</th>'
-    + '<th style="text-align:center">Dias parado</th>'
-    + '<th>Nº acompanhamento</th><th>Responsável</th><th>Comentário</th>'
-    + '<th>Texto breve</th></tr></thead><tbody>';
-  pend.slice().sort(function(a, b){
-    // o que está parado há mais tempo primeiro — é por onde se começa
-    var da = gpSBDias(a), db2 = gpSBDias(b);
-    if (da !== db2) return (db2 == null ? -1 : db2) - (da == null ? -1 : da);
-    return String(a.rc).localeCompare(String(b.rc)) || String(a.seq).localeCompare(String(b.seq));
-  }).forEach(function(i){
-    var ri = gpRespInfo(i.rc, i.seq, i.pedido);
-    var resp = ri.nome;
-    var dt = gpSBDesde(i);
-    var k = (_gpSB.itens || []).indexOf(i);
-    h += '<tr>'
-      + '<td style="text-align:center"><input type="checkbox"'
-      +   ' onchange="gpSBMarcar(' + k + ', this.checked)"'
-      +   ' style="width:16px;height:16px;cursor:pointer"></td>'
-      + '<td style="font-weight:700;color:var(--az)">' + cpEsc(i.rc) + '</td>'
-      + '<td style="font-weight:600">' + cpEsc(i.seq) + '</td>'
-      + '<td style="font-size:10.5px">' + cpEsc(i.oport || '—') + '</td>'
-      + '<td>' + cpEsc(i.itemOp || '—') + '</td>'
-      + '<td><input type="text" value="' + cpEsc(i.novoItem || '') + '"'
-      +   ' onchange="gpSBCampo(' + k + ', \'novoItem\', this.value)"'
-      +   ' style="width:70px;font-size:11px;padding:3px 6px;border:1px solid var(--brd);'
-      +     'border-radius:5px;font-weight:700;color:var(--vd)"></td>'
-      + '<td>' + cpEsc(i.pedido || '—') + '</td>'
-      + '<td style="font-size:10.5px;font-weight:600'
-      +   (resp ? '' : ';color:var(--tx2);font-weight:400') + '">'
-      +   cpEsc(resp || '—')
-      +   (ri.via === 'rcitem'
-            ? ' <span title="O pedido da BU não bateu com o da medição; '
-              + 'o nome veio por RC + item." style="font-size:9px;font-weight:700;'
-              + 'color:var(--am);background:var(--amc);border-radius:4px;'
-              + 'padding:1px 5px;white-space:nowrap">RC+item</span>' : '')
-      +   '</td>'
-      + '<td style="text-align:center;font-size:10.5px">'
-      +   (dt ? cpDataBR(dt) : '<span style="color:var(--tx2)">—</span>') + '</td>'
-      + '<td style="text-align:center">' + gpDiasHtml(gpSBDias(i)) + '</td>'
-      + '<td><input type="text" value="' + cpEsc(i.acomp || '') + '" placeholder="."'
-      +   ' onchange="gpSBCampo(' + k + ', \'acomp\', this.value)"'
-      +   ' style="width:120px;font-size:11px;padding:3px 6px;border:1px solid var(--brd);'
-      +     'border-radius:5px"></td>'
-      + '<td><input type="text" value="' + cpEsc(i.nome || '') + '" placeholder="nome"'
-      +   ' onchange="gpSBCampo(' + k + ', \'nome\', this.value)" list="gp-sb-nomes"'
-      +   ' style="width:130px;font-size:11px;padding:3px 6px;border:1px solid var(--brd);'
-      +     'border-radius:5px;font-weight:600;background:'
-      +     ((i.nome || '') ? 'var(--azc)' : '#fff') + '"></td>'
-      + '<td><input type="text" value="' + cpEsc(i.comentario || '') + '" placeholder="o que falta"'
-      +   ' onchange="gpSBCampo(' + k + ', \'comentario\', this.value)"'
-      +   ' style="width:160px;font-size:11px;padding:3px 6px;border:1px solid var(--brd);'
-      +     'border-radius:5px;background:' + ((i.comentario || '') ? 'var(--amc)' : '#fff') + '"></td>'
-      + '<td style="font-size:10px;color:var(--tx2);white-space:normal;min-width:240px">'
-      +   cpEsc(i.textoBreve || '—') + '</td></tr>';
-  });
-  var _nomesSB = [];
-  (_gpSB.itens || []).forEach(function(x){
-    var n = String(x.nome || '').trim();
-    if (n && _nomesSB.indexOf(n) === -1) _nomesSB.push(n);
-  });
-  h += '</tbody></table></div>'
-    + '<datalist id="gp-sb-nomes">'
-    +   _nomesSB.map(function(n){ return '<option value="' + cpEsc(n) + '">'; }).join('')
-    + '</datalist>'
-    + '<div style="font-size:10.5px;color:var(--tx2);margin-top:8px">'
-    + 'O que você escrever aqui é o mesmo da aba <strong>Controle de Pedidos › Status B</strong>: '
-    + 'grava no mesmo dia e aparece lá. A <strong>exportação do arquivo do script</strong> '
-    + 'continua só naquela aba.</div>'
+  // A MESMA PLANILHA DA ABA (11/11). Antes havia duas tabelas parecidas
+  // aqui e lá; agora é a mesma função desenhando nos dois lugares, com
+  // os filtros, o aplicar-a-todos e a exportação para o script.
+  h += '<div id="gp-sb-lista"></div>'
     + '</div>';
   return h;
 }
