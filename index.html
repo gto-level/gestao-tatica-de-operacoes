@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '10/11 22:10';
+var GTO_BUILD = '10/11 23:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -22650,6 +22650,41 @@ async function mdrEsquecerLotes(){
 // aí não se sabe sequer quando ele fica apto.
 var MD_PRECISA_APTO = ['patec', 'patecman'];
 
+// ── AS QUATRO DA EMISSÃO: ORDEM E META POR PESSOA (10/11) ────────
+// Regra nova do André. Antes, as quatro disputavam bloco a bloco na
+// ordem de SLA e o desempate era "quem tem menos item no total". Com
+// isso um comprador marcado nas quatro podia fechar a demanda inteira
+// numa fila só — ele via a pessoa sem nenhum item de PATEC, por
+// exemplo, porque Emitir Pedido tinha 155 e já a tinha enchido.
+//
+// Agora vale uma ORDEM, e a pessoa enche a meta dela nessa ordem:
+//   1º PATEC e PATEC Manual, em partes iguais entre as duas;
+//   2º Emitir Pedido, com o que faltar para a meta;
+//   3º Reaproveitamento, por último.
+// Dentro de cada fila, a repartição é por igual entre quem está
+// marcado NELA — não mais pelo total da pessoa.
+//
+// As outras atividades (Abrir PATEC Unificado, Negociar, DPV,
+// Rejeitado) seguem como estavam: têm a cota da linha delas e não
+// entram nesta conta.
+var MD_EMISSAO = ['patec', 'patecman', 'emitir', 'reap'];
+var MD_ETAPA_1 = ['patec', 'patecman'];   // juntas, alternando
+var MD_ETAPA_2 = ['emitir'];
+// 0 = não é emissão (vai primeiro, como antes); 1 e 2 = a ordem nova.
+// O reap tem laço próprio, depois de tudo.
+function mdEtapaDoBloco(b){
+  var sts = (b && b.statuses) || [];
+  for (var i = 0; i < sts.length; i++) if (MD_ETAPA_1.indexOf(sts[i]) !== -1) return 1;
+  for (var j = 0; j < sts.length; j++) if (MD_ETAPA_2.indexOf(sts[j]) !== -1) return 2;
+  return 0;
+}
+// quantos itens das quatro este bloco traz — é o que conta na meta
+function mdItensEmissao(b){
+  var n = 0;
+  MD_EMISSAO.forEach(function(ch){ n += ((b && b.porStatus) || {})[ch] || 0; });
+  return n;
+}
+
 function mdDataNegociacao(it){
   var k = gpChave(it);
   var man = (typeof _gpNeg !== 'undefined' && _gpNeg[k]) ? _gpNeg[k] : {};
@@ -22742,9 +22777,17 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   MD_STATUS.forEach(function(x){ if (diasCh(x.chave) > nDias) nDias = diasCh(x.chave); });
   var res = { pessoas:{}, fila:[], semAtividade:[], dias:nDias, cotaDia:cota, cotaSemana:semana,
               total:(itens || []).length, diasAcima:[], estourou:[], foraAtividade:[] };
+  // A meta de emissão por pessoa: o "padrão itens por dia" do topo
+  // vezes os dias úteis do topo. É o teto das QUATRO somadas — chegou
+  // lá, a pessoa para de receber emissão e o resto vai para a fila.
+  // A oportunidade que cruzar a linha entra inteira, porque não se
+  // divide; é a mesma regra da cota das linhas.
+  var metaEmissao = Math.max(1, cota * Math.max(1, Math.min(7, Math.round(+dias || 5))));
+  res.metaEmissao = metaEmissao;
   (pessoas || []).forEach(function(n){
     res.pessoas[n] = { nome:n, itens:[], blocos:[], n:0, porDia:new Array(nDias).fill(0),
-                       porStatus:{}, tipo:{ L:0, Q:0 }, tipoEmitir:{ L:0, Q:0 }, fora:0, reap:0 };
+                       porStatus:{}, tipo:{ L:0, Q:0 }, tipoEmitir:{ L:0, Q:0 }, fora:0, reap:0,
+                       emissao:0 };
     MD_STATUS.forEach(function(x){ res.pessoas[n].porStatus[x.chave] = 0; });
   });
   res.reap = 0;
@@ -22763,7 +22806,41 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     return c;
   };
 
-  mdBlocos(itens).forEach(function(b){
+  // A ORDEM DOS BLOCOS.
+  //
+  // Fora da emissão, nada muda: esses blocos vão primeiro, na ordem de
+  // sempre (prioritário, SLA, tamanho, RC). Depois vem a etapa 1 —
+  // PATEC e PATEC Manual ALTERNANDO, um de cada, para que as duas
+  // andem em partes iguais e uma não acabe antes da outra. Por último
+  // a etapa 2, Emitir Pedido, que completa a meta de cada um.
+  var ordenados = mdBlocos(itens);
+  (function(){
+    var pos = {};   // posição do bloco dentro da fila dele, para alternar
+    ordenados.forEach(function(b){
+      b.__etapa = mdEtapaDoBloco(b);
+      var ch = '';
+      if (b.__etapa === 1) {
+        ch = (b.porStatus.patec || 0) >= (b.porStatus.patecman || 0) ? 'patec' : 'patecman';
+      } else if (b.__etapa === 2) ch = 'emitir';
+      b.__fila = ch;
+      if (ch) { b.__pos = (pos[ch] = (pos[ch] === undefined ? 0 : pos[ch] + 1)); }
+      else b.__pos = 0;
+    });
+    ordenados.sort(function(a, b){
+      if (a.__etapa !== b.__etapa) return a.__etapa - b.__etapa;
+      if (a.__etapa === 1) {
+        // 1º de PATEC, 1º de Manual, 2º de PATEC, 2º de Manual...
+        if (a.__pos !== b.__pos) return a.__pos - b.__pos;
+        if (a.__fila !== b.__fila) return a.__fila < b.__fila ? -1 : 1;
+      }
+      if (!!b.prio !== !!a.prio) return b.prio ? 1 : -1;
+      if (b.slaMax !== a.slaMax) return b.slaMax - a.slaMax;
+      if (b.n !== a.n) return b.n - a.n;
+      return String(a.itens[0].rc).localeCompare(String(b.itens[0].rc));
+    });
+  })();
+
+  ordenados.forEach(function(b){
     var quemFaz = pessoas.filter(function(n){ return cobre(n, b) > 0; });
     if (!quemFaz.length) {
       // ninguém na equipe atua em nenhum status desta oportunidade
@@ -22776,6 +22853,8 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     // Unificado o que vale é a soma dos dois contra a cota da linha.
     var cand = quemFaz.filter(function(n){
       var at = mdAtvNorm(atividades[n]), p = res.pessoas[n], temEspaco = false;
+      // a meta de emissão é teto das quatro somadas
+      if (b.__etapa && p.emissao >= metaEmissao) return false;
       (b.statuses || []).forEach(function(ch){
         if (temEspaco) return;
         var a = mdAtvDe(ch);
@@ -22801,6 +22880,14 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
       var m = res.pessoas[melhor];
       var cn = cobre(n, b), cm = cobre(melhor, b);
       if (cn !== cm) { if (cn > cm) melhor = n; return; }
+      // DENTRO DA FILA, PARTES IGUAIS (10/11). Antes o desempate era
+      // pelo total da pessoa, e quem tinha pouco no total levava o
+      // bloco mesmo já estando cheio daquela fila. Agora conta quanto
+      // cada um já tem DESTA fila; o total só decide se empatar.
+      if (b.__fila) {
+        var qn = p.porStatus[b.__fila] || 0, qm = m.porStatus[b.__fila] || 0;
+        if (qn !== qm) { if (qn < qm) melhor = n; return; }
+      }
       // entre iguais, Emitir Pedido reparte L e Q por igual
       if (b.tipoEmitir && b.porStatus.emitir) {
         if (p.tipoEmitir[b.tipoEmitir] !== m.tipoEmitir[b.tipoEmitir]) {
@@ -22823,6 +22910,7 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
       it.foraAtividade = at.indexOf(mdAtvDe(it.statusChave)) === -1;
       pm.itens.push(it); pm.n++;
       pm.porStatus[it.statusChave] = (pm.porStatus[it.statusChave] || 0) + 1;
+      if (MD_EMISSAO.indexOf(it.statusChave) !== -1) pm.emissao++;
       if (it.tipo === 'L' || it.tipo === 'Q') {
         pm.tipo[it.tipo]++;
         if (it.statusChave === 'emitir') pm.tipoEmitir[it.tipo]++;
@@ -22857,19 +22945,24 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     var cotaReap = cotaCh('reap');
     itensReap.forEach(function(it){
       var cand = equipeReap.filter(function(n){
+        // o reap é a última etapa da emissão: respeita a cota da linha
+        // E a meta das quatro somadas
+        if (res.pessoas[n].emissao >= metaEmissao) return false;
         return (res.pessoas[n].porStatus.reap || 0) < cotaReap;
       });
       if (!cand.length) { it.pessoa = ''; it.dia = 0; it.foraAtividade = false; res.fila.push(it); return; }
+      // partes iguais DENTRO da fila do reap; o total só desempata
       var melhor = cand[0];
       cand.forEach(function(n){
         var a = res.pessoas[n], m = res.pessoas[melhor];
-        if (a.n !== m.n) { if (a.n < m.n) melhor = n; return; }
         if (a.reap !== m.reap) { if (a.reap < m.reap) melhor = n; return; }
+        if (a.n !== m.n) { if (a.n < m.n) melhor = n; return; }
       });
       var pr = res.pessoas[melhor];
       it.pessoa = melhor;
       it.foraAtividade = false;
       pr.itens.push(it); pr.n++; pr.reap++;
+      pr.emissao++;
       pr.porStatus.reap = (pr.porStatus.reap || 0) + 1;
       // L e Q do reap contam no total da pessoa, mas não nas colunas
       // "L/Q emissão", que são do Emitir Pedido do MAPA do dia
@@ -23177,6 +23270,30 @@ function mdAvisoDiasCurtos(res){
 // a OPORTUNIDADE NÃO SE DIVIDE: quem está em 24 de 25 ainda é candidato,
 // e o bloco inteiro — que pode ter 12 itens — entra nele. Por isso a
 // cota é alvo, não teto, e o total passa um pouco.
+// A META DE EMISSÃO NA TELA (10/11).
+//
+// Com a meta por pessoa, item de emissão passa a parar na fila por um
+// motivo novo: a pessoa fechou a meta. Sem isto na tela, ele some sem
+// explicação — foi o erro que já apareceu três vezes neste módulo.
+function mdAvisoMeta(res){
+  if (!res || !res.metaEmissao) return '';
+  var cheios = [], naFila = 0;
+  (res.lista || []).forEach(function(p){
+    if ((p.emissao || 0) >= res.metaEmissao) cheios.push(p.nome + ' ' + p.emissao);
+  });
+  (res.fila || []).forEach(function(it){
+    if (MD_EMISSAO.indexOf(it.statusChave) !== -1) naFila++;
+  });
+  if (!cheios.length && !naFila) return '';
+  return '<div style="font-size:11px;color:var(--tx2);margin-top:4px">🎯 <strong>Meta de emissão</strong> '
+    + cpNum(res.metaEmissao) + ' por pessoa (itens/dia do topo × dias úteis), somando Emitir Pedido, '
+    + 'PATEC, PATEC Manual e Reaproveitamento'
+    + (cheios.length ? ' · fecharam a meta: <strong>' + cpEsc(cheios.join(' · ')) + '</strong>' : '')
+    + (naFila ? ' · <strong style="color:var(--am)">' + cpNum(naFila) + ' item(ns) de emissão na fila</strong> '
+        + 'por não haver mais quem receba' : '')
+    + '. A ordem é PATEC e PATEC Manual primeiro, em partes iguais, depois Emitir Pedido e por fim o reap.</div>';
+}
+
 function mdAvisoAcimaCota(res){
   var l = (res && res.acimaCota) || [];
   if (!l.length) return '';
@@ -23257,6 +23374,7 @@ async function mdDistribuir(){
     + (res.semAtividade.length ? ' · ' + cpNum(res.semAtividade.length) + ' sem ninguém na atividade' : '')
     + '.</span>'
     + mdAvisoDiasCurtos(res)
+    + mdAvisoMeta(res)
     + mdAvisoAcimaCota(res)
     + (res.reapSemMarcacao
         ? '<div style="font-size:11px;color:var(--am);margin-top:4px">♻️ Ninguém está marcado na '
