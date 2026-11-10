@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 10:20';
+var GTO_BUILD = '11/11 11:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -18280,7 +18280,8 @@ function rjLinhasItens(itens){
 // Guardados por pedido + RC + item, em config/rejeite_tratativa. O
 // motivo é condição da conclusão: sem justificativa escrita, o campo
 // de conclusão fica travado — foi o que o André pediu.
-var RJ_CONCLUSOES = ['Ajustado', 'Republicado', 'Devolvido', 'PATEC'];
+// 11/11: PATEC saiu e Status B entrou, a pedido do André.
+var RJ_CONCLUSOES = ['Ajustado', 'Republicado', 'Devolvido', 'Status B'];
 var _rjTrat = { itens:{}, atualizadoEm:'', atualizadoPor:'' };
 
 function rjChaveTrat(l){
@@ -18310,27 +18311,67 @@ async function rjGravarTratativas(){
   } catch (e) { console.warn('rjGravarTratativas:', e); return false; }
 }
 
-// guarda o que o comprador digitou e redesenha, para a conclusão
-// destravar no mesmo instante em que o motivo é escrito
-var _rjLinhasAtual = [];
-async function rjSalvarTrat(idx, campo, valor){
-  var l = _rjLinhasAtual[idx];
+// AS LINHAS DE CADA GRADE, POR TELA.
+//
+// Eram uma variável só, e as duas abas do Rejeite desenham na mesma
+// passada: a última a desenhar sobrescrevia a outra, e salvar numa
+// linha do Fornecedor gravava na chave de uma linha do Supervisor.
+// Agora cada grade tem a sua lista, pelo prefixo.
+var _rjLinhas = {};
+var _rjLinhasAtual = [];   // compatibilidade: a última desenhada
+
+function _rjLinhaDe(pref, idx){
+  var L = _rjLinhas[pref] || _rjLinhasAtual;
+  return L ? L[idx] : null;
+}
+
+// ENQUANTO ELE DIGITA. O André escreveu o motivo em 11/11 e a conclusão
+// continuou travada: o destravar dependia de redesenhar a tabela, e o
+// redesenho só acontecia no onchange (que só dispara ao sair do campo)
+// — e ainda por cima redesenhava as abas do Rejeite, não o card da
+// Governança de pedidos, que é onde ele estava.
+//
+// Agora o destravar é imediato e feito no próprio campo, sem redesenhar
+// nada: assim ele não perde o cursor no meio da frase.
+function rjMotivoDigitando(pref, idx, el){
+  try {
+    var sel = document.getElementById('rj-concl-' + pref + '-' + idx);
+    if (!sel) return;
+    var tem = !!String(el && el.value != null ? el.value : '').trim();
+    sel.disabled = !tem;
+    sel.style.background = tem ? '' : 'var(--cin)';
+    sel.style.color = tem ? '' : 'var(--tx2)';
+    sel.style.cursor = tem ? '' : 'not-allowed';
+    sel.title = tem ? 'como foi concluído' : 'escreva o motivo antes de concluir';
+    if (sel.options.length) {
+      sel.options[0].text = tem ? '— escolha —' : 'escreva o motivo';
+    }
+    if (!tem) sel.value = '';
+    if (el) el.style.borderColor = tem ? 'var(--vd)' : 'var(--brd)';
+  } catch (e) { console.warn('rjMotivoDigitando:', e); }
+}
+
+async function rjSalvarTrat(pref, idx, campo, valor){
+  var l = _rjLinhaDe(pref, idx);
   if (!l) return;
   var k = rjChaveTrat(l);
   var o = _rjTrat.itens[k] || (_rjTrat.itens[k] = { motivo:'', conclusao:'' });
   o[campo] = String(valor == null ? '' : valor).trim();
   // conclusão sem motivo não existe: se o motivo for apagado, a
   // conclusão cai junto, senão ficaria um "Ajustado" sem justificativa
-  if (campo === 'motivo' && !o.motivo) o.conclusao = '';
+  if (campo === 'motivo' && !o.motivo) {
+    o.conclusao = '';
+    var sel = document.getElementById('rj-concl-' + pref + '-' + idx);
+    if (sel) sel.value = '';
+  }
   var ok = await rjGravarTratativas();
-  rjDesenhar();
-  var st = document.getElementById('rj-trat-status');
+  var st = document.getElementById('rj-trat-status-' + pref)
+        || document.getElementById('rj-trat-status');
   if (st) {
     st.innerHTML = ok
       ? '<span style="color:var(--vd)">✔ guardado</span>'
       : '<span style="color:var(--vm)">✗ a base recusou — o que você digitou NÃO foi guardado</span>';
-    if (ok) setTimeout(function(){ var e2 = document.getElementById('rj-trat-status');
-                                   if (e2) e2.innerHTML = ''; }, 2500);
+    if (ok) setTimeout(function(){ if (st) st.innerHTML = ''; }, 2500);
   }
 }
 
@@ -18353,6 +18394,8 @@ var RJ_COLS = [
 // passou, mas sem elas o comprador não sabe por que o item foi
 // rejeitado — é o dado que ele precisa para tratar.
 function rjGradeHTML(L, extras, idPrefixo){
+  var pref = idPrefixo || 'f';
+  _rjLinhas[pref] = L;
   _rjLinhasAtual = L;
   if (!L.length) return '';
   var cols = RJ_COLS.slice(0, 7).concat(extras || [])
@@ -18386,7 +18429,7 @@ function rjGradeHTML(L, extras, idPrefixo){
                 : '')
       + '</div>';
   }
-  h += '<div id="rj-trat-status" style="font-size:11px;margin-top:.4rem;min-height:14px"></div>'
+  h += '<div id="rj-trat-status-' + pref + '" style="font-size:11px;margin-top:.4rem;min-height:14px"></div>'
     + '<div style="overflow:auto;max-height:520px;margin-top:.4rem"><table><thead><tr>'
     + cols.map(function(c){ return '<th>' + cpEsc(c.t) + '</th>'; }).join('')
     + '</tr></thead><tbody>';
@@ -18409,15 +18452,22 @@ function rjGradeHTML(L, extras, idPrefixo){
           return '<td style="font-size:10.5px">' + cpEsc(c.v(l) || '—') + '</td>';
         }).join('')
       + '<td><input type="text" value="' + cpEsc(t.motivo) + '" placeholder="por que foi tratado assim"'
-      +   ' onchange="rjSalvarTrat(' + idx + ', \'motivo\', this.value)"'
+      +   ' oninput="rjMotivoDigitando(\'' + pref + '\', ' + idx + ', this)"'
+      +   ' onchange="rjSalvarTrat(\'' + pref + '\', ' + idx + ', \'motivo\', this.value)"'
       +   ' style="width:210px;font-size:11px;padding:3px 6px;border-radius:6px;'
       +     'border:1px solid ' + (temMotivo ? 'var(--vd)' : 'var(--brd)') + '"></td>'
-      + '<td><select onchange="rjSalvarTrat(' + idx + ', \'conclusao\', this.value)"'
+      + '<td><select id="rj-concl-' + pref + '-' + idx + '"'
+      +   ' onchange="rjSalvarTrat(\'' + pref + '\', ' + idx + ', \'conclusao\', this.value)"'
       +   (temMotivo ? '' : ' disabled')
       +   ' title="' + (temMotivo ? 'como foi concluído' : 'escreva o motivo antes de concluir') + '"'
       +   ' style="font-size:11px;padding:3px 6px;border-radius:6px;border:1px solid var(--brd);'
       +     (temMotivo ? '' : 'background:var(--cin);color:var(--tx2);cursor:not-allowed') + '">'
       +   '<option value="">' + (temMotivo ? '— escolha —' : 'escreva o motivo') + '</option>'
+      // conclusão gravada antes de a lista mudar continua aparecendo —
+      // o PATEC saiu em 11/11 e item marcado assim não pode sumir calado
+      +   (t.conclusao && RJ_CONCLUSOES.indexOf(t.conclusao) === -1
+            ? '<option value="' + cpEsc(t.conclusao) + '" selected>' + cpEsc(t.conclusao)
+              + ' (não está mais na lista)</option>' : '')
       +   RJ_CONCLUSOES.map(function(o){
             return '<option value="' + cpEsc(o) + '"'
                  + (t.conclusao === o ? ' selected' : '') + '>' + cpEsc(o) + '</option>';
