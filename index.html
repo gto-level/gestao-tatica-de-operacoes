@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 05:10';
+var GTO_BUILD = '11/11 06:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -13263,6 +13263,13 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
             respPorItem:{}, respOutros:{}, respTotal:0,
             respPorRcItem:{}, resp2Total:0, respPorLetra:[],
             respPorPedido:{}, respPedTotal:0, respPedConflito:0,
+            // ÍNDICE PEDIDO → RC, item e oportunidade (11/11). É o que
+            // faltava para a tela de rejeitados: o pedido do rejeite
+            // fornecedor não diz qual RC é, e o índice do Rejeite
+            // Supervisor só guarda o que está em STATUS 8 — por isso
+            // 59 dos 61 pedidos do André apareciam "sem comprador".
+            // Entra só o que é dos nossos grupos de compras.
+            pedItens:{}, pedItensN:0,
             libDia:{}, libSemData:0,
             rejSup:[], rejSupTotal:0, rejSupCols:{}, rejSupPos:[], rejSupPed:{},
             rejSupFunil:{ lidas:0, st8:0, elimPedido:0, elimItem:0, semElim:0,
@@ -13317,6 +13324,10 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
                             'H', 'Linha requisição', r.respPorLetra);
   var _iPdR = _cpColOuLetra(cabs, ['PEDIDO','NUMERO_PEDIDO','NUM_PEDIDO','NUMERO_DO_PEDIDO'],
                             'D', 'Pedido', r.respPorLetra);
+  // A OPORTUNIDADE (F) — para o índice pedido → RC, item e oportunidade
+  // que a tela de rejeitados usa. Entrou em 11/11.
+  var _iOpR = _cpColOuLetra(cabs, ['OPORTUNIDADE','NUMERO_OPORTUNIDADE','NUM_OPORTUNIDADE','OPORT'],
+                            'F', 'Oportunidade', r.respPorLetra);
 
   // ── Rejeite Supervisor: as colunas que só ele usa ────────────────
   // São as letras que o André passou (C, D, E, G, H, I, L, M, N, T). Procuro
@@ -13493,6 +13504,23 @@ function cpLerMedicao(linhas, dataAlvo, cortarEliminados){
         if (kp) {
           if (!r.respPorPedido[kp]) { r.respPorPedido[kp] = nomeB; r.respPedTotal++; }
           else if (r.respPorPedido[kp] !== nomeB) r.respPedConflito++;
+          // e o retrato do pedido: cada RC+item dele, com a oportunidade.
+          // Só dos nossos grupos, senão o índice triplica de tamanho sem
+          // servir para nada — rejeite de outro grupo não é nosso.
+          if (iGrp === -1 || gpGrupoNosso(lb[iGrp])) {
+            var _rcP = _cpRespN(lb[_iRcR]), _itP = _cpRespN(lb[_iItR]);
+            if (_rcP || _itP) {
+              var _lp = r.pedItens[kp] || (r.pedItens[kp] = []);
+              var _jaTem = false;
+              for (var _z = 0; _z < _lp.length; _z++) {
+                if (_lp[_z][0] === _rcP && _lp[_z][1] === _itP) { _jaTem = true; break; }
+              }
+              if (!_jaTem) {
+                _lp.push([_rcP, _itP, _iOpR === -1 ? '' : String(lb[_iOpR] == null ? '' : lb[_iOpR]).trim()]);
+                r.pedItensN++;
+              }
+            }
+          }
         }
       }
 
@@ -13907,6 +13935,8 @@ async function cpHandleUpload(file){
     await _guarda('resp_pedido', function(){ return gpSalvarResp(med, file.name); });
     await _guarda('conversao',   function(){ return monSalvarConversao(med, file.name); });
     await _guarda('rejeite',     function(){ return rjsSalvarMedicao(med, file.name); });
+    // o índice pedido → RC, item e oportunidade da tela de rejeitados
+    await _guarda('rej_ped_ix',  function(){ return rjSalvarPedIx(med, file.name); });
     try { await rjlCarregar(); await rjlAplicarSupervisor(); } catch (e) {}
     try { await rjHistGravar(); } catch (e) {}
     try { if (document.getElementById('rj-supervisor')) rjDesenhar(); } catch (e) {}
@@ -16792,6 +16822,81 @@ async function gpSalvarResp(med, arquivo){
     return false;
   }
 }
+// ── ÍNDICE PEDIDO → RC, ITEM E OPORTUNIDADE (11/11) ──────────────
+// Guardado como texto compacto, uma linha por pedido+item
+// ("pedido,rc,item,oportunidade"), fatiado em documentos de 700 KB
+// como o resto do que não cabe em 1 MB do Firestore. Com a medição
+// real do André dá ~87 mil linhas, 2,9 MB, 5 partes.
+//
+// Lido sob demanda: só quem abre a tela de rejeitados precisa dele, e
+// cinco leituras a mais em toda abertura do dash não se justificam.
+var RJP_PARTE = 700000;
+var RJP_DOC = 'rejeite_ped_itens';
+var _rjPedIx = { itens:null, n:0, pedidos:0, arquivo:'', atualizadoEm:'', erro:'' };
+
+async function rjSalvarPedIx(med, arquivo){
+  try {
+    if (!med || !med.pedItens) return false;
+    var linhas = [];
+    Object.keys(med.pedItens).forEach(function(p){
+      med.pedItens[p].forEach(function(t){
+        linhas.push(p + ',' + t[0] + ',' + t[1] + ',' + t[2]);
+      });
+    });
+    var txt = linhas.join('\n'), partes = [];
+    for (var i = 0; i < txt.length; i += RJP_PARTE) partes.push(txt.slice(i, i + RJP_PARTE));
+    var db = getDB(); if (!db) return false;
+    await Promise.all(partes.map(function(t, j){
+      return db.collection('config').doc(RJP_DOC + '_' + j).set({ t:t });
+    }));
+    await db.collection('config').doc(RJP_DOC).set({
+      v:1, partes: partes.length, n: linhas.length,
+      pedidos: Object.keys(med.pedItens).length,
+      arquivo: arquivo || '', atualizadoEm: new Date().toISOString(),
+      atualizadoPor: cpQuem()
+    });
+    _rjPedIx = { itens:null, n:linhas.length, pedidos:Object.keys(med.pedItens).length,
+                 arquivo:arquivo || '', atualizadoEm:new Date().toISOString(), erro:'' };
+    return true;
+  } catch (e) {
+    console.warn('rjSalvarPedIx:', e);
+    _rjPedIx.erro = (e && e.message) ? e.message : 'não consegui gravar';
+    return false;
+  }
+}
+
+async function rjCarregarPedIx(forcar){
+  if (_rjPedIx.itens && !forcar) return _rjPedIx;
+  try {
+    var db = getDB(); if (!db) return _rjPedIx;
+    var doc = await db.collection('config').doc(RJP_DOC).get();
+    if (!doc || !doc.exists) { _rjPedIx.itens = {}; return _rjPedIx; }
+    var d = doc.data() || {};
+    var n = Math.max(0, Math.round(+d.partes || 0));
+    var partes = await Promise.all((function(){
+      var out = [];
+      for (var j = 0; j < n; j++) out.push(db.collection('config').doc(RJP_DOC + '_' + j).get());
+      return out;
+    })());
+    var txt = partes.map(function(p){
+      return (p && p.exists) ? ((p.data() || {}).t || '') : '';
+    }).join('');
+    var ix = {};
+    txt.split('\n').forEach(function(l){
+      if (!l) return;
+      var c = l.split(',');
+      (ix[c[0]] || (ix[c[0]] = [])).push([c[1] || '', c[2] || '', c[3] || '']);
+    });
+    _rjPedIx = { itens:ix, n:+d.n || 0, pedidos:+d.pedidos || 0, arquivo:d.arquivo || '',
+                 atualizadoEm:d.atualizadoEm || '', erro:'' };
+  } catch (e) {
+    console.warn('rjCarregarPedIx:', e);
+    _rjPedIx.itens = _rjPedIx.itens || {};
+    _rjPedIx.erro = (e && e.message) ? e.message : 'não consegui ler';
+  }
+  return _rjPedIx;
+}
+
 async function gpCarregarResp(){
   try {
     var db = getDB(); if (!db) return;
@@ -16877,7 +16982,11 @@ function gpMemItens(){
 // "00010"), e o Excel às vezes põe um ".0" no fim — por isso cada parte
 // entra limpa.
 function _cpRespN(v){
-  var s = String(v == null ? '' : v).trim().replace(/\.0+$/, '');
+  // as aspas aparecem quando o CSV vem citado e alguém o abre sem
+  // parser; sem tirá-las aqui, a chave do pedido vira '"4514882460"'
+  // e nenhum cruzamento fecha
+  var s = String(v == null ? '' : v).trim().replace(/^["']+|["']+$/g, '').trim();
+  s = s.replace(/\.0+$/, '');
   s = s.replace(/^0+/, '');
   return s;
 }
@@ -17023,7 +17132,8 @@ var _rjsRod = { cockpit:{}, motivos:{}, nCockpit:0, nMotivos:0, nDados:0,
 // lados, o cruzamento com o levelboard dá zero e parece que falta dado —
 // quando o que falta é só o formato bater.
 function _rjsN(v){
-  var t = String(v == null ? '' : v).trim().replace(/\.0+$/, '');
+  var t = String(v == null ? '' : v).trim().replace(/^["']+|["']+$/g, '').trim();
+  t = t.replace(/\.0+$/, '');
   if (/^\d+$/.test(t)) t = t.replace(/^0+(?=\d)/, '');
   return t;
 }
@@ -17597,9 +17707,18 @@ function gpRender(){
   gpRenderDetalhe();
 }
 
-function gpAbrirCard(ch){
+async function gpAbrirCard(ch){
   _gpCard = (_gpCard === ch) ? '' : ch;
   gpRender();
+  // o índice pedido → RC/item/oportunidade pesa 5 documentos: só é lido
+  // quando alguém abre o card que precisa dele, e uma vez por sessão
+  if (_gpCard === 'rejeitados' || _gpCard === 'rejsup') {
+    if (!_rjPedIx.itens) {
+      await rjCarregarPedIx();
+      await rjCarregarTratativas();
+      gpRender();
+    }
+  }
 }
 
 function gpRenderDetalhe(){
@@ -17774,15 +17893,58 @@ function rjResumoHTML(itens){
 // de subir os rejeitados de novo.
 // ══════════════════════════════════════════════════════════════════
 
-// pedido → as linhas da medição daquele pedido (uma por RC+item)
+// pedido → as linhas da medição daquele pedido (uma por RC+item).
+//
+// ERRO ACHADO EM 11/11, com os arquivos reais do André: isto lia
+// _rjsMed.itens, que é o índice do Rejeite SUPERVISOR — e ele só
+// guarda linha com STATUS_PROCESSO 8. Na medição dele, dos 61 pedidos
+// rejeitados só 2 estavam em 8, então 59 apareciam "sem comprador".
+// Os 61 estavam na medição, todos com RESP_PEDIDO preenchido.
+//
+// Agora o RC, o item e a oportunidade vêm do índice pedido → itens,
+// montado de TODAS as linhas da medição; e o comprador vem do
+// mapaPed, que responde "quem emitiu este pedido" e já era montado
+// assim. O _rjsMed continua valendo como reforço.
 function rjIxPedido(){
   var ix = {};
+  // 1) o índice novo, de todas as linhas da medição
+  Object.keys((_rjPedIx && _rjPedIx.itens) || {}).forEach(function(p){
+    ix[p] = (_rjPedIx.itens[p] || []).map(function(t){
+      return { rc:t[0], itemRc:t[1], oport:t[2], comprador:'' };
+    });
+  });
+  // 2) o do Rejeite Supervisor por cima: ali o comprador vem da linha
   ((_rjsMed && _rjsMed.itens) || []).forEach(function(o){
     var p = _rjsN(o.pedido);
     if (!p) return;
-    (ix[p] || (ix[p] = [])).push(o);
+    var lista = ix[p] || (ix[p] = []);
+    var achou = false;
+    lista.forEach(function(x){
+      if (_rjsN(x.rc) === _rjsN(o.rc) && _rjsN(x.itemRc) === _rjsN(o.itemRc)) {
+        achou = true;
+        if (!x.oport) x.oport = o.oport || '';
+        if (o.comprador) x.comprador = o.comprador;
+      }
+    });
+    if (!achou) lista.push({ rc:o.rc, itemRc:o.itemRc, oport:o.oport || '',
+                             comprador:o.comprador || '' });
+  });
+  // 3) e quem emitiu o pedido fecha o que ficou sem nome
+  var porPed = (_gpResp && _gpResp.mapaPed) ? _gpResp.mapaPed : {};
+  Object.keys(ix).forEach(function(p){
+    var nome = porPed[p] || '';
+    if (!nome) return;
+    ix[p].forEach(function(x){ if (!x.comprador) x.comprador = nome; });
   });
   return ix;
+}
+
+// Pedido que não tem nenhum item no índice, mas tem emissor conhecido:
+// ainda assim a linha ganha o comprador. É o caso de uma medição antiga
+// em que o pedido ainda não aparecia com RC.
+function rjCompradorDoPedido(ped){
+  var porPed = (_gpResp && _gpResp.mapaPed) ? _gpResp.mapaPed : {};
+  return porPed[_rjsN(ped)] || '';
 }
 
 // item da oportunidade, do levelboard (AF), pela chave RC|item
@@ -17816,8 +17978,11 @@ function rjLinhasItens(itens){
       };
     };
     if (!med.length) {
-      semDono++; pedSemDono[ped] = 1;
-      out.push(base(null));
+      var l0 = base(null);
+      l0.comprador = rjCompradorDoPedido(ped);
+      l0.semDono = !l0.comprador;
+      if (l0.semDono) { semDono++; pedSemDono[ped] = 1; }
+      out.push(l0);
       return;
     }
     med.forEach(function(o){
@@ -17922,6 +18087,23 @@ function rjGradeHTML(L, extras, idPrefixo){
       + cpNum(L.__semDono) + ' linha(s)</strong> em ' + cpNum(L.__pedSemDono)
       + ' pedido(s) sem comprador: o pedido não foi achado na medição do Rejeite '
       + 'Supervisor. Suba a medição do dia — é dela que vem quem criou o pedido.</div>';
+  }
+  // Os traços das colunas Oportunidade e Item da OP têm motivo, e cada
+  // um é de um arquivo: com os arquivos reais do André, 15 das 93
+  // linhas não têm oportunidade na medição (pedido que não veio de
+  // oportunidade) e só 21 têm item da OP, porque o levelboard é a
+  // carteira de AGORA e o rejeite é de pedidos antigos. Sem esta
+  // linha, o traço vira suspeita de erro de leitura.
+  var _semOp = L.filter(function(l){ return !l.oport; }).length;
+  var _semIt = L.filter(function(l){ return !l.itemOp; }).length;
+  if (_semOp || _semIt) {
+    h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:.4rem;line-height:1.6">ℹ '
+      + (_semOp ? '<strong>' + cpNum(_semOp) + '</strong> linha(s) sem <strong>Oportunidade</strong>: '
+                + 'a medição não traz esse campo para elas — é pedido que não veio de uma oportunidade. ' : '')
+      + (_semIt ? '<strong>' + cpNum(_semIt) + '</strong> linha(s) sem <strong>Item da OP</strong>: '
+                + 'a RC não está no levelboard atual, que é a carteira de hoje — rejeite de pedido '
+                + 'antigo já saiu dela. Suba um levelboard mais abrangente se precisar dessa coluna.' : '')
+      + '</div>';
   }
   h += '<div id="rj-trat-status" style="font-size:11px;margin-top:.4rem;min-height:14px"></div>'
     + '<div style="overflow:auto;max-height:520px;margin-top:.4rem"><table><thead><tr>'
@@ -18101,6 +18283,10 @@ async function rjAbrir(){
         _rjTrat = { itens:T.itens || {}, atualizadoEm:T.atualizadoEm || '',
                     atualizadoPor:T.atualizadoPor || '' };
       }
+      // o que faz o rejeite nascer com dono: quem emitiu cada pedido e
+      // o índice pedido → RC, item e oportunidade
+      await gpCarregarResp();
+      await rjCarregarPedIx(true);
       if (docs[0] && docs[0].exists) {
         var R = docs[0].data() || {};
         _gpRej = { itens:R.itens || [], arquivo:R.arquivo || '', aba:R.aba || '',
