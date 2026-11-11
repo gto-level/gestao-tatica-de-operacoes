@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 20:40';
+var GTO_BUILD = '11/11 21:55';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1529,7 +1529,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                   <div id="rj-barras-sup"></div>
                 </div>
                 <div class="rj-prazo">
-                  <div class="rj-prazo-t rj-t-forn">Fornecedor — dias parados desde a rejeição</div>
+                  <div class="rj-prazo-t rj-t-forn">Fornecedor — dias parados desde a rejeição <span style="font-weight:500;opacity:.75">(só os que estão no prazo)</span></div>
                   <div id="rj-barras-forn"></div>
                 </div>
               </div>
@@ -19483,11 +19483,22 @@ function arjDados(ini, fim){
     slaSup[faixa(v)]++;
     if (v != null) { somaS += (+v || 0); comS++; valS.push(+v || 0); }
   });
+  // DIAS PARADOS DO FORNECEDOR: SÓ O QUE ESTÁ NO PRAZO (11/11).
+  // Pedido do André: "o que está fora do prazo não é minha equipe quem
+  // trata". A barra passa a medir só os que ainda estão dentro do
+  // prazo de recusa (coluna N da planilha); os de fora continuam
+  // contados no card, ao lado dos de dentro.
+  var fornNoPrazo = 0, fornSemPrazo = 0;
   forn.forEach(function(i){
     var it2 = porChaveF[_rjsN(i.pedido)];
     var dd = it2 ? rjlSla(it2, hojeISO)
                  : ((i.dias === '' || i.dias == null) ? null : (+i.dias || 0));
     i.diasHoje = dd;
+    var pz = String(i.prazo || '');
+    var dentro = /NO\s*PRAZO/i.test(pz) && !/FORA/i.test(pz);
+    if (!pz.trim()) fornSemPrazo++;
+    if (!dentro) return;
+    fornNoPrazo++;
     slaForn[faixa(dd)]++;
     if (dd != null) { somaF += dd; comF++; valF.push(dd); }
   });
@@ -19538,6 +19549,7 @@ function arjDados(ini, fim){
     movSup:  RJ_EVOLUCAO ? rjlMovimento(perIni, perFim, 's') : null,
     movForn: RJ_EVOLUCAO ? rjlMovimento(perIni, perFim, 'f') : null,
     slaSup:slaSup, slaForn:slaForn, ordemSla:ORDEM,
+    fornNoPrazo:fornNoPrazo, fornSemPrazo:fornSemPrazo,
     mediaSup: comS ? Math.round(somaS / comS * 10) / 10 : null,
     mediaForn: comF ? Math.round(somaF / comF * 10) / 10 : null,
     medianaSup: mediana(valS), medianaForn: mediana(valF),
@@ -19637,6 +19649,19 @@ function arjSlideHTML(op){
   var corF = '#C62828', corS = '#E08A1E', corT = '#1B5E20', corP = '#3266AD';
   var secs = '';
 
+  // Linha curta sob o gráfico do fornecedor: quantos ficaram de fora
+  // da conta por estarem fora do prazo, e quantos vieram sem a coluna
+  // preenchida. Sem isso, o total do gráfico não bate com o card e
+  // parece que sumiu item.
+  var notaPrazoForn = function(){
+    var fora = d.foraPrazo || 0, sem = d.fornSemPrazo || 0;
+    if (!fora && !sem) return '';
+    return '<div style="font-size:10px;color:#6b7280;margin-top:4px;line-height:1.5">'
+      + (fora ? _arjN(fora) + ' fora do prazo não entram aqui — não são tratados pela equipe.' : '')
+      + (sem ? ' ' + _arjN(sem) + ' sem a coluna Prazo Recusa preenchida.' : '')
+      + '</div>';
+  };
+
   // Faixas de tempo parado, enxutas: rótulo, barra e "n · %".
   var tempoHTML = function(mapa, cor, total){
     return d.ordemSla.filter(function(k){ return mapa[k]; }).map(function(k){
@@ -19650,19 +19675,28 @@ function arjSlideHTML(op){
 
   // ── 1. GERAL: cards, evolução e tempo parado ───────────────────
   if (op.incVisao) {
+    // 11/11: o card "Resolvidos" (o do Rodrigo — apontados · falta
+    // tratamento · resolvidos) saiu da apresentação a pedido do André.
+    // Ele continua na tela de Rejeite, onde a conta é operacional; no
+    // slide ele só levantava pergunta. Com o histórico ligado, o "%
+    // resolvidos" volta — é outro número, medido entre dois retratos.
+    var cards = [
+      arjCard('Total rejeitado', _arjN(d.total), 'supervisor + fornecedor', corT),
+      arjCard('Rejeite Supervisor', _arjN(d.sup.length),
+        _arjN(d.q.level) + ' Level · ' + _arjN(d.q.petro) + ' Petrobras', corS),
+      arjCard('Rejeite Fornecedor', _arjN(d.forn.length),
+        _arjN(d.forn.length - d.foraPrazo) + ' no prazo · '
+        + _arjN(d.foraPrazo) + ' fora do prazo', corF)
+    ];
+    if (RJ_EVOLUCAO)
+      cards.push(arjCard('% resolvidos', _arjPctTexto(d.mov), _arjPctSub(d.mov), corP));
     secs += '<div><div class="sec-title">📊 Geral — pedidos rejeitados em '
       + _arjBR(op.data || '') + '</div>'
-      + '<div class="mapa-grid">'
-      +   arjCard('Total rejeitado', _arjN(d.total), 'supervisor + fornecedor', corT)
-      +   arjCard('Rejeite Supervisor', _arjN(d.sup.length),
-            _arjN(d.q.level) + ' Level · ' + _arjN(d.q.petro) + ' Petrobras', corS)
-      +   arjCard('Rejeite Fornecedor', _arjN(d.forn.length),
-            _arjN(d.foraPrazo) + ' fora do prazo', corF)
-      // O quarto card só existe quando há histórico para medir. Sem ele,
-      // "% resolvidos" seria sempre um traço ocupando um quarto da linha.
-      +   (RJ_EVOLUCAO
-           ? arjCard('% resolvidos', _arjPctTexto(d.mov), _arjPctSub(d.mov), corP)
-           : arjCard('Resolvidos', _arjN(d.fora), _arjSubRodrigo(d), corP))
+      // a grade acompanha a quantidade de cards: três não deixam um
+      // buraco onde era o quarto
+      + '<div class="mapa-grid" style="grid-template-columns:repeat('
+      +   cards.length + ',1fr)">'
+      +   cards.join('')
       + '</div></div>';
 
     // Com o histórico desligado não há linha do tempo para desenhar: o
@@ -19687,8 +19721,10 @@ function arjSlideHTML(op){
               // Respiro entre os dois: são coisas diferentes, e coladas
               // pareciam uma lista só de nove faixas.
               + '<div style="height:12px;margin:9px 0 0;border-top:1px solid #e3e8ef"></div>'
-              + '<div class="col-tit">Fornecedor — dias parados desde a rejeição</div>'
-              + tempoHTML(d.slaForn, corF, d.forn.length)
+              + '<div class="col-tit">Fornecedor — dias parados desde a rejeição '
+                + '<span style="font-weight:500;opacity:.75">(só os que estão no prazo)</span></div>'
+              + tempoHTML(d.slaForn, corF, d.fornNoPrazo)
+              + notaPrazoForn()
             : '')
         +   '</div>'
         + '</div>'
@@ -19697,8 +19733,9 @@ function arjSlideHTML(op){
       secs += '<div class="two-col" style="grid-template-columns:1fr 1fr;gap:20px">'
         +   '<div><div class="col-tit">Supervisor — dias parados desde o envio do cockpit</div>'
         +     tempoHTML(d.slaSup, corS, d.sup.length) + '</div>'
-        +   '<div><div class="col-tit">Fornecedor — dias parados desde a rejeição</div>'
-        +     tempoHTML(d.slaForn, corF, d.forn.length) + '</div>'
+        +   '<div><div class="col-tit">Fornecedor — dias parados desde a rejeição '
+        +     '<span style="font-weight:500;opacity:.75">(só os que estão no prazo)</span></div>'
+        +     tempoHTML(d.slaForn, corF, d.fornNoPrazo) + notaPrazoForn() + '</div>'
         + '</div>';
     }
   }
@@ -19953,16 +19990,21 @@ function arjDesenharResumo(){
     +     'border-radius:10px;padding:.7rem .9rem;text-align:center">'
     +     '<div style="font-size:9px;font-weight:700;color:var(--tx2)">FORNECEDOR</div>'
     +     '<div style="font-size:24px;font-weight:800;color:var(--vm)">' + cpNum(d.forn.length) + '</div>'
-    +     '<div style="font-size:10px;color:var(--tx2)">' + cpNum(d.foraPrazo) + ' fora do prazo</div></div>'
-    +   '<div style="flex:1;min-width:140px;background:var(--azc);border:1px solid var(--azm);'
-    +     'border-radius:10px;padding:.7rem .9rem;text-align:center">'
-    +     '<div style="font-size:9px;font-weight:700;color:var(--tx2)">'
-    +       (RJ_EVOLUCAO ? '% RESOLVIDOS' : 'RESOLVIDOS') + '</div>'
-    +     '<div style="font-size:24px;font-weight:800;color:var(--azm)">'
-    +       (RJ_EVOLUCAO ? _arjPctTexto(d.mov) : cpNum(d.fora)) + '</div>'
     +     '<div style="font-size:10px;color:var(--tx2)">'
-    +       (RJ_EVOLUCAO ? (d.mov ? _arjPctSub(d.mov) : 'preciso de 2 dias')
-                         : _arjSubRodrigo(d)) + '</div></div>'
+    +       cpNum(d.forn.length - d.foraPrazo) + ' no prazo · '
+    +       cpNum(d.foraPrazo) + ' fora do prazo</div></div>'
+    // 11/11: o card "Resolvidos" saiu daqui junto com o do slide — esta
+    // tela é o espelho do que vai na apresentação, e os dois não podem
+    // divergir. Com o histórico ligado, volta como "% resolvidos".
+    +   (RJ_EVOLUCAO
+         ? '<div style="flex:1;min-width:140px;background:var(--azc);border:1px solid var(--azm);'
+           + 'border-radius:10px;padding:.7rem .9rem;text-align:center">'
+           + '<div style="font-size:9px;font-weight:700;color:var(--tx2)">% RESOLVIDOS</div>'
+           + '<div style="font-size:24px;font-weight:800;color:var(--azm)">'
+           +   _arjPctTexto(d.mov) + '</div>'
+           + '<div style="font-size:10px;color:var(--tx2)">'
+           +   (d.mov ? _arjPctSub(d.mov) : 'preciso de 2 dias') + '</div></div>'
+         : '')
     + '</div>';
 
   if (RJ_EVOLUCAO && d.mov) {
@@ -68022,7 +68064,10 @@ function rvjDesenhar(){
       raKpi({ l:'Total rejeitado', v: dpNum(d.total), darkGreen:true,
               cap:'fornecedor + supervisor' })
     + raKpi({ l:'Rejeite Fornecedor', v: dpNum(d.forn.length), small:true, purple:true,
-              cap: d.foraPrazo ? dpNum(d.foraPrazo) + ' fora do prazo' : '',
+              cap: d.foraPrazo
+                     ? dpNum(d.forn.length - d.foraPrazo) + ' no prazo · '
+                       + dpNum(d.foraPrazo) + ' fora do prazo'
+                     : (d.forn.length ? dpNum(d.forn.length) + ' no prazo' : ''),
               corte: d.forn.length
                 ? raCorte('rj_forn', 'Rejeite Fornecedor', d.forn, RVJ_FORN_COLS, caixasForn) : null })
     + raKpi({ l:'Rejeite Supervisor', v: dpNum(d.sup.length), small:true, lightBlue:true,
@@ -68058,7 +68103,9 @@ function rvjDesenhar(){
     }).join('');
   };
   rvjPor('rj-barras-sup', barras(d.slaSup, d.sup.length, ''));
-  rvjPor('rj-barras-forn', barras(d.slaForn, d.forn.length, 'rj-b-forn'));
+  // 11/11: o gráfico do fornecedor conta só quem está NO PRAZO — fora do
+  // prazo não é a equipe do André que trata. O % acompanha o mesmo total.
+  rvjPor('rj-barras-forn', barras(d.slaForn, d.fornNoPrazo, 'rj-b-forn'));
 
   if (typeof _fcAgendarVarredura === 'function') _fcAgendarVarredura();
 }
