@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 19:05';
+var GTO_BUILD = '11/11 20:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -16088,7 +16088,14 @@ function mdItensDaAtividade(ch){
   // a linha unificada conta os dois Abrir PATEC juntos
   var quais = mdStatusDaAtv(ch), n = 0;
   if (_mdBase && _mdBase.itens) {
-    _mdBase.itens.forEach(function(i){ if (quais.indexOf(i.statusChave) !== -1) n++; });
+    // e a negociação madura já conta como Emitir Pedido, igual à
+    // Governança — senão a tabela mostraria um número e a distribuição
+    // mandaria outro
+    var dia = (typeof mdDataSel === 'function') ? (_mdCfg.dataDist || mdDataSel()) : '';
+    _mdBase.itens.forEach(function(i){
+      var c = mdPromoveParaEmitir(i, dia) ? 'emitir' : i.statusChave;
+      if (quais.indexOf(c) !== -1) n++;
+    });
   }
   return n;
 }
@@ -23929,6 +23936,59 @@ function mdAptoPedido(it, dia){
            motivo: (libera && libera <= hoje) ? '' : 'apto só em ' + cpDataBR(libera) };
 }
 
+// ── A NEGOCIAÇÃO MADURA VIRA EMITIR PEDIDO (11/11) ───────────────
+// Bug achado pelo André: na Governança, item de Negociar Preço ou
+// Negociar acima do limite DPV que já cumpriu os 2 dias úteis cai no
+// card EMITIR PEDIDO (gpEstado). Na Distribuição do MAPA isso não
+// acontecia: ele continuava sendo repartido como negociação, porque o
+// status vinha cru da coluna ANALISTA_AUTOMATICO do arquivo.
+//
+// Resultado: a Governança dizia "tem 30 para emitir" e a distribuição
+// mandava para a equipe só os que o MAPA já trazia como Emitir Pedido.
+// Os negociados ficavam de fora da relação.
+//
+// Aqui a mesma regra da Governança é aplicada ANTES de distribuir. O
+// item vai COPIADO: a base lida do arquivo não é tocada, senão o
+// resumo do dia e a exportação com as colunas originais mudariam de
+// significado no meio do caminho.
+var MD_VIRA_EMITIR = ['negociar', 'dpv'];
+
+function mdPromoveParaEmitir(it, dia){
+  if (MD_VIRA_EMITIR.indexOf(it.statusChave) === -1) return false;
+  try { return mdAptoPedido(it, dia).apto; } catch (e) { return false; }
+}
+
+function mdPromoverNegociados(itens, dia){
+  return (itens || []).map(function(it){
+    if (!mdPromoveParaEmitir(it, dia)) return it;
+    var o = {};
+    for (var k in it) if (Object.prototype.hasOwnProperty.call(it, k)) o[k] = it[k];
+    o.statusChave = 'emitir';
+    o.statusOriginal = it.statusChave;      // de onde ele veio
+    o.deNegociacao = true;
+    return o;
+  });
+}
+
+// Quantos de cada um dos três de emissão existem para o dia, já com os
+// negociados maduros somados ao Emitir Pedido. É o que o André pediu
+// para ver na tela da distribuição.
+function mdContaEmissao(dia){
+  var r = { emitir:{ total:0, doMapa:0, daNegociacao:0 },
+            patec:{ total:0, aptos:0 }, patecman:{ total:0, aptos:0 } };
+  ((_mdBase && _mdBase.itens) || []).forEach(function(it){
+    var ch = it.statusChave;
+    if (ch === 'emitir') { r.emitir.total++; r.emitir.doMapa++; return; }
+    if (ch === 'patec' || ch === 'patecman') {
+      r[ch].total++;
+      try { if (mdAptoPedido(it, dia).apto) r[ch].aptos++; } catch (e) {}
+      return;
+    }
+    if (mdPromoveParaEmitir(it, dia)) { r.emitir.total++; r.emitir.daNegociacao++; }
+  });
+  return r;
+}
+
 function mdEntraNaDistribuicao(it, dia){
   var achou = false;
   for (var i = 0; i < MD_STATUS.length; i++) {
@@ -24710,6 +24770,9 @@ async function mdDistribuir(){
   var itensMapa = temMapa
     ? _mdBase.itens.filter(function(it){ return mdEntraNaDistribuicao(it, _diaDist); })
     : [];
+  // a negociação que já cumpriu os 2 dias úteis entra como Emitir
+  // Pedido, exatamente como a Governança mostra
+  itensMapa = mdPromoverNegociados(itensMapa, _diaDist);
   // Os rejeitados NÃO entram mais aqui: desde 11/11 cada rejeite já
   // nasce com dono — quem criou o pedido —, e isso é resolvido na tela
   // de rejeitados, pelo cruzamento com a medição.
@@ -24774,7 +24837,41 @@ function mdRenderResumo(){
   // distribuir 21 sem dizer nada é a receita para o André achar que o
   // dashboard perdeu itens.
   var aptos = mdContaAptos(mdDataSel());
-  var h = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem;margin-top:.9rem">';
+  // ── O QUE HÁ PARA EMITIR (11/11) ──────────────────────────────
+  // Pedido do André: na tela da distribuição ele quer ver quantos
+  // pedidos há para emitir, somando o que o MAPA já traz como Emitir
+  // Pedido com a negociação que cumpriu os 2 dias úteis — e os dois
+  // de PATEC ao lado. Antes era preciso ir até a Governança para
+  // saber isso, e os números não batiam.
+  var _em = mdContaEmissao(mdDataSel());
+  var h = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));'
+    +   'gap:.75rem;margin-top:.9rem">'
+    + card('A EMITIR — EMITIR PEDIDO', cpNum(_em.emitir.total),
+        cpNum(_em.emitir.doMapa) + ' do MAPA'
+        + (_em.emitir.daNegociacao
+            ? ' · <strong style="color:var(--vd)">+ ' + cpNum(_em.emitir.daNegociacao)
+              + ' da negociação</strong>'
+            : ' · nenhum vindo da negociação'),
+        'var(--az)')
+    + card('A EMITIR — PEDIDO PATEC', cpNum(_em.patec.aptos),
+        'de ' + cpNum(_em.patec.total) + ' no MAPA · '
+        + cpNum(_em.patec.total - _em.patec.aptos) + ' aguardando os 2 dias',
+        'var(--vd)')
+    + card('A EMITIR — PATEC MANUAL', cpNum(_em.patecman.aptos),
+        'de ' + cpNum(_em.patecman.total) + ' no MAPA · '
+        + cpNum(_em.patecman.total - _em.patecman.aptos) + ' aguardando os 2 dias',
+        'var(--azm)')
+    + '</div>'
+    + (_em.emitir.daNegociacao
+        ? '<div style="font-size:10.5px;color:var(--tx2);margin-top:6px;line-height:1.6">'
+          + '↳ Os <strong>' + cpNum(_em.emitir.daNegociacao) + '</strong> da negociação são itens '
+          + 'de <strong>Negociar Preço Excessivo</strong> e <strong>Negociar, acima do limite '
+          + 'DPV</strong> que já cumpriram os <strong>2 dias úteis</strong>. Eles entram na '
+          + 'distribuição como Emitir Pedido, igual ao card da Governança — até 11/11 ficavam '
+          + 'de fora da relação.</div>'
+        : '');
+
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem;margin-top:.9rem">';
   // este resumo é do MAPA do dia: rejeitado e reap têm fonte própria e
   // cada um já tem o resumo dele, então apareceriam aqui zerados
   MD_STATUS.filter(function(x){ return mdStatusDoMapa(x.chave); }).forEach(function(x){
@@ -25139,6 +25236,9 @@ async function mdSalvarDia(){
                dpv:!!i.dpv, valor:i.valor, foraAtividade:!!i.foraAtividade,
                prioritario:!!i.prioritario,
                origem:i.origem || 'mapa', lote:i.lote || '', statusReap:i.statusReap || '',
+               // de onde o item veio quando a negociação madura virou
+               // Emitir Pedido — para o relatório poder dizer
+               statusOriginal:i.statusOriginal || '', deNegociacao:!!i.deNegociacao,
                statusArquivo:i.statusArquivo || '', statusMarcado:!!i.statusMarcado,
                dataLote:i.dataLote || '' };
     };
