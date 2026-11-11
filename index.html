@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 17:30';
+var GTO_BUILD = '11/11 19:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -20688,135 +20688,12 @@ function rjsAbrirLado(l){
   gpRenderDetalhe();
 }
 
-function rjsCardLado(chave, nome, n, cor, fundo, sub){
-  var sel = _rjsLado === chave;
-  return '<div onclick="rjsAbrirLado(\'' + chave + '\')" style="flex:1;min-width:170px;cursor:pointer;'
-    + 'border-radius:12px;padding:1rem .9rem;text-align:center;background:' + fundo + ';'
-    + 'border:' + (sel ? '2.5px' : '1.5px') + ' solid ' + cor + ';transition:.15s">'
-    + '<div style="font-size:30px;font-weight:800;color:' + cor + ';line-height:1.1">' + cpNum(n) + '</div>'
-    + '<div style="font-size:11px;font-weight:700;color:' + cor + ';margin-top:5px;letter-spacing:.2px">'
-    +   cpEsc(nome.toUpperCase()) + '</div>'
-    + '<div style="font-size:10px;color:var(--tx2);margin-top:4px">' + sub + '</div></div>';
-}
+// Os dois cards grandes viraram botões em 11/11, no mesmo formato do
+// Rejeite Fornecedor — ver gpHtmlRejeiteSup.
 
-function gpHtmlRejeiteSup(){
-  var q = rjsPorCulpa();
-  var r;
-  try { r = rjsMontar(); } catch (e) { r = { linhas:[], fora:[] }; }
 
-  var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
-    + '<span>Rejeite Supervisor — ' + cpNum(q.total) + ' item(ns) rejeitado(s)</span>'
-    + '<span style="display:flex;gap:8px">'
-    +   (q.total ? '<button class="btn btn-s" onclick="rjsExportar()">⬇ Exportar planilha</button>' : '')
-    +   '<button class="btn btn-s" onclick="gpAbrirCard(\'rejsup\')">✕ Fechar</button>'
-    + '</span></div>';
-
-  if (!q.total) {
-    return h + '<div style="font-size:12px;color:var(--tx2)">'
-      + 'Sem itens. A conta sai da medição (Controle de Pedidos) e os motivos da planilha do '
-      + 'Rodrigo (Controle de Pedidos › Rejeite › Rejeite Supervisor).</div></div>';
-  }
-
-  h += '<div style="display:flex;gap:10px;flex-wrap:wrap">'
-    + rjsCardLado('level', 'Motivo Level', q.level, 'var(--vm)', 'var(--vmc)',
-        'motivo que nasce do nosso lado')
-    + rjsCardLado('petro', 'Motivo Petrobras', q.petro, 'var(--azm)', 'var(--azc)',
-        'preço excessivo e data de parada')
-    + (q.sem ? rjsCardLado('sem', 'Sem classificação', q.sem, 'var(--am)', 'var(--amc)',
-        q.semPadrao ? cpNum(q.semPadrao) + ' sem padrão na planilha' : 'código novo, me diga o lado')
-      : '')
-    + '</div>';
-
-  // códigos que ainda não sei de que lado ficam
-  if (q.sem - q.semPadrao > 0) {
-    h += '<div class="al al-a" style="font-size:11.5px;margin-top:.8rem">'
-      + '⚠ Estes padrões não estão na minha lista, então não entraram em nenhum dos dois lados. '
-      + 'Me diga de quem é cada um e eu classifico:<div style="margin-top:5px;line-height:1.8">'
-      + Object.keys(q.codigosSem).sort().map(function(k){
-          return '<div><strong>' + q.codigosSem[k] + '</strong> × ' + cpEsc(k) + '</div>'; }).join('')
-      + '</div></div>';
-  }
-
-  // ── a lista do lado escolhido ─────────────────────────────────
-  if (_rjsLado) {
-    var lista = r.linhas.filter(function(l){
-      return (!l.padrao ? 'sem' : rjsCulpa(l.padrao)) === _rjsLado;
-    });
-    var porPadrao = {};
-    lista.forEach(function(l){
-      var k = l.padrao || '(sem padrão na planilha)';
-      porPadrao[k] = (porPadrao[k] || 0) + 1;
-    });
-    h += '<div style="margin-top:1rem;border-top:1px dashed var(--brd);padding-top:.8rem">'
-      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:.6rem">'
-      +   '<strong style="font-size:12.5px">' + cpEsc(RJS_CULPA_NOME[_rjsLado]) + ' — '
-      +     cpNum(lista.length) + ' item(ns)</strong>'
-      +   '<button class="btn btn-s" style="font-size:11px;margin-left:auto"'
-      +     ' onclick="rjsBaixarLado(\'' + _rjsLado + '\')">⬇ Baixar</button>'
-      +   '<button class="btn btn-s" style="font-size:11px"'
-      +     ' onclick="rjsAbrirLado(\'' + _rjsLado + '\')">✕ Fechar</button>'
-      + '</div>'
-      + '<div style="font-size:11.5px;color:var(--tx2);line-height:1.9;margin-bottom:.6rem">'
-      + Object.keys(porPadrao).sort(function(a, b){ return porPadrao[b] - porPadrao[a]; })
-          .map(function(k){
-            return '<div><strong style="color:var(--tx)">' + porPadrao[k] + '</strong> — '
-              + cpEsc(k) + '</div>'; }).join('')
-      + '</div>'
-      // A MESMA GRADE DA ABA (11/11): as colunas que o André pediu e os
-      // campos Motivo e Conclusão editáveis. Era só leitura aqui, e ele
-      // tinha de pular para a outra aba para escrever.
-      // O prefixo 'gs' é próprio deste card: duas grades desenhadas na
-      // mesma página não podem dividir a lista de linhas.
-      + rjGradeHTML(rjsLinhasGrade(lista), RJ_EXTRA_SUP_GOV, 'gs', true)
-      + '</div>';
-  } else {
-    h += '<div style="font-size:11.5px;color:var(--tx2);margin-top:.8rem">'
-      + 'Clique num dos lados para ver os itens.</div>';
-  }
-
-  h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:10px;line-height:1.7">'
-    + gppNota('rejsup', 'neste card')
-    + ' Âmbar a partir de 15 dias, vermelho a partir de 30.<br>'
-    + 'O lado sai do código do <strong>Padrão de Rejeição</strong> da planilha do Rodrigo. '
-    + 'São <strong>' + Object.keys(RJS_CULPA).filter(function(k){ return RJS_CULPA[k] === 'level'; }).length
-    + ' códigos Level</strong> e <strong>'
-    + Object.keys(RJS_CULPA).filter(function(k){ return RJS_CULPA[k] === 'petro'; }).length
-    + ' Petrobras</strong>; o que não estiver na lista fica à parte, para você dizer de quem é. '
-    + 'O <strong>Motivo</strong> e a <strong>Conclusão</strong> que você escrever aqui são '
-    + 'os mesmos da aba <strong>Controle de Pedidos › Rejeite › Rejeite Supervisor</strong>.'
-    + '</div></div>';
-  return h;
-}
-
-function rjsBaixarLado(lado){
-  try {
-    var r = rjsMontar();
-    var lista = r.linhas.filter(function(l){
-      return (!l.padrao ? 'sem' : rjsCulpa(l.padrao)) === lado;
-    });
-    if (!lista.length) { alert('Nada para baixar neste lado.'); return; }
-    var cab = RJS_COLS.map(function(c){ return c[0]; }).concat(['Lado']);
-    var linhas = [cab];
-    lista.forEach(function(l){
-      linhas.push(RJS_COLS.map(function(c){
-        var v = l[c[1]];
-        if (c[1] === 'dataPedido') return v ? cpDataBR(v) : '';
-        return (v == null) ? '' : v;
-      }).concat([RJS_CULPA_NOME[lado]]));
-    });
-    var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(linhas),
-      lado === 'level' ? 'Motivo Level' : (lado === 'petro' ? 'Motivo Petrobras' : 'Sem classificacao'));
-    XLSX.writeFile(wb, 'Rejeite_' + lado + '_' + cpHojeISO().replace(/-/g, '') + '.xlsx');
-  } catch (e) { alert('Não consegui baixar: ' + e.message); }
-}
-
-// ── Rejeite Supervisor — a tela ───────────────────────────────────
 function rjsNum(v){ return (v == null || v === '') ? '—' : cpNum(v); }
 
-// Por que a medição não trouxe item nenhum. Mostra o caminho que cada
-// linha fez e, principalmente, QUAL coluna cada parte da regra foi ler —
-// é aí que mora o engano quando o cabeçalho vem escrito diferente.
 function rjsFunilHTML(){
   var F = (_rjsMed && _rjsMed.funil) ? _rjsMed.funil : null;
   if (!F || !F.lidas) return '';
@@ -20891,10 +20768,6 @@ function rjsFunilHTML(){
     + '</div>';
 }
 
-// O cruzamento que responde a pergunta de uma vez: dos pedidos que o
-// Rodrigo aponta, quantos a medição tem — e em que status eles estão
-// lá. Se todos estiverem em 3, o problema não é coluna nenhuma: é a
-// regra do status 8 não bater com o que o arquivo traz.
 function rjsCruzaRodrigoHTML(){
   var cock = (_rjsRod && _rjsRod.cockpit) ? _rjsRod.cockpit : {};
   var ped  = (_rjsMed && _rjsMed.pedidos) ? _rjsMed.pedidos : {};
@@ -21192,6 +21065,165 @@ function rjSupervisorHTML(){
   return h;
 }
 
+function gpHtmlRejeiteSup(){
+  var q = rjsPorCulpa();
+  var r;
+  try { r = rjsMontar(); } catch (e) { r = { linhas:[], fora:[] }; }
+  var faltaMed = !(_rjsMed && _rjsMed.itens && _rjsMed.itens.length);
+  var faltaRod = !(_rjsRod && _rjsRod.nCockpit);
+
+  var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
+    + '<span>Rejeite Supervisor — ' + cpNum(q.total) + ' item(ns) rejeitado(s)</span>'
+    + '<span style="display:flex;gap:8px">'
+    +   (q.total ? '<button class="btn btn-s" onclick="rjsExportar()">⬇ Exportar planilha</button>' : '')
+    +   '<button class="btn btn-s" onclick="gpAbrirCard(\'rejsup\')">✕ Fechar</button>'
+    + '</span></div>';
+
+  if (!q.total) {
+    return h + '<div style="font-size:12px;color:var(--tx2)">'
+      + 'Sem itens. A conta sai da medição (Controle de Pedidos) e os motivos da planilha do '
+      + 'Rodrigo (Controle de Pedidos › Rejeite › Rejeite Supervisor).</div></div>';
+  }
+
+  // ── O MESMO FORMATO DO REJEITE FORNECEDOR (11/11) ─────────────
+  // Pedido do André: ele gostou do recorte compacto do Fornecedor —
+  // a linha de botões com a conta de cada lado e o resumo logo abaixo —
+  // e quis o mesmo aqui. Os dois cards grandes viraram botões, "Todos"
+  // passou a ser uma opção de verdade, e a lista aparece de cara em
+  // vez de só depois de escolher um lado.
+  var _rjsOrigem = [];
+  if (_rjsMed && _rjsMed.arquivo) {
+    _rjsOrigem.push('medição <strong>' + cpEsc(_rjsMed.arquivo) + '</strong>');
+  }
+  if (_rjsRod && _rjsRod.arquivo) {
+    _rjsOrigem.push('planilha do Rodrigo <strong>' + cpEsc(_rjsRod.arquivo) + '</strong>');
+  }
+  var _rjsLista = r.linhas.filter(function(l){
+    if (!_rjsLado) return true;
+    return (!l.padrao ? 'sem' : rjsCulpa(l.padrao)) === _rjsLado;
+  });
+  h += '<div style="font-size:12px;margin-top:.5rem;color:var(--tx2)">'
+    + (_rjsOrigem.length ? 'Vem da ' + _rjsOrigem.join(' e da ') + '. ' : '')
+    + cpNum(q.total) + ' item(ns) rejeitado(s).'
+    + (_rjsLado ? ' <strong style="color:var(--az)">Mostrando ' + cpNum(_rjsLista.length)
+        + ' de ' + cpEsc(RJS_CULPA_NOME[_rjsLado]) + '.</strong>' : '')
+    + '</div>';
+
+  // os botões do recorte, com a conta de cada lado
+  var _rjsBotoes = [{ k:'', nome:'Todos', n:q.total }];
+  _rjsBotoes.push({ k:'level', nome:'Motivo Level', n:q.level });
+  _rjsBotoes.push({ k:'petro', nome:'Motivo Petrobras', n:q.petro });
+  if (q.sem) _rjsBotoes.push({ k:'sem', nome:'Sem classificação', n:q.sem });
+  h += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:.6rem">'
+    + '<span style="font-size:10px;color:var(--tx2);font-weight:700">LADO DA REJEIÇÃO</span>'
+    + _rjsBotoes.map(function(b){
+        var on = (_rjsLado === b.k);
+        return '<button class="btn btn-s" onclick="rjsAbrirLado(\'' + b.k + '\')"'
+             + ' style="font-size:11px;padding:3px 10px;'
+             +   (on ? 'background:var(--az);color:#fff;border-color:var(--az);font-weight:700' : '')
+             + '">' + cpEsc(b.nome) + ' ' + cpNum(b.n) + '</button>';
+      }).join('')
+    + (q.total ? '<button class="btn btn-s" style="font-size:11px;margin-left:auto"'
+        + ' onclick="rjsBaixarLado(\'' + _rjsLado + '\')">⬇ Baixar o que está na tela</button>' : '')
+    + '</div>';
+
+  // códigos que ainda não sei de que lado ficam
+  if (q.sem - q.semPadrao > 0) {
+    h += '<div class="al al-a" style="font-size:11.5px;margin-top:.8rem">'
+      + '⚠ Estes padrões não estão na minha lista, então não entraram em nenhum dos dois lados. '
+      + 'Me diga de quem é cada um e eu classifico:<div style="margin-top:5px;line-height:1.8">'
+      + Object.keys(q.codigosSem).sort().map(function(k){
+          return '<div><strong>' + q.codigosSem[k] + '</strong> × ' + cpEsc(k) + '</div>'; }).join('')
+      + '</div></div>';
+  }
+
+  // o resumo, na mesma leitura do Fornecedor: por padrão e por comprador
+  if (_rjsLista.length) {
+    var porPadrao = {}, porComprador = {}, pedidos = {};
+    _rjsLista.forEach(function(l){
+      var k = l.padrao || '(sem padrão na planilha)';
+      porPadrao[k] = (porPadrao[k] || 0) + 1;
+      var c = l.comprador || '(sem comprador)';
+      porComprador[c] = (porComprador[c] || 0) + 1;
+      if (l.pedido) pedidos[_rjsN(l.pedido)] = 1;
+    });
+    var topo = function(o){
+      return Object.keys(o).sort(function(a, b){ return o[b] - o[a]; })
+        .map(function(k){ return cpEsc(k) + ' <strong>' + o[k] + '</strong>'; }).join(' · ');
+    };
+    h += '<div style="font-size:11px;color:var(--tx2);margin-top:.9rem;line-height:1.8">'
+      + '<div><strong style="color:var(--tx)">' + cpNum(_rjsLista.length) + '</strong> item(ns) em '
+      +   cpNum(Object.keys(pedidos).length) + ' pedido(s).</div>'
+      + '<div>Por padrão: ' + topo(porPadrao) + '</div>'
+      + '<div>Por comprador: ' + topo(porComprador) + '</div>'
+      + '</div>';
+
+    h += rjGradeHTML(rjsLinhasGrade(_rjsLista), RJ_EXTRA_SUP_GOV, 'gs', true);
+  } else {
+    h += '<div style="font-size:11.5px;color:var(--tx2);margin-top:.8rem">'
+      + 'Nenhum item neste recorte.</div>';
+  }
+
+  // ── os que saíram da medição ──────────────────────────────────
+  // Antes isto era lido como falha ("não estão na medição"). O André
+  // conferiu item a item: eles saíram porque o comprador tratou. A
+  // lista continua, com o motivo de cada um, mas o tom é de resolvido.
+  if (r.fora.length) {
+    h += '<div style="margin-top:1rem;border:1.5px solid var(--vd);border-radius:10px;'
+      +   'background:var(--vdc);padding:.7rem .85rem">'
+      +   '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">'
+      +     '<strong style="font-size:12px">✓ ' + cpNum(r.fora.length)
+      +       ' item(ns) já resolvidos — apontados pelo Rodrigo e fora da medição</strong>'
+      +     '<button class="btn btn-s" style="font-size:11px;margin-left:auto"'
+      +       ' onclick="rjsBaixarFora()">⬇ Baixar a lista</button></div>'
+      +   '<div style="font-size:11px;color:var(--tx2);margin-bottom:.5rem">'
+      +     'Saíram da medição porque o rejeite foi tratado. O motivo de cada um está abaixo — '
+      +     'é por ele que se confere se foi tratamento mesmo ou dado faltando.'
+      +     (r.temRetrato ? '' : ' <span style="color:var(--am)">Suba a medição de novo para eu '
+                                 + 'conseguir dizer o motivo de cada um.</span>')
+      +   '</div>'
+      +   '<div style="font-size:11.5px;margin-bottom:.6rem;line-height:1.9">'
+      +     (Object.keys(r.porMotivo)
+              .sort(function(x, y){ return r.porMotivo[y] - r.porMotivo[x]; })
+              .map(function(m){
+                return '<div><strong>' + r.porMotivo[m] + '</strong> — ' + cpEsc(m) + '</div>';
+              }).join(''))
+      +   '</div>'
+      +   '<div style="overflow:auto;max-height:260px"><table><thead><tr>'
+      +     '<th>Pedido</th><th>Item</th><th>Oportunidade</th>'
+      +     '<th style="text-align:right">SLA Pedido</th><th>Padrão rejeição</th>'
+      +     '<th>Justificativa</th><th>Por que ficou de fora</th>'
+      +   '</tr></thead><tbody>';
+    r.fora.forEach(function(f){
+      h += '<tr><td style="font-weight:700;color:var(--az)">' + cpEsc(f.pedido) + '</td>'
+        + '<td>' + cpEsc(f.item || '—') + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(f.op || '—') + '</td>'
+        + '<td style="text-align:right;font-weight:700">' + rjsNum(f.sla) + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(f.padrao || '—') + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(f.justificativa || '—') + '</td>'
+        + '<td style="font-size:10.5px;color:' + (f.cod === 'outroItem' ? 'var(--am)' : 'var(--vm)') + '">'
+        +   cpEsc(f.motivo || '—') + '</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+  } else if (!faltaRod && !faltaMed) {
+    h += '<div class="al al-v" style="font-size:11.5px;margin-top:1rem">'
+      + '✓ Todo item apontado no último cockpit do Rodrigo tem par na medição.</div>';
+  }
+
+  // ── a regra escrita ───────────────────────────────────────────
+  h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:10px;line-height:1.7">'
+    + '<strong>A regra:</strong> da medição entram as linhas com <strong>STATUS_PROCESSO = 8</strong>, '
+    + '<strong>CODIGO_ELIMINACAO vazio</strong> e <strong>CODIGO_ELIMINACAO_ITEM_PEDIDO vazio</strong>; '
+    + 'a contagem é por <strong>Requisição + LINHAREQUISICAO</strong>, sem repetir. '
+    + 'O <strong>SLA Pedido</strong> vem do último cockpit do Rodrigo, casado por <strong>pedido</strong> '
+    + '(aquela aba não tem coluna de item). <strong>SLA RC</strong> e <strong>Idas ao Mercado</strong> '
+    + 'vêm do levelboard por <strong>RC + SEQ</strong>. <strong>Padrão</strong> e '
+    + '<strong>justificativa</strong> vêm da aba Dados por <strong>pedido + item</strong>, sempre do '
+    + 'cockpit mais recente. A exportação leva estas colunas e, no fim, a linha original da medição.'
+    + '</div></div>';
+  return h;
+}
+
 // ── exportação ────────────────────────────────────────────────────
 function rjsExportar(){
   try {
@@ -21221,6 +21253,44 @@ function rjsExportar(){
     }
     XLSX.writeFile(wb, 'Rejeite_Supervisor_' + cpHojeISO().replace(/-/g, '') + '.xlsx');
   } catch (e) { alert('Não consegui exportar: ' + e.message); }
+}
+
+// Baixa o recorte que está na tela do card. Com o lado vazio, baixa
+// tudo — "Todos" virou uma opção de verdade em 11/11.
+// (Esta função já existiu e sumiu num ajuste anterior do card; voltou
+// com o Todos e com as mesmas colunas que a tela mostra.)
+function rjsBaixarLado(lado){
+  try {
+    var r = rjsMontar();
+    var lista = (r.linhas || []).filter(function(l){
+      if (!lado) return true;
+      return (!l.padrao ? 'sem' : rjsCulpa(l.padrao)) === lado;
+    });
+    if (!lista.length) { alert('Não há itens neste recorte.'); return; }
+    var g = rjsLinhasGrade(lista);
+    var cab = ['RC','Item','Oportunidade','Item da OP','Pedido','Comprador','SLA Pedido',
+               'Motivo','Conclusão','Padrão rejeição','Justificativa',
+               'Parado desde','Dias parado'];
+    var aoa = [cab];
+    g.forEach(function(l){
+      var t = rjTrat(l);
+      var d = gppDesde('rejsup', rjsChaveLb(l.rc, l.itemRc));
+      var dias = gpDias(d);
+      aoa.push([l.rc, l.itemRc, l.oport, l.itemOp, l.pedido,
+                l.comprador || '(sem comprador)', +l.sla || 0,
+                t.motivo, t.conclusao, l.padrao, l.justificativa,
+                d ? cpDataBR(d) : '', dias == null ? '' : dias]);
+    });
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = cab.map(function(c){ return { wch: Math.max(11, Math.min(32, c.length + 4)) }; });
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({
+      s:{ r:0, c:0 }, e:{ r:aoa.length - 1, c:cab.length - 1 } }) };
+    var wb = XLSX.utils.book_new();
+    var aba = lado ? (RJS_CULPA_NOME[lado] || lado) : 'Todos';
+    XLSX.utils.book_append_sheet(wb, ws, aba.slice(0, 28));
+    XLSX.writeFile(wb, 'Rejeite_supervisor_' + (lado || 'todos') + '_'
+      + cpHojeISO().replace(/-/g, '') + '.xlsx');
+  } catch (e) { alert('Não consegui baixar: ' + e.message); }
 }
 
 function rjsBaixarFora(){
