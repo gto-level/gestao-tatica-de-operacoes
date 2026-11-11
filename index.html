@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '11/11 16:10';
+var GTO_BUILD = '11/11 17:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -18290,8 +18290,64 @@ function gpRenderDetalhe(){
 // Estas três funções são a parte comum: a mesma ordenação, o mesmo resumo
 // e a mesma tabela servem o card e a aba, para não existirem duas versões
 // da mesma lista que um dia divergem.
+// ── O RECORTE POR PRAZO DE RECUSA (11/11) ────────────────────────
+// Pedido do André: a coluna N da planilha de rejeite fornecedor (Prazo
+// Recusa) diz se o pedido ainda está NO PRAZO de resposta ou já passou.
+// Na planilha dele de 10/11 são 184 no prazo e 309 fora, em 493 linhas.
+//
+// O recorte vale para a tela inteira — cards, resumo, tabela e Excel —
+// e não joga nada fora: a base continua com tudo, muda só o que se
+// está olhando.
+var RJ_PRAZOS = [
+  { k:'',      nome:'Todos' },
+  { k:'no',    nome:'No prazo' },
+  { k:'fora',  nome:'Fora do prazo' }
+];
+var _rjPrazo = '';
+
+function rjPrazoDe(v){
+  var t = cpNormCab(v);
+  if (!t) return '';
+  if (t.indexOf('FORA') !== -1) return 'fora';
+  if (t.indexOf('NO_PRAZO') !== -1 || t.indexOf('NOPRAZO') !== -1) return 'no';
+  return '';
+}
+function rjPrazoContas(){
+  var c = { '':0, no:0, fora:0, sem:0 };
+  ((_gpRej && _gpRej.itens) || []).forEach(function(i){
+    c['']++;
+    var k = rjPrazoDe(i.prazo);
+    if (k) c[k]++; else c.sem++;
+  });
+  return c;
+}
+function rjPrazoFiltrar(k){
+  _rjPrazo = (k === _rjPrazo) ? '' : (k || '');
+  try { rjDesenhar(); } catch (e) {}
+  try { if (typeof gpRender === 'function' && _gpCard === 'rejeitados') gpRender(); } catch (e2) {}
+}
+// os botões do recorte, com a conta de cada lado
+function rjPrazoBotoesHTML(){
+  var c = rjPrazoContas();
+  if (!c['']) return '';
+  return '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:.6rem">'
+    + '<span style="font-size:10px;color:var(--tx2);font-weight:700">PRAZO DE RECUSA</span>'
+    + RJ_PRAZOS.map(function(p){
+        var n = p.k ? c[p.k] : c[''];
+        var on = (_rjPrazo === p.k);
+        return '<button class="btn btn-s" onclick="rjPrazoFiltrar(\'' + p.k + '\')"'
+             + ' style="font-size:11px;padding:3px 10px;'
+             +   (on ? 'background:var(--az);color:#fff;border-color:var(--az);font-weight:700' : '')
+             + '">' + cpEsc(p.nome) + ' ' + cpNum(n) + '</button>';
+      }).join('')
+    + (c.sem ? '<span style="font-size:10px;color:var(--am)">' + cpNum(c.sem)
+        + ' sem a coluna Prazo Recusa preenchida</span>' : '')
+    + '</div>';
+}
+
 function rjItens(){
   var itens = (_gpRej && _gpRej.itens) ? _gpRej.itens.slice() : [];
+  if (_rjPrazo) itens = itens.filter(function(i){ return rjPrazoDe(i.prazo) === _rjPrazo; });
   itens.sort(function(a, b){
     if ((b.dias || 0) !== (a.dias || 0)) return (b.dias || 0) - (a.dias || 0);
     return String(a.pedido).localeCompare(String(b.pedido));
@@ -18788,17 +18844,25 @@ function rjTabelaAntigaHTML(itens){
 // A linha que diz de qual arquivo veio a base que está na tela.
 function rjOrigemHTML(itens){
   if (!_gpRej || !_gpRej.arquivo) return '';
+  var todos = ((_gpRej && _gpRej.itens) || []).length;
   return '<span style="color:var(--tx2)">Último arquivo: <strong>' + cpEsc(_gpRej.arquivo)
     + '</strong>' + (_gpRej.atualizadoEm ? ' — ' + cpDataBR(String(_gpRej.atualizadoEm).slice(0,10)) : '')
-    + ' · ' + cpNum(_gpRej.lidas) + ' linhas, <strong>' + cpNum(itens.length)
-    + '</strong> dos nossos grupos, ' + cpNum(_gpRej.fora) + ' de outros grupos fora da conta.</span>';
+    + ' · ' + cpNum(_gpRej.lidas) + ' linhas, <strong>' + cpNum(todos)
+    + '</strong> dos nossos grupos, ' + cpNum(_gpRej.fora) + ' de outros grupos fora da conta.'
+    // com o recorte ligado, dizer de quantos estamos falando — senão o
+    // número do card some de vista sem explicação
+    + (_rjPrazo ? ' <strong style="color:var(--az)">Mostrando ' + cpNum(itens.length)
+        + ' que estão ' + ((_rjPrazo === 'no') ? 'NO PRAZO' : 'FORA DO PRAZO') + '.</strong>' : '')
+    + '</span>';
 }
 
 // O card da Governança de pedidos: lê a mesma base, sem o upload.
 function gpHtmlRejeitados(){
   var itens = rjItens();
   var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
-    + '<span>Rejeitados — ' + cpNum(itens.length) + ' pedido(s) dos nossos grupos</span>'
+    + '<span>Rejeitados — ' + cpNum(itens.length) + ' pedido(s) dos nossos grupos'
+    +   (_rjPrazo ? ' <span style="font-weight:500;color:var(--az)">· '
+          + cpEsc(_rjPrazo === 'no' ? 'no prazo' : 'fora do prazo') + '</span>' : '') + '</span>'
     + '<span style="display:flex;gap:8px">'
     +   (itens.length ? '<button class="btn btn-s" onclick="gpCopiar()">📋 Copiar</button>'
                       + '<button class="btn btn-s" onclick="gpBaixarExcel()">⬇ Baixar Excel</button>' : '')
@@ -18807,7 +18871,8 @@ function gpHtmlRejeitados(){
     + '<div class="al al-b" style="font-size:11.5px">ℹ A planilha de rejeitados é subida em '
     +   '<strong>Controle de Pedidos › Rejeite › Rejeite Fornecedor</strong>. Aqui é só leitura — '
     +   'a base é a mesma.</div>'
-    + '<div style="font-size:12px;margin-top:.5rem">' + rjOrigemHTML(itens) + '</div>';
+    + '<div style="font-size:12px;margin-top:.5rem">' + rjOrigemHTML(itens) + '</div>'
+    + rjPrazoBotoesHTML();
   if (!itens.length) {
     return h + '<div style="font-size:12px;color:var(--tx2);margin-top:.8rem">'
       + 'Nenhum pedido rejeitado nos nossos grupos.</div></div>';
@@ -18896,7 +18961,9 @@ function rjFornecedorHTML(){
   var itens = rjItens();
   return '<div class="cd" style="border-top:3px solid var(--vm)">'
     + '<div class="cd-t" style="justify-content:space-between">'
-    +   '<span>🏭 Rejeite Fornecedor — ' + cpNum(itens.length) + ' pedido(s) dos nossos grupos</span>'
+    +   '<span>🏭 Rejeite Fornecedor — ' + cpNum(itens.length) + ' pedido(s) dos nossos grupos'
+    +     (_rjPrazo ? ' <span style="font-weight:500;color:var(--az)">· '
+            + cpEsc(_rjPrazo === 'no' ? 'no prazo' : 'fora do prazo') + '</span>' : '') + '</span>'
     +   '<span style="display:flex;gap:8px">'
     +     (itens.length ? '<button class="btn btn-s" onclick="gpCopiar()">📋 Copiar</button>'
                         + '<button class="btn btn-s" onclick="gpBaixarExcel()">⬇ Baixar Excel</button>' : '')
@@ -18914,6 +18981,7 @@ function rjFornecedorHTML(){
     +     ' onchange="gpUploadRejeitados(this.files[0]); this.value=\'\';">'
     + '</div>'
     + '<div id="gp-rej-status" style="margin-top:.7rem;font-size:12px">' + rjOrigemHTML(itens) + '</div>'
+    + rjPrazoBotoesHTML()
     + (itens.length
         ? rjResumoHTML(itens) + rjTabelaHTML(itens)
         : '<div style="font-size:12px;color:var(--tx2);margin-top:.8rem">'
@@ -21699,8 +21767,10 @@ function gpLinhasDoCard(){
 
 function gpCopiar(){
   if (_gpCard === 'rejeitados') {
-    var t = ['PEDIDOS REJEITADOS — ' + cpNum(_gpRej.itens.length) + ' pedido(s) dos nossos grupos', ''];
-    _gpRej.itens.forEach(function(i){
+    var _lista = rjItens();
+    var t = ['PEDIDOS REJEITADOS — ' + cpNum(_lista.length) + ' pedido(s) dos nossos grupos'
+             + (_rjPrazo ? (_rjPrazo === 'no' ? ' — NO PRAZO' : ' — FORA DO PRAZO') : ''), ''];
+    _lista.forEach(function(i){
       t.push('Pedido ' + i.pedido + ' · ' + i.grupo + ' · ' + (i.forn || '')
         + (i.dias ? ' · ' + i.dias + ' dia(s) rejeitado' : '')
         + (i.motivo ? ' · ' + i.motivo : '')
