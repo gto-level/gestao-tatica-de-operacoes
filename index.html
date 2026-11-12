@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '12/11 16:20';
+var GTO_BUILD = '12/11 17:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -22528,10 +22528,53 @@ function monSerie(){
     real[i] = (real[i] === null ? 0 : real[i]) + (+h.total || 0);
   });
 
+  // ── O DIA SEM MEDIÇÃO SALVA (12/11) ────────────────────────────
+  // O André comparou este card (376) com o Emitidos x convertidos
+  // (1.005) e perguntou por que não batia. O buraco eram os 7 dias
+  // úteis do período em que ninguém salvou a medição do dia: aqui eles
+  // valiam ZERO, e lá não, porque a medição de momento é cumulativa e
+  // sabe a data de criação de cada pedido.
+  //
+  // Agora esses dias são preenchidos pela ÚLTIMA medição, pela data de
+  // criação do pedido. O dia que TEM registro salvo continua valendo o
+  // registro: ele é a foto daquele dia, feita na hora, e sobrescrevê-lo
+  // com o arquivo de hoje apagaria o que já foi conferido.
+  //
+  // As duas bases não são a mesma coisa, então cada dia preenchido fica
+  // marcado — na tabela, no gráfico e no Excel. Número emprestado que
+  // não se anuncia é como o número errado: ninguém sabe de onde veio.
+  var preenchidos = [];
+  (function(){
+    var porDia = {};
+    ((_monConv && _monConv.conv) || []).forEach(function(c){
+      if (!c.dia || cpEstaFora(c.nome)) return;
+      porDia[c.dia] = (porDia[c.dia] || 0) + (+c.mem || 0) + (+c.emi || 0);
+    });
+    if (!Object.keys(porDia).length) return;
+    var daMedicao = {};
+    Object.keys(porDia).forEach(function(d){
+      if (d < m.inicio || d > m.fim) return;
+      var alvo = d;
+      if (idx[alvo] === undefined) {        // fim de semana ou feriado
+        alvo = monProxUtilNaLista(d, dias);
+        if (alvo === null) return;
+      }
+      daMedicao[alvo] = (daMedicao[alvo] || 0) + porDia[d];
+    });
+    dias.forEach(function(d, i){
+      if (real[i] !== null || d > hoje) return;
+      if (daMedicao[d] === undefined) return;
+      real[i] = daMedicao[d];
+      preenchidos.push(d);
+    });
+  })();
+
   var semMedicao = [];
   dias.forEach(function(d, i){
     if (d <= hoje && real[i] === null) semMedicao.push(d);
   });
+  var ixPreench = {};
+  preenchidos.forEach(function(d){ ixPreench[d] = 1; });
 
   // último dia com número — depois dele a linha do real não é traçada
   var ultimo = -1;
@@ -22559,6 +22602,7 @@ function monSerie(){
   return { med:m, dias:dias, meta:meta, real:real, plan:plan,
            planAcum:planAcum, realAcum:realAcum, projecao:projecao,
            rolados:rolados, semMedicao:semMedicao, ultimo:ultimo,
+           preenchidos:preenchidos, ixPreench:ixPreench,
            feito:feito, comDado:comDado, ritmo:ritmo,
            planTotal: meta * dias.length,
            decorridos: decorridos, esperadoHoje: esperadoHoje, gap: gap,
@@ -23111,9 +23155,17 @@ function monRenderResumo(){
                + ') contados em ' + cpDataBR(r.para);
         }).join(' · ') + '</div>');
   }
+  if (s.preenchidos.length) {
+    recados.push('<div style="color:var(--azm)">ℹ ' + cpNum(s.preenchidos.length)
+      + ' dia(s) sem medição salva estão contados pela <strong>última medição</strong>, '
+      + 'pela data de criação do pedido: '
+      + s.preenchidos.slice(0, 8).map(cpDataBR).join(', ')
+      + (s.preenchidos.length > 8 ? ' e mais ' + (s.preenchidos.length - 8) : '')
+      + '. Sem isso eles valeriam zero e o gap ficaria pior do que é.</div>');
+  }
   if (s.semMedicao.length) {
     recados.push('<div style="color:var(--am)">⚠ ' + cpNum(s.semMedicao.length)
-      + ' dia(s) útil(eis) do período ainda sem medição subida: '
+      + ' dia(s) útil(eis) do período sem medição salva e sem nada na última medição: '
       + s.semMedicao.slice(0, 8).map(cpDataBR).join(', ')
       + (s.semMedicao.length > 8 ? ' e mais ' + (s.semMedicao.length - 8) : '') + '.</div>');
   }
@@ -23145,7 +23197,14 @@ function monRenderGrafico(){
           pointRadius:0, tension:0, fill:false },
         { label:'Feitos no dia', data:s.real,
           borderColor:'#0E9E6A', backgroundColor:'rgba(14,158,106,.14)',
-          borderWidth:3, pointRadius:3, tension:.25, fill:true, spanGaps:true } ];
+          borderWidth:3, tension:.25, fill:true, spanGaps:true,
+          // o dia emprestado da última medição sai com um ponto azul
+          // maior: no gráfico também tem de dar para ver de onde veio
+          pointRadius: s.dias.map(function(d){ return s.ixPreench[d] ? 5 : 3; }),
+          pointBackgroundColor: s.dias.map(function(d){
+            return s.ixPreench[d] ? '#1A4A8A' : '#0E9E6A'; }),
+          pointBorderColor: s.dias.map(function(d){
+            return s.ixPreench[d] ? '#1A4A8A' : '#0E9E6A'; }) } ];
   try {
     _monChart = new Chart(el, {
       type:'line',
@@ -23181,7 +23240,10 @@ function monRenderDias(){
     h += '<tr' + (d === s.hoje ? ' style="background:var(--azc)"' : '') + '>'
       + '<td style="font-weight:600">' + cpDataBR(d) + '</td>'
       + '<td style="text-align:right">' + cpNum(s.meta) + '</td>'
-      + '<td style="text-align:right;font-weight:700">' + (v === null ? '—' : cpNum(v)) + '</td>'
+      + '<td style="text-align:right;font-weight:700' + (s.ixPreench[d] ? ';color:var(--azm)' : '')
+      +   '" title="' + (s.ixPreench[d] ? 'veio da última medição, pela data de criação do pedido'
+                                        : '') + '">'
+      +   (v === null ? '—' : cpNum(v)) + '</td>'
       + '<td style="text-align:right;font-weight:600;color:'
       +   (saldo === null ? 'var(--tx2)' : (saldo >= 0 ? 'var(--vd)' : 'var(--vm)')) + '">'
       +   (saldo === null ? '—' : (saldo > 0 ? '+' : '') + cpNum(saldo)) + '</td>'
@@ -23190,6 +23252,8 @@ function monRenderDias(){
       + '<td style="font-size:10.5px;color:var(--tx2)">'
       +   (rolPara[d] ? '↪ inclui ' + rolPara[d].map(function(r){
               return cpNum(r.n) + ' de ' + cpDataBR(r.de); }).join(' e ') : '')
+      +   (s.ixPreench[d]
+            ? '<span style="color:var(--azm)">veio da última medição</span>' : '')
       +   (v === null ? (futuro ? 'ainda não chegou' : 'sem medição subida') : '')
       + '</td></tr>';
   });
@@ -23673,6 +23737,7 @@ function monBaixarExcel(){
                  s.meta * (i + 1),
                  (rolPara[d] ? 'inclui ' + rolPara[d].map(function(r){
                      return r.n + ' de ' + cpDataBR(r.de); }).join(' e ') + '. ' : '')
+                 + (s.ixPreench[d] ? 'veio da última medição (data de criação do pedido). ' : '')
                  + (v === null ? (d > s.hoje ? 'ainda não chegou' : 'sem medição subida') : '')]);
     });
     var ws1 = XLSX.utils.aoa_to_sheet(aoa1);
