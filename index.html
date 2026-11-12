@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '12/11 22:45';
+var GTO_BUILD = '12/11 23:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -17197,6 +17197,7 @@ async function rjSalvarPedIx(med, arquivo){
     });
     _rjPedIx = { itens:null, n:linhas.length, pedidos:Object.keys(med.pedItens).length,
                  arquivo:arquivo || '', atualizadoEm:new Date().toISOString(), erro:'' };
+    try { gpPedidoIxLimpar(); } catch (e9) {}
     return true;
   } catch (e) {
     console.warn('rjSalvarPedIx:', e);
@@ -17396,6 +17397,7 @@ async function rjCarregarPedIx(forcar){
     });
     _rjPedIx = { itens:ix, n:+d.n || 0, pedidos:+d.pedidos || 0, arquivo:d.arquivo || '',
                  atualizadoEm:d.atualizadoEm || '', erro:'' };
+    try { gpPedidoIxLimpar(); } catch (e9) {}
   } catch (e) {
     console.warn('rjCarregarPedIx:', e);
     _rjPedIx.itens = _rjPedIx.itens || {};
@@ -18263,6 +18265,46 @@ function emiConcluidos(){
   return out;
 }
 
+// ══ O NÚMERO DO PEDIDO, PELA CHAVE RC + ITEM (12/11) ═════════════
+// Pedido do André: os três cards de emissão ganham a coluna PEDIDO.
+// "Vamos criar uma chave (rc item) e buscar na planilha de medição, na
+// coluna D (pedidos)... se tiver o número do pedido trazer para a
+// coluna; se não tiver é só deixar em branco."
+//
+// O índice que a medição já grava é pedido → lista de RC+item (é assim
+// que o rejeite descobre o que tem dentro de cada pedido). Aqui a
+// pergunta é a inversa, então viro o índice uma vez e guardo: varrer
+// 119 mil linhas a cada linha da tela seria quadrático.
+//
+// Em branco é resposta legítima: item que ainda não virou pedido não
+// está na medição, e inventar um "—" sugeriria falha de leitura.
+var _gpPedPorRcItem = null;
+
+function gpPedidoIx(){
+  if (_gpPedPorRcItem) return _gpPedPorRcItem;
+  var ix = {};
+  var fonte = (_rjPedIx && _rjPedIx.itens) ? _rjPedIx.itens : null;
+  if (fonte) {
+    Object.keys(fonte).forEach(function(ped){
+      (fonte[ped] || []).forEach(function(t){
+        var k = _rjsN(t[0]) + '|' + _rjsN(t[1]);
+        if (k !== '|' && !ix[k]) ix[k] = ped;
+      });
+    });
+  }
+  _gpPedPorRcItem = ix;
+  return ix;
+}
+
+// A medição nova precisa derrubar o índice virado, senão a tela fica
+// mostrando o pedido de ontem para um item que mudou.
+function gpPedidoIxLimpar(){ _gpPedPorRcItem = null; }
+
+function gpPedidoDe(rc, seq){
+  var ix = gpPedidoIx();
+  return ix[_rjsN(rc) + '|' + _rjsN(seq)] || '';
+}
+
 // ══ O DONO DE CADA ITEM (12/11) ══════════════════════════════════
 // Pedido do André: os cards de emissão passam a mostrar o COMPRADOR
 // responsável, antes da RC; e "todo item já distribuído deve permanecer
@@ -18519,6 +18561,15 @@ async function gpAbrirCard(ch){
       gpRender();
     }
   }
+  // os três cards de emissão precisam do mesmo índice: é dele que sai a
+  // coluna Pedido, virada pela chave RC + item
+  if (_gpCard === 'emitir' || _gpCard === 'patec' || _gpCard === 'patecman') {
+    if (!_rjPedIx.itens) {
+      await rjCarregarPedIx();
+      gpPedidoIxLimpar();
+      gpRender();
+    }
+  }
   // O Status B da Governança desenha a MESMA lista da aba, então
   // precisa do dia carregado em _stbDia — quem entra direto pela
   // Governança não passou pela aba.
@@ -18596,7 +18647,9 @@ function gpRenderDetalhe(){
   }
   h += '<div style="overflow:auto;max-height:560px"><table><thead><tr>'
     + (comDono ? '<th title="quem recebeu o item na distribuição">Comprador</th>' : '')
-    + '<th>RC</th><th>Item</th><th>Oportunidade</th><th>Item op.</th>'
+    + '<th>RC</th><th>Item</th>'
+    + (comDono ? '<th title="achado na medição do dia pela chave RC + item">Pedido</th>' : '')
+    + '<th>Oportunidade</th><th>Item op.</th>'
     + '<th style="text-align:right">SLA</th><th>Segmento</th>'
     + (dePatec ? '<th>Fornecedor ganhador</th><th>NM do pedido</th>' : '')
     + (semNeg ? '' : '<th>Data da negociação</th><th>Apto a pedido</th>')
@@ -18617,6 +18670,8 @@ function gpRenderDetalhe(){
           : '')
       + '<td style="font-weight:700;color:var(--az)">' + cpEsc(it.rc) + '</td>'
       + '<td>' + cpEsc(it.seq) + '</td>'
+      + (comDono
+          ? '<td style="font-weight:600">' + cpEsc(gpPedidoDe(it.rc, it.seq)) + '</td>' : '')
       + '<td>' + cpEsc(it.op || '—') + '</td>'
       + '<td>' + cpEsc(it.itemOp || '—') + '</td>'
       + '<td style="text-align:right;font-weight:600">' + cpNum(it.sla || 0) + '</td>'
@@ -18686,7 +18741,14 @@ function gpRenderDetalhe(){
     h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:8px;line-height:1.7">'
       + 'A coluna <strong>Comprador</strong> é quem recebeu o item na distribuição do MAPA. '
       + 'Item já distribuído <strong>continua com o mesmo comprador</strong> nas próximas '
-      + 'distribuições, até ser concluído.'
+      + 'distribuições, até ser concluído. '
+      + 'A coluna <strong>Pedido</strong> vem da <strong>medição do dia</strong>, procurada '
+      + 'pela chave <strong>RC + item</strong> — em branco quer dizer que o item ainda não '
+      + 'virou pedido na medição'
+      + ((_rjPedIx && _rjPedIx.arquivo)
+          ? ' (medição de ' + cpDataBR(String(_rjPedIx.atualizadoEm || '').slice(0, 10)) + ')'
+          : '; <strong style="color:var(--am)">nenhuma medição lida ainda</strong>')
+      + '.'
       + (semDono ? ' <strong>' + cpNum(semDono) + '</strong> item(ns) ainda não entraram em '
                    + 'nenhuma distribuição.' : '')
       + '</div>';
@@ -22581,18 +22643,36 @@ function gpBaixarExcel(){
     }
     var l = gpLinhasDoCard();
     if (!l.length) return;
-    var cab = ['Card','RC','Item','Oportunidade','Item oport.','SLA','Segmento','Status do MAPA',
+    // o Excel leva as mesmas colunas da tela: comprador e pedido nos três
+    // cards de emissão, e a tratativa no Emitir pedido. Planilha que não
+    // bate com a tela foi o que já deu confusão aqui mais de uma vez.
+    var _comDono = (_gpCard === 'emitir' || _gpCard === 'patec' || _gpCard === 'patecman');
+    var _comTrat = (_gpCard === 'emitir');
+    var cab = ['Card']
+      .concat(_comDono ? ['Comprador'] : [])
+      .concat(['RC','Item'])
+      .concat(_comDono ? ['Pedido'] : [])
+      .concat(['Oportunidade','Item oport.','SLA','Segmento','Status do MAPA',
                'Data da negociação','Apto a pedido','Fornecedor ganhador','NM do pedido',
-               'Comentário','Situação'];
+               'Comentário'])
+      .concat(_comTrat ? ['Comentário do pedido','Conclusão'] : [])
+      .concat(['Situação']);
     var aoa = [cab];
     l.forEach(function(x){
       var it = x.it, e = x.e;
-      aoa.push([govNomeCard(e.card), it.rc, it.seq, it.op || '', it.itemOp || '', it.sla || 0,
+      aoa.push([govNomeCard(e.card)]
+        .concat(_comDono ? [gpDonoDe(e.chave)] : [])
+        .concat([it.rc, it.seq])
+        .concat(_comDono ? [gpPedidoDe(it.rc, it.seq)] : [])
+        .concat([it.op || '', it.itemOp || '', it.sla || 0,
                 it.seg || '', it.status || '',
                 e.dataNeg ? cpDataBR(e.dataNeg) : '', e.libera ? cpDataBR(e.libera) : '',
-                e.fornecedor || '', e.nmPedido || '', e.comentario || '',
-                e.card !== e.origem ? 'Veio de ' + govNomeCard(e.origem)
-                  : (e.dataNeg ? (e.liberado ? 'Apto a pedido' : 'Aguardando 2 dias') : 'Sem data')]);
+                e.fornecedor || '', e.nmPedido || '', e.comentario || ''])
+        .concat(_comTrat ? [e.emiComentario || '', emiNome(e.emiConclusao)] : [])
+        .concat([
+                e.retido ? ('Parado · ' + emiNome(e.emiConclusao))
+                  : (e.card !== e.origem ? 'Veio de ' + govNomeCard(e.origem)
+                  : (e.dataNeg ? (e.liberado ? 'Apto a pedido' : 'Aguardando 2 dias') : 'Sem data'))]));
     });
     var ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols'] = cab.map(function(c){ return { wch: Math.max(10, Math.min(28, c.length + 4)) }; });
