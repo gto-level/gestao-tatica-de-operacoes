@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '12/11 21:40';
+var GTO_BUILD = '12/11 22:45';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -18263,6 +18263,74 @@ function emiConcluidos(){
   return out;
 }
 
+// ══ O DONO DE CADA ITEM (12/11) ══════════════════════════════════
+// Pedido do André: os cards de emissão passam a mostrar o COMPRADOR
+// responsável, antes da RC; e "todo item já distribuído deve permanecer
+// com o comprador até a sua conclusão".
+//
+// São as duas faces do mesmo dado. Guardo um índice rc|seq → quem
+// recebeu, atualizado a cada distribuição salva. Varrer todas as
+// distribuições a cada abertura de tela seria caro — cada dia guarda
+// milhares de itens —, então o índice é mantido na hora de salvar, que
+// é quando a informação nasce.
+//
+// Entradas velhas são podadas: item distribuído há mais de 120 dias ou
+// já foi concluído ou não é mais o mesmo trabalho.
+var GP_DONO_DOC = 'distribuicao_dono';
+var GP_DONO_MAX = 8000;
+var GP_DONO_DIAS = 120;
+var _gpDono = { itens:{}, atualizadoEm:'' };
+
+function gpDonoDe(chave){
+  var o = _gpDono.itens[chave];
+  return o ? (o.n || '') : '';
+}
+function gpDonoInfo(chave){ return _gpDono.itens[chave] || null; }
+
+async function gpCarregarDono(){
+  try {
+    var db = getDB(); if (!db) return;
+    var d = await db.collection('config').doc(GP_DONO_DOC).get();
+    if (d && d.exists) {
+      var D = d.data() || {};
+      _gpDono = { itens:D.itens || {}, atualizadoEm:D.atualizadoEm || '' };
+    }
+  } catch (e) { console.warn('gpCarregarDono:', e); }
+}
+
+// Cada distribuição salva atualiza o índice: o dono mais recente vence.
+async function gpGravarDono(lista, data){
+  try {
+    var db = getDB(); if (!db) return false;
+    (lista || []).forEach(function(p){
+      (p.itens || []).forEach(function(i){
+        var k = String(i.rc || '') + '|' + String(i.seq || '');
+        if (k === '|') return;
+        _gpDono.itens[k] = { n:p.nome, d:data || cpHojeISO() };
+      });
+    });
+    // poda: o que é velho demais sai, e se ainda passar do teto saem os
+    // mais antigos — o documento tem 1 MiB e não pode crescer sem fim
+    var corte = (function(){
+      var dt = new Date(cpHojeISO() + 'T12:00:00');
+      dt.setDate(dt.getDate() - GP_DONO_DIAS);
+      return dt.toISOString().slice(0, 10);
+    })();
+    Object.keys(_gpDono.itens).forEach(function(k){
+      if ((_gpDono.itens[k].d || '') < corte) delete _gpDono.itens[k];
+    });
+    var ks = Object.keys(_gpDono.itens);
+    if (ks.length > GP_DONO_MAX) {
+      ks.sort(function(a, b){
+        return String(_gpDono.itens[a].d).localeCompare(String(_gpDono.itens[b].d)); });
+      ks.slice(0, ks.length - GP_DONO_MAX).forEach(function(k){ delete _gpDono.itens[k]; });
+    }
+    _gpDono.atualizadoEm = new Date().toISOString();
+    await db.collection('config').doc(GP_DONO_DOC).set(_gpDono);
+    return true;
+  } catch (e) { console.warn('gpGravarDono:', e); return false; }
+}
+
 // O estado de um item: onde ele cai hoje e por quê.
 function gpEstado(it){
   var k = gpChave(it);
@@ -18490,6 +18558,8 @@ function gpRenderDetalhe(){
   var editavel = (_gpCard === 'negociar' || _gpCard === 'dpv');
   var dePatec  = (_gpCard === 'patec' || _gpCard === 'patecman');
   var deEmitir = (_gpCard === 'emitir');
+  // os três cards de emissão mostram quem é o responsável, antes da RC
+  var comDono = (_gpCard === 'emitir' || _gpCard === 'patec' || _gpCard === 'patecman');
   var semNeg   = gpSemNegociacao(_gpCard);
   // Dias parado: nos dois de PATEC conta da data de NEGOCIAÇÃO, que é
   // data real e vale já no primeiro dia; em Emitir Pedido não existe
@@ -18525,6 +18595,7 @@ function gpRenderDetalhe(){
     box.innerHTML = h; return;
   }
   h += '<div style="overflow:auto;max-height:560px"><table><thead><tr>'
+    + (comDono ? '<th title="quem recebeu o item na distribuição">Comprador</th>' : '')
     + '<th>RC</th><th>Item</th><th>Oportunidade</th><th>Item op.</th>'
     + '<th style="text-align:right">SLA</th><th>Segmento</th>'
     + (dePatec ? '<th>Fornecedor ganhador</th><th>NM do pedido</th>' : '')
@@ -18536,7 +18607,14 @@ function gpRenderDetalhe(){
     + (semNeg ? '' : '<th>Situação</th>') + '</tr></thead><tbody>';
   lista.forEach(function(x){
     var it = x.it, e = x.e;
+    var dono = comDono ? gpDonoDe(e.chave) : '';
     h += '<tr>'
+      + (comDono
+          ? '<td style="font-weight:600' + (dono ? '' : ';color:var(--tx2)') + '">'
+            + (dono ? cpEsc(dono)
+                    : '<span title="o item ainda não entrou em nenhuma distribuição">'
+                      + 'não distribuído</span>') + '</td>'
+          : '')
       + '<td style="font-weight:700;color:var(--az)">' + cpEsc(it.rc) + '</td>'
       + '<td>' + cpEsc(it.seq) + '</td>'
       + '<td>' + cpEsc(it.op || '—') + '</td>'
@@ -18602,6 +18680,16 @@ function gpRenderDetalhe(){
       + 'Digite a data em que negociou. Dois dias úteis depois, o item sai deste card e '
       + 'aparece em <strong>Emitir pedido</strong>, mesmo que o MAPA do dia continue trazendo '
       + 'ele como negociação.</div>';
+  }
+  if (comDono) {
+    var semDono = lista.filter(function(x){ return !gpDonoDe(x.e.chave); }).length;
+    h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:8px;line-height:1.7">'
+      + 'A coluna <strong>Comprador</strong> é quem recebeu o item na distribuição do MAPA. '
+      + 'Item já distribuído <strong>continua com o mesmo comprador</strong> nas próximas '
+      + 'distribuições, até ser concluído.'
+      + (semDono ? ' <strong>' + cpNum(semDono) + '</strong> item(ns) ainda não entraram em '
+                   + 'nenhuma distribuição.' : '')
+      + '</div>';
   }
   if (deEmitir) {
     h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:8px;line-height:1.8">'
@@ -22240,6 +22328,9 @@ async function gpAbrir(){
       // a tratativa do card Emitir pedido: ela muda em que card o item
       // cai, então precisa estar carregada antes do primeiro desenho
       await emiCarregar();
+      // quem recebeu cada item na última distribuição — é a coluna
+      // Comprador dos cards de emissão
+      await gpCarregarDono();
       // histórico de presença dos dois cards que não têm data própria
       await Promise.all([gppCarregar('emitir'), gppCarregar('rejsup')]);
       var d4 = await db.collection('config').doc('governanca_cockpit').get();
@@ -25181,6 +25272,38 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     });
   })();
 
+  // ── O ITEM FICA COM QUEM JÁ O RECEBEU (12/11) ──────────────────
+  // "Todo item já distribuído deve permanecer com o comprador até a sua
+  // conclusão." Então, antes de repartir, pergunto se a oportunidade já
+  // tem dono. Se tiver, e esse dono estiver atuando na atividade hoje,
+  // é dele — sem passar pelo equilíbrio, sem olhar cota.
+  //
+  // A cota é ignorada de propósito: o item já era dele, não é trabalho
+  // novo entrando. Se eu respeitasse a cota, um comprador cheio veria
+  // os itens dele irem para outra pessoa, que é exatamente o que o
+  // André mandou não acontecer. O quanto isso pesou sai no resumo.
+  //
+  // A oportunidade não se divide, então o dono do bloco é o dono mais
+  // frequente entre os itens dele.
+  var donoDoBloco = function(b, quemFaz){
+    var cont = {}, melhorN = '', melhorQ = 0;
+    (b.itens || []).forEach(function(it){
+      var d = gpDonoDe(String(it.rc || '') + '|' + String(it.seq || ''));
+      if (!d) return;
+      cont[d] = (cont[d] || 0) + 1;
+      if (cont[d] > melhorQ) { melhorQ = cont[d]; melhorN = d; }
+    });
+    if (!melhorN) return '';
+    // o dono só vale se estiver na equipe de hoje e atuando na atividade
+    if (quemFaz.indexOf(melhorN) !== -1) return melhorN;
+    // não está: o item muda de mão, e isso tem de ser dito — foi uma
+    // regra que não deu para cumprir, não uma escolha do rateio
+    res.donoPerdido.push({ nome:melhorN, rc:b.itens[0].rc, n:b.n });
+    return '';
+  };
+  res.mantidos = 0;
+  res.donoPerdido = [];
+
   ordenados.forEach(function(b){
     var quemFaz = pessoas.filter(function(n){ return cobre(n, b) > 0; });
     if (!quemFaz.length) {
@@ -25206,7 +25329,10 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
       });
       return temEspaco;
     });
-    if (!cand.length) {
+    // o dono anterior vem antes da fila: item já distribuído não volta
+    // para a fila de espera nem muda de mão por falta de cota
+    var antigo = donoDoBloco(b, quemFaz);
+    if (!cand.length && !antigo) {
       b.itens.forEach(function(it){ it.pessoa = ''; it.dia = 0; it.foraAtividade = false;
                                     res.fila.push(it); });
       return;
@@ -25214,8 +25340,12 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     // A oportunidade não se divide: ela vai inteira para quem cobre o
     // maior número de itens dela. Quem cobre tudo vem primeiro; se
     // sobrar item de uma atividade que não é dele, o item vai marcado.
-    var melhor = null;
-    cand.forEach(function(n){
+    var melhor = antigo || null;
+    if (melhor) {
+      b.__mantido = true;
+      res.mantidos += b.n;
+    }
+    (melhor ? [] : cand).forEach(function(n){
       var p = res.pessoas[n];
       if (!melhor) { melhor = n; return; }
       var m = res.pessoas[melhor];
@@ -25248,6 +25378,7 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     pm.blocos.push(b);
     b.itens.forEach(function(it){
       it.pessoa = melhor;
+      it.mantido = !!b.__mantido;
       it.foraAtividade = at.indexOf(mdAtvDe(it.statusChave)) === -1;
       pm.itens.push(it); pm.n++;
       pm.porStatus[it.statusChave] = (pm.porStatus[it.statusChave] || 0) + 1;
@@ -25702,6 +25833,33 @@ function mdAvisoDiasCurtos(res){
 // Com a meta por pessoa, item de emissão passa a parar na fila por um
 // motivo novo: a pessoa fechou a meta. Sem isto na tela, ele some sem
 // explicação — foi o erro que já apareceu três vezes neste módulo.
+// Quantos itens ficaram com quem já era dono. Isto muda o rateio do
+// dia — a pessoa pode passar da cota porque o item já era dela —, e um
+// número que muda a divisão não pode ficar invisível.
+function mdAvisoMantidos(res){
+  if (!res) return '';
+  var n = +res.mantidos || 0;
+  var perdidos = res.donoPerdido || [];
+  if (!n && !perdidos.length) return '';
+  var h = '';
+  if (n) {
+    h += '<div style="font-size:11px;color:var(--azm);margin-top:4px">🔒 <strong>'
+      + cpNum(n) + '</strong> item(ns) ficaram com quem já era dono, de distribuições '
+      + 'anteriores — eles não entram no rateio e podem passar da cota da pessoa.</div>';
+  }
+  if (perdidos.length) {
+    var soma = perdidos.reduce(function(a, p){ return a + p.n; }, 0);
+    var nomes = {};
+    perdidos.forEach(function(p){ nomes[p.nome] = (nomes[p.nome] || 0) + p.n; });
+    h += '<div style="font-size:11px;color:var(--am);margin-top:4px">⚠ <strong>'
+      + cpNum(soma) + '</strong> item(ns) mudaram de dono porque o comprador anterior não '
+      + 'está atuando nesta atividade hoje: '
+      + cpEsc(Object.keys(nomes).map(function(k){ return k + ' (' + nomes[k] + ')'; })
+          .join(' · ')) + '.</div>';
+  }
+  return h;
+}
+
 function mdAvisoMeta(res){
   if (!res || !res.metaEmissao) return '';
   var metaDe = function(n){ return ((res.metaPessoa || {})[n]) || res.metaEmissao; };
@@ -25834,6 +25992,7 @@ async function mdDistribuir(){
     + (res.semAtividade.length ? ' · ' + cpNum(res.semAtividade.length) + ' sem ninguém na atividade' : '')
     + '.</span>'
     + mdAvisoDiasCurtos(res)
+    + mdAvisoMantidos(res)
     + mdAvisoMeta(res)
     + mdAvisoAcimaCota(res)
     + (res.reapSemMarcacao
@@ -26261,6 +26420,8 @@ async function mdSalvarDia(){
                // e sem elas aqui o Excel sairia vazio nos três campos
                itemOp:i.itemOp || '', centro:i.centro || '', propostas:i.propostas || '',
                statusChave:i.statusChave, dia:+i.dia || 0, fluxo:i.fluxo, prazo:i.prazo,
+               // ficou com quem já era dono, em vez de ser rateado
+               mantido:!!i.mantido,
                dpv:!!i.dpv, valor:i.valor, foraAtividade:!!i.foraAtividade,
                prioritario:!!i.prioritario,
                origem:i.origem || 'mapa', lote:i.lote || '', statusReap:i.statusReap || '',
@@ -26286,6 +26447,8 @@ async function mdSalvarDia(){
       foraAtividade: (d.res.foraAtividade || []).slice(0, 2000),
       geradoEm:d.geradoEm, geradoPor:d.geradoPor
     });
+    // o índice de donos é atualizado aqui, onde a informação nasce
+    try { await gpGravarDono(d.res.lista, d.data); } catch (e2) { console.warn('dono:', e2); }
     return true;
   } catch (e) { console.warn('mdSalvarDia:', e); return false; }
 }
@@ -26399,6 +26562,8 @@ async function mdCarregarBasesGov(){
     // muda outros de fila: sem ela, a distribuição do dia seguinte
     // mandaria para a equipe o que já foi concluído ou está travado
     try { await emiCarregar(); } catch (e0) {}
+    // o dono anterior de cada item: ele manda na distribuição de hoje
+    try { await gpCarregarDono(); } catch (e00) {}
     var d = await Promise.all([
       db.collection('config').doc('governanca_rejeitados').get(),
       db.collection('config').doc('governanca_negociacao').get(),
