@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '12/11 11:30';
+var GTO_BUILD = '12/11 16:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -3145,11 +3145,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
           <div class="cd">
             <div class="cd-t" style="justify-content:space-between">
               <span>🔁 Emitidos x convertidos por comprador</span>
-              <label style="font-size:11px;color:var(--tx2);font-weight:500;display:flex;
-                     align-items:center;gap:6px;cursor:pointer">
-                <input type="checkbox" id="mon-conv-tudo" onchange="monRenderConversao()">
-                tudo que a medição trouxe, mesmo fora do período
-              </label>
+              <span id="mon-per-conv"></span>
             </div>
             <div id="mon-conversao"></div>
           </div>
@@ -3157,11 +3153,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
           <div class="cd">
             <div class="cd-t" style="justify-content:space-between">
               <span>🚫 Rejeites por comprador</span>
-              <label style="font-size:11px;color:var(--tx2);font-weight:500;display:flex;
-                     align-items:center;gap:6px;cursor:pointer">
-                <input type="checkbox" id="mon-rej-tudo" onchange="monRenderRejeite()">
-                todos os rejeites da planilha, mesmo fora do período
-              </label>
+              <span id="mon-per-rej"></span>
             </div>
             <div id="mon-rejeite"></div>
           </div>
@@ -23293,13 +23285,89 @@ function monRenderCombinado(){
     + 'status de abrir PATEC do MAPA de hoje. Quem está fora da equipe não entra.</div>';
 }
 
+// ── O PERÍODO DE CADA CARD (12/11) ───────────────────────────────
+// Antes era uma chavinha de duas posições: o período da medição ou
+// tudo. O André pediu um período de verdade — "preciso ter um campo
+// onde eu consiga ver tb um período específico com início e fim".
+// Então são três modos, e cada card guarda o seu: dois cards olhando
+// janelas diferentes é uma pergunta legítima (o emitido do mês contra
+// o rejeite da semana), e forçar os dois juntos tiraria isso dele.
+//
+// Sem medição informada, o modo "medição" não tem o que recortar e
+// vira "tudo" — mas a tela diz isso, em vez de mostrar vazio.
+var MON_PERIODOS = [
+  { k:'med',  n:'Período da medição' },
+  { k:'esc',  n:'Escolher um período' },
+  { k:'tudo', n:'Tudo' }
+];
+var _monPer = { conv:{ modo:'med', ini:'', fim:'' },
+                rej: { modo:'med', ini:'', fim:'' } };
+
+function monPerAtual(k){
+  var p = _monPer[k] || (_monPer[k] = { modo:'med', ini:'', fim:'' });
+  if (p.modo === 'esc' && (p.ini || p.fim)) {
+    return { modo:'esc', ini: p.ini || '0000-01-01', fim: p.fim || '9999-12-31',
+             rotulo: (p.ini ? 'de ' + cpDataBR(p.ini) : 'até o começo')
+                     + (p.fim ? ' a ' + cpDataBR(p.fim) : ' em diante') };
+  }
+  if (p.modo === 'med') {
+    var m = monMedAtual();
+    if (m) return { modo:'med', ini:m.inicio, fim:m.fim,
+                    rotulo:'de ' + cpDataBR(m.inicio) + ' a ' + cpDataBR(m.fim) };
+    return { modo:'tudo', ini:'', fim:'', semMedicao:true,
+             rotulo:'tudo — não há medição informada para recortar' };
+  }
+  return { modo:'tudo', ini:'', fim:'', rotulo:'tudo o que a base trouxe' };
+}
+
+// A data vazia só passa no modo "tudo": item sem data não tem como
+// provar que está dentro da janela, e contá-lo mesmo assim inflaria o
+// número do período sem que ninguém percebesse.
+function monPerDentro(k, data){
+  var p = monPerAtual(k);
+  if (p.modo === 'tudo') return true;
+  if (!data) return false;
+  return data >= p.ini && data <= p.fim;
+}
+
+function monPerHTML(k){
+  var p = _monPer[k] || { modo:'med', ini:'', fim:'' };
+  var cx = 'font-size:11px;padding:3px 7px;border:1.5px solid var(--brd);border-radius:6px';
+  return '<span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+    + '<select onchange="monPerModo(\'' + k + '\', this.value)" style="' + cx + ';font-weight:600">'
+    +   MON_PERIODOS.map(function(o){
+          return '<option value="' + o.k + '"' + (p.modo === o.k ? ' selected' : '') + '>'
+               + cpEsc(o.n) + '</option>'; }).join('')
+    + '</select>'
+    + (p.modo === 'esc'
+        ? '<input type="date" value="' + cpEsc(p.ini) + '" style="' + cx + '"'
+          + ' onchange="monPerData(\'' + k + '\', \'ini\', this.value)">'
+          + '<span style="font-size:11px;color:var(--tx2)">até</span>'
+          + '<input type="date" value="' + cpEsc(p.fim) + '" style="' + cx + '"'
+          + ' onchange="monPerData(\'' + k + '\', \'fim\', this.value)">'
+        : '')
+    + '</span>';
+}
+
+function monPerModo(k, v){
+  (_monPer[k] || (_monPer[k] = {})).modo = v || 'med';
+  monPerRedesenhar(k);
+}
+function monPerData(k, qual, v){
+  (_monPer[k] || (_monPer[k] = { modo:'esc' }))[qual] = v || '';
+  monPerRedesenhar(k);
+}
+function monPerRedesenhar(k){
+  var el = document.getElementById('mon-per-' + k);
+  if (el) el.innerHTML = monPerHTML(k);
+  if (k === 'conv') monRenderConversao(); else monRenderRejeite();
+}
+
 // ── emitidos x convertidos ────────────────────────────────────────
 function monConvLinhas(){
-  var m = monMedAtual();
-  var tudo = (document.getElementById('mon-conv-tudo') || {}).checked;
   var por = {};
   (_monConv.conv || []).forEach(function(c){
-    if (!tudo && m && (!c.dia || c.dia < m.inicio || c.dia > m.fim)) return;
+    if (!monPerDentro('conv', c.dia)) return;
     if (cpEstaFora(c.nome)) return;
     var o = por[c.nome] || (por[c.nome] =
       { nome:c.nome, mem:0, emi:0, lib:0, aguard:0, rej:0, outro:0 });
@@ -23312,14 +23380,15 @@ function monConvLinhas(){
     t.mem += p.mem; t.emi += p.emi; t.lib += p.lib;
     t.aguard += p.aguard; t.rej += p.rej; t.outro += p.outro; return t;
   }, { mem:0, emi:0, lib:0, aguard:0, rej:0, outro:0 });
-  return { lista:lista, total:tot, tudo:!!tudo };
+  return { lista:lista, total:tot, per:monPerAtual('conv') };
 }
 
 function monRenderConversao(){
+  var pb = document.getElementById('mon-per-conv');
+  if (pb) pb.innerHTML = monPerHTML('conv');
   var box = document.getElementById('mon-conversao');
   if (!box) return;
   var r = monConvLinhas();
-  var m = monMedAtual();
   var cab = '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.8rem">'
     + 'Da medição de momento. <strong>Emitido</strong> é tudo que virou pedido — '
     + 'STATUS_PROCESSO <strong>3, 5 ou 8</strong>, sem código de eliminação. O pedido fica em 3 só '
@@ -23328,18 +23397,16 @@ function monRenderConversao(){
     + '<strong>convertido</strong> (liberado), <strong>em liberação</strong> (esperando) ou '
     + '<strong>rejeitado</strong>. O <strong>memorizado</strong> (status 2) ainda não é pedido e '
     + 'por isso fica fora da conta da conversão. '
-    + (r.tudo ? 'Mostrando <strong>tudo que a medição trouxe</strong>'
-                + (_monConv.desde ? ' (pedidos criados de ' + cpDataBR(_monConv.desde)
-                                    + ' para cá)' : '') + '.'
-             : (m ? 'Recorte pela data de criação do pedido, de ' + cpDataBR(m.inicio) + ' a '
-                    + cpDataBR(m.fim) + '.' : ''))
+    + 'Recorte pela <strong>data de criação do pedido</strong>: ' + cpEsc(r.per.rotulo) + '.'
+    + (r.per.modo === 'tudo' && _monConv.desde
+        ? ' A medição só traz pedidos criados de ' + cpDataBR(_monConv.desde) + ' para cá.' : '')
     + (_monConv.arquivo ? '<br>Última medição: <strong>' + cpEsc(_monConv.arquivo) + '</strong>'
         + (_monConv.atualizadoEm ? ' — ' + cpDataBR(String(_monConv.atualizadoEm).slice(0, 10)) : '') + '.' : '')
     + '</div>';
   if (!r.lista.length) {
     box.innerHTML = cab + '<div style="font-size:12px;color:var(--tx2)">'
       + (_monConv.arquivo
-          ? 'Nenhum pedido emitido neste recorte. Marque a chave acima para ver tudo que está emitido.'
+          ? 'Nenhum pedido emitido neste recorte. Troque o período aí em cima para abrir a janela.'
           : 'Nada aqui ainda. Suba a medição de momento em <strong>Controle de Pedidos</strong> '
             + 'que esta tabela se monta sozinha.') + '</div>';
     return;
@@ -23347,7 +23414,8 @@ function monRenderConversao(){
   var pctT = r.total.emi ? Math.round(r.total.lib * 100 / r.total.emi) : 0;
   var h = cab + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(142px,1fr));'
     + 'gap:12px;margin-bottom:.9rem">'
-    + monCard('FEITOS NO PERÍODO', cpNum(r.total.mem + r.total.emi),
+    + monCard(r.per.modo === 'tudo' ? 'FEITOS (TUDO)' : 'FEITOS NO PERÍODO',
+        cpNum(r.total.mem + r.total.emi),
         cpNum(r.total.mem) + ' memorizados + ' + cpNum(r.total.emi) + ' emitidos')
     + monCard('EMITIDOS', cpNum(r.total.emi), 'viraram pedido (3 · 5 · 8)', 'var(--az)')
     + monCard('CONVERTIDOS', cpNum(r.total.lib), 'já liberados', 'var(--vd)', 'var(--vdc)')
@@ -23390,27 +23458,79 @@ function monRenderConversao(){
   box.innerHTML = h;
 }
 
-// ── rejeites por comprador ───────────────────────────────────────
+// ── rejeites por comprador — os DOIS lados ───────────────────────
+// Até 12/11 este card só olhava o rejeite do FORNECEDOR. O André pediu
+// "uma visão do total, e tb por tipo supervisor e fornecedor" — são
+// dois trabalhos diferentes caindo no mesmo comprador, e um número só
+// escondia qual dos dois estava pesando.
+//
+// Os dois lados têm datas diferentes. O fornecedor traz a DATA DA
+// REJEIÇÃO na planilha. O supervisor não traz data nenhuma: o que ele
+// traz é há quantos dias o item está parado desde o envio do cockpit.
+// Então a data dele é deduzida — hoje menos esses dias — e a tela diz
+// isso, em vez de fingir que é dado de arquivo.
+function monRejDataSup(l){
+  var d = (l.slaPedido == null) ? null : (+l.slaPedido || 0);
+  if (d == null) return '';
+  try {
+    var dt = new Date(cpHojeISO() + 'T12:00:00');
+    dt.setDate(dt.getDate() - d);
+    return dt.toISOString().slice(0, 10);
+  } catch (e) { return ''; }
+}
+
 function monRejLinhas(){
-  var m = monMedAtual();
-  var tudo = (document.getElementById('mon-rej-tudo') || {}).checked;
   var donos = _monConv.rejDonos || {};
   var por = {}, semDono = 0, usados = 0;
+  var pega = function(nome){
+    return por[nome] || (por[nome] = { nome:nome, forn:0, sup:0, pedidos:0,
+      itens:0, somaDias:0, pior:0, motivos:{} });
+  };
+
+  // ── lado FORNECEDOR: a planilha de rejeitados ──
   ((_gpRej && _gpRej.itens) || []).forEach(function(i){
-    if (!tudo && m && (!i.dataRej || i.dataRej < m.inicio || i.dataRej > m.fim)) return;
+    if (!monPerDentro('rej', i.dataRej)) return;
     var p = String(i.pedido || '').trim().replace(/\.0+$/, '');
     var nome = donos[p] || '';
     if (!nome) { semDono++; nome = '(comprador não identificado)'; }
     if (nome !== '(comprador não identificado)' && cpEstaFora(nome)) return;
     usados++;
-    var o = por[nome] || (por[nome] =
-      { nome:nome, pedidos:0, itens:0 , somaDias:0, pior:0, motivos:{} });
-    o.pedidos++; o.itens += +i.nItens || 0;
+    var o = pega(nome);
+    o.forn++; o.pedidos++; o.itens += +i.nItens || 0;
     o.somaDias += +i.dias || 0;
     if ((+i.dias || 0) > o.pior) o.pior = +i.dias || 0;
     var mo = i.motivo || '(sem motivo)';
     o.motivos[mo] = (o.motivos[mo] || 0) + 1;
   });
+
+  // ── lado SUPERVISOR: a medição cruzada com o Rodrigo ──
+  // Aqui o comprador já vem certo, sem PROCV. A contagem é por PEDIDO,
+  // como nas telas de rejeite: o mesmo pedido em várias RCs é um
+  // rejeite só.
+  var supSemData = 0, vistos = {};
+  var sup = [];
+  try { sup = (rjsMontar() || {}).linhas || []; } catch (e) { sup = []; }
+  sup.forEach(function(l){
+    var ped = _rjsN(l.pedido) || '';
+    var nome = l.comprador || '';
+    if (!nome) { semDono++; nome = '(comprador não identificado)'; }
+    if (nome !== '(comprador não identificado)' && cpEstaFora(nome)) return;
+    var dt = monRejDataSup(l);
+    if (!dt) supSemData++;
+    if (!monPerDentro('rej', dt)) return;
+    var chave = cpNormNome(nome) + '|' + ped;
+    if (ped && vistos[chave]) return;
+    if (ped) vistos[chave] = 1;
+    usados++;
+    var o = pega(nome);
+    o.sup++; o.pedidos++; o.itens++;
+    var d2 = (l.slaPedido == null) ? 0 : (+l.slaPedido || 0);
+    o.somaDias += d2;
+    if (d2 > o.pior) o.pior = d2;
+    var mo2 = l.padrao || '(sem padrão)';
+    o.motivos[mo2] = (o.motivos[mo2] || 0) + 1;
+  });
+
   var lista = Object.keys(por).map(function(k){
     var o = por[k];
     o.media = o.pedidos ? Math.round(o.somaDias / o.pedidos) : 0;
@@ -23425,30 +23545,39 @@ function monRejLinhas(){
     return o;
   }).sort(function(a, b){ return b.pedidos - a.pedidos || a.nome.localeCompare(b.nome); });
   var tot = lista.reduce(function(t, p){
-    t.pedidos += p.pedidos; t.itens += p.itens; t.st8 += p.st8; return t;
-  }, { pedidos:0, itens:0, st8:0 });
-  return { lista:lista, total:tot, semDono:semDono, usados:usados, tudo:!!tudo };
+    t.pedidos += p.pedidos; t.forn += p.forn; t.sup += p.sup;
+    t.itens += p.itens; t.st8 += p.st8; return t;
+  }, { pedidos:0, forn:0, sup:0, itens:0, st8:0 });
+  return { lista:lista, total:tot, semDono:semDono, usados:usados,
+           supSemData:supSemData, per:monPerAtual('rej') };
 }
 
 function monRenderRejeite(){
+  var pb = document.getElementById('mon-per-rej');
+  if (pb) pb.innerHTML = monPerHTML('rej');
   var box = document.getElementById('mon-rejeite');
   if (!box) return;
   var r = monRejLinhas();
-  var m = monMedAtual();
   var cab = '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.8rem">'
-    + 'A planilha de rejeitados da Governança diz <strong>quais pedidos</strong> foram recusados; '
-    + 'a medição de momento diz <strong>quem emitiu</strong> cada um. Cruzo os dois pelo número do '
-    + 'pedido. <strong>Parado há mais tempo</strong> é o rejeite mais antigo daquele comprador '
-    + 'que ainda não foi resolvido, em dias — sai da coluna Dias Rejeitado da planilha. '
+    + 'Os <strong>dois lados</strong> do rejeite, no mesmo comprador. No '
+    + '<strong>fornecedor</strong>, a planilha de rejeitados diz quais pedidos foram recusados e a '
+    + 'medição diz quem emitiu cada um — cruzo os dois pelo número do pedido. No '
+    + '<strong>supervisor</strong>, o comprador já vem da medição, sem cruzamento. Os dois contam '
+    + 'por PEDIDO: o mesmo pedido em várias RCs é um rejeite só. '
+    + '<strong>Parado há mais tempo</strong> é o rejeite mais antigo dele ainda sem resolver. '
     + 'A coluna <strong>Status 8</strong> é o rejeite que a própria medição marca.'
-    + (r.tudo ? ' Mostrando <strong>todos</strong> os rejeites da planilha.'
-             : (m ? ' Recorte pela data da rejeição, de ' + cpDataBR(m.inicio) + ' a '
-                    + cpDataBR(m.fim) + '.' : ''))
+    + '<br>Recorte: ' + cpEsc(r.per.rotulo) + '.'
+    + (r.per.modo !== 'tudo'
+        ? ' No fornecedor vale a <strong>data da rejeição</strong> da planilha; no supervisor '
+          + 'não há data no arquivo, então uso <strong>hoje menos os dias parados</strong> do '
+          + 'cockpit — é uma dedução, não um dado de arquivo.'
+        : '')
     + '</div>';
-  if (!((_gpRej && _gpRej.itens) || []).length) {
+  var temForn = !!((_gpRej && _gpRej.itens) || []).length;
+  if (!temForn && !r.total.sup) {
     box.innerHTML = cab + '<div style="font-size:12px;color:var(--tx2)">'
-      + 'Nenhuma planilha de rejeitados guardada. Suba uma no card <strong>Rejeitados</strong> '
-      + 'da Governança.</div>';
+      + 'Nenhuma base de rejeite guardada. Suba a planilha do fornecedor e a medição do '
+      + 'supervisor em <strong>Controle de Pedidos › Rejeite</strong>.</div>';
     return;
   }
   if (!r.lista.length) {
@@ -23456,26 +23585,56 @@ function monRenderRejeite(){
       + 'Nenhum rejeite neste recorte.</div>';
     return;
   }
-  var h = cab;
+  var h = cab
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(142px,1fr));'
+    + 'gap:12px;margin-bottom:.9rem">'
+    + monCard('TOTAL DE REJEITES', cpNum(r.total.pedidos), 'fornecedor + supervisor', 'var(--az)')
+    + monCard('FORNECEDOR', cpNum(r.total.forn), 'recusados pelo fornecedor',
+        'var(--vm)', 'var(--vmc)')
+    + monCard('SUPERVISOR', cpNum(r.total.sup), 'apontados pelo supervisor',
+        'var(--am)', 'var(--amc)')
+    + monCard('COMPRADORES', cpNum(r.lista.length), 'com ao menos um rejeite')
+    + '</div>';
   if (r.semDono) {
     h += '<div style="font-size:11px;color:var(--am);margin-bottom:.6rem">⚠ ' + cpNum(r.semDono)
       + ' pedido(s) rejeitado(s) sem comprador identificado — suba a medição de momento para o '
       + 'cruzamento pegar esses também.</div>';
   }
+  if (r.per.modo !== 'tudo' && r.supSemData) {
+    h += '<div style="font-size:11px;color:var(--am);margin-bottom:.6rem">⚠ ' + cpNum(r.supSemData)
+      + ' item(ns) do supervisor sem dias parados no cockpit: sem isso não dá para dizer se '
+      + 'estão no período, e eles ficam de fora do recorte.</div>';
+  }
   h += '<div style="overflow:auto;max-height:420px"><table><thead><tr><th>Comprador</th>'
-    + '<th style="text-align:right">Pedidos rejeitados</th><th style="text-align:right">Itens</th>'
-    + '<th style="text-align:right" title="Média da coluna Dias Rejeitado da planilha">'
+    + '<th style="text-align:right">Total</th>'
+    + '<th style="text-align:right" title="Pedidos recusados pelo fornecedor">Fornecedor</th>'
+    + '<th style="text-align:right" title="Pedidos apontados pelo supervisor">Supervisor</th>'
+    + '<th style="width:120px">Repartição</th>'
+    + '<th style="text-align:right">Itens</th>'
+    + '<th style="text-align:right" title="Média de dias parado dos dois lados">'
     +   'Média de dias parado</th>'
-    + '<th style="text-align:right" title="O rejeite mais antigo dele ainda sem resolver — '
-    +   'o maior valor da coluna Dias Rejeitado">Parado há mais tempo</th>'
+    + '<th style="text-align:right" title="O rejeite mais antigo dele ainda sem resolver">'
+    +   'Parado há mais tempo</th>'
     + '<th>Motivo mais comum</th><th style="text-align:right">Status 8 na medição</th>'
     + '</tr></thead><tbody>';
   r.lista.forEach(function(p){
     var feio = p.pedidos >= 10 || p.pior >= 5;
+    var pf = p.pedidos ? Math.round(p.forn * 100 / p.pedidos) : 0;
     h += '<tr' + (feio ? ' style="background:var(--vmc)"' : '') + '>'
       + '<td style="font-weight:600">' + cpEsc(p.nome) + '</td>'
       + '<td style="text-align:right;font-weight:800;color:' + (feio ? 'var(--vm)' : 'var(--tx)') + '">'
       +   cpNum(p.pedidos) + '</td>'
+      + '<td style="text-align:right;font-weight:600;color:'
+      +   (p.forn ? 'var(--vm)' : 'var(--tx2)') + '">' + cpNum(p.forn) + '</td>'
+      + '<td style="text-align:right;font-weight:600;color:'
+      +   (p.sup ? 'var(--am)' : 'var(--tx2)') + '">' + cpNum(p.sup) + '</td>'
+      // a barra mostra de onde vem o rejeite daquele comprador: vermelho
+      // é fornecedor, âmbar é supervisor
+      + '<td><span title="' + cpNum(p.forn) + ' fornecedor · ' + cpNum(p.sup) + ' supervisor"'
+      +   ' style="display:flex;height:8px;border-radius:4px;overflow:hidden;'
+      +   'background:var(--cin)">'
+      +   '<span style="width:' + pf + '%;background:var(--vm)"></span>'
+      +   '<span style="width:' + (100 - pf) + '%;background:var(--am)"></span></span></td>'
       + '<td style="text-align:right">' + cpNum(p.itens) + '</td>'
       + '<td style="text-align:right">' + cpNum(p.media) + '</td>'
       + '<td style="text-align:right;font-weight:600;color:'
@@ -23485,6 +23644,9 @@ function monRenderRejeite(){
   });
   h += '</tbody><tfoot><tr><td>Total</td>'
     + '<td style="text-align:right;font-weight:800">' + cpNum(r.total.pedidos) + '</td>'
+    + '<td style="text-align:right;font-weight:800;color:var(--vm)">' + cpNum(r.total.forn) + '</td>'
+    + '<td style="text-align:right;font-weight:800;color:var(--am)">' + cpNum(r.total.sup) + '</td>'
+    + '<td></td>'
     + '<td style="text-align:right;font-weight:800">' + cpNum(r.total.itens) + '</td>'
     + '<td></td><td></td><td></td>'
     + '<td style="text-align:right;font-weight:800">' + cpNum(r.total.st8) + '</td>'
