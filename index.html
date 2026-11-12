@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '12/11 10:15';
+var GTO_BUILD = '12/11 11:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -18563,44 +18563,51 @@ function rjItemOpPar(rc, item){
 }
 function rjItemOp(rc, item){ return rjItemOpPar(rc, item)[0]; }
 
-// AS LINHAS DA TELA — uma por ITEM, não por pedido.
-// Um pedido pode ter várias RCs; as colunas RC, Item, Oportunidade e
-// Item da OP são de item, então a linha é o item. Pedido que a medição
-// não conhece vira UMA linha, com as colunas vazias e marcada.
+// AS LINHAS DA TELA — uma por PEDIDO.
+//
+// Em 11/11 era uma linha por ITEM, com RC, Item, Oportunidade e Item da
+// OP. Em 12/11 o André mudou: "o mesmo pedido para várias RCs vão
+// considerar apenas um... aqui estamos tratando apenas o rejeite do
+// PEDIDO, eu neste momento não preciso linkar com a RC — se eu resolver
+// o rejeite do pedido está correto". Então o pedido repetido virou uma
+// linha só, e as quatro colunas de item saíram da tela.
+//
+// A RC do primeiro item continua guardada no objeto, sem aparecer: há
+// código que a usa como chave para buscar o "parado desde".
 function rjLinhasItens(itens){
-  var ix = rjIxPedido(), out = [], semDono = 0, pedSemDono = {};
+  var ix = rjIxPedido(), out = [], porPedido = {}, semDono = 0, pedSemDono = {};
   (itens || []).forEach(function(i){
     var ped = _rjsN(i.pedido);
-    var med = ix[ped] || [];
-    var base = function(o){
-      return {
-        rc: o ? o.rc : '', itemRc: o ? o.itemRc : '',
-        // sem oportunidade na medição, vale a do levelboard
-        oport: o ? (o.oport || rjItemOpPar(o.rc, o.itemRc)[1]) : '',
-        itemOp: o ? (o.itemOp || rjItemOpPar(o.rc, o.itemRc)[0]) : '',
-        pedido: i.pedido, comprador: o ? (o.comprador || '') : '',
-        sla: +i.dias || 0,
-        // o que a tela antiga mostrava, guardado para o resumo e o Excel
-        grupo: i.grupo || '', resp: i.resp || '', forn: i.forn || '',
-        tipo: i.tipo || '', dataRej: i.dataRej || '', envios: +i.envios || 0,
-        prazo: i.prazo || '', motivoRej: i.motivo || '',
-        de: o ? (o.de || '') : '',
-        semDono: !o || !o.comprador
-      };
-    };
-    if (!med.length) {
-      var l0 = base(null);
-      l0.comprador = rjCompradorDoPedido(ped);
-      l0.semDono = !l0.comprador;
-      if (l0.semDono) { semDono++; pedSemDono[ped] = 1; }
-      out.push(l0);
+    if (porPedido[ped]) {
+      // o mesmo pedido veio de novo: soma os itens e fica o maior SLA
+      var j = porPedido[ped];
+      j.nRcs++;
+      if ((+i.dias || 0) > (j.sla || 0)) j.sla = +i.dias || 0;
       return;
     }
-    med.forEach(function(o){
-      var l = base(o);
-      if (l.semDono) { semDono++; pedSemDono[ped] = 1; }
-      out.push(l);
-    });
+    var med = ix[ped] || [];
+    // o dono é o mesmo para o pedido inteiro; se a medição trouxer
+    // várias linhas, vale a primeira que tem comprador
+    var o = null, k;
+    for (k = 0; k < med.length; k++) { if (med[k] && med[k].comprador) { o = med[k]; break; } }
+    if (!o && med.length) o = med[0];
+    var l = {
+      rc: o ? o.rc : '', itemRc: o ? o.itemRc : '',
+      oport: o ? (o.oport || rjItemOpPar(o.rc, o.itemRc)[1]) : '',
+      itemOp: o ? (o.itemOp || rjItemOpPar(o.rc, o.itemRc)[0]) : '',
+      pedido: i.pedido, comprador: o ? (o.comprador || '') : '',
+      sla: +i.dias || 0, nRcs: med.length || 1,
+      // o que a tela antiga mostrava, guardado para o resumo e o Excel
+      grupo: i.grupo || '', resp: i.resp || '', forn: i.forn || '',
+      tipo: i.tipo || '', dataRej: i.dataRej || '', envios: +i.envios || 0,
+      prazo: i.prazo || '', motivoRej: i.motivo || '',
+      de: o ? (o.de || '') : '', semDono: false
+    };
+    if (!l.comprador) l.comprador = rjCompradorDoPedido(ped);
+    l.semDono = !l.comprador;
+    if (l.semDono) { semDono++; pedSemDono[ped] = 1; }
+    porPedido[ped] = l;
+    out.push(l);
   });
   out.sort(function(a, b){
     if ((b.sla || 0) !== (a.sla || 0)) return (b.sla || 0) - (a.sla || 0);
@@ -18619,10 +18626,27 @@ function rjLinhasItens(itens){
 var RJ_CONCLUSOES = ['Ajustado', 'Republicado', 'Devolvido', 'Status B'];
 var _rjTrat = { itens:{}, atualizadoEm:'', atualizadoPor:'' };
 
-function rjChaveTrat(l){
-  return _rjsN(l.pedido) + '|' + _rjsN(l.rc) + '|' + _rjsN(l.itemRc);
+// A chave era pedido|RC|item. Desde 12/11 é o PEDIDO: a linha é o
+// pedido, e tratar o pedido trata o rejeite inteiro.
+function rjChaveTrat(l){ return _rjsN(l.pedido); }
+
+// O que foi escrito antes de 12/11 está gravado na chave antiga. Em vez
+// de migrar a base, a leitura procura também por ela: a primeira chave
+// que começa com o pedido vale para a linha. Assim nada do que o
+// comprador escreveu se perde, e o próximo salvamento já grava na
+// chave nova.
+function rjTrat(l){
+  var k = rjChaveTrat(l);
+  if (_rjTrat.itens[k]) return _rjTrat.itens[k];
+  var pre = k + '|', ks = Object.keys(_rjTrat.itens || {});
+  for (var i = 0; i < ks.length; i++) {
+    if (ks[i].indexOf(pre) === 0) {
+      var v = _rjTrat.itens[ks[i]];
+      if (v && (v.motivo || v.conclusao)) return v;
+    }
+  }
+  return { motivo:'', conclusao:'' };
 }
-function rjTrat(l){ return _rjTrat.itens[rjChaveTrat(l)] || { motivo:'', conclusao:'' }; }
 
 async function rjCarregarTratativas(){
   try {
@@ -18710,12 +18734,11 @@ async function rjSalvarTrat(pref, idx, campo, valor){
   }
 }
 
-// ── a tabela nova: uma linha por item ────────────────────────────
+// ── a tabela: uma linha por PEDIDO ──────────────────────────────
+// RC, Item, Oportunidade e Item da OP saíram em 12/11: com uma linha
+// por pedido elas não têm um valor só, e o André não precisa delas
+// aqui — "se eu resolver o rejeite do pedido está correto".
 var RJ_COLS = [
-  { t:'RC',          v:function(l){ return l.rc; } },
-  { t:'Item',        v:function(l){ return l.itemRc; } },
-  { t:'Oportunidade',v:function(l){ return l.oport; } },
-  { t:'Item da OP',  v:function(l){ return l.itemOp; } },
   { t:'Pedido',      v:function(l){ return l.pedido; } },
   { t:'Comprador',   v:function(l){ return l.comprador; } },
   { t:'SLA Pedido',  v:function(l){ return +l.sla || 0; } },
@@ -18737,8 +18760,8 @@ function rjGradeHTML(L, extras, idPrefixo, extrasNoFim){
   _rjLinhasAtual = L;
   if (!L.length) return '';
   var cols = extrasNoFim
-    ? RJ_COLS.slice(0, 7).concat(RJ_COLS.slice(7)).concat(extras || [])
-    : RJ_COLS.slice(0, 7).concat(extras || []).concat(RJ_COLS.slice(7));
+    ? RJ_COLS.slice(0, 3).concat(RJ_COLS.slice(3)).concat(extras || [])
+    : RJ_COLS.slice(0, 3).concat(extras || []).concat(RJ_COLS.slice(3));
   var h = '';
   if (L.__semDono) {
     h += '<div class="al al-a" style="font-size:11.5px;margin-top:.6rem">⚠ <strong>'
@@ -18746,27 +18769,17 @@ function rjGradeHTML(L, extras, idPrefixo, extrasNoFim){
       + ' pedido(s) sem comprador: o pedido não foi achado na medição do Rejeite '
       + 'Supervisor. Suba a medição do dia — é dela que vem quem criou o pedido.</div>';
   }
-  // Os traços das colunas Oportunidade e Item da OP têm motivo, e cada
-  // um é de um arquivo: com os arquivos reais do André, 15 das 93
-  // linhas não têm oportunidade na medição (pedido que não veio de
-  // oportunidade) e só 21 têm item da OP, porque o levelboard é a
-  // carteira de AGORA e o rejeite é de pedidos antigos. Sem esta
-  // linha, o traço vira suspeita de erro de leitura.
-  var _semOp = L.filter(function(l){ return !l.oport; }).length;
-  var _semIt = L.filter(function(l){ return !l.itemOp; }).length;
-  if (_semOp || _semIt) {
+  // A nota que explicava os traços de Oportunidade e Item da OP saiu em
+  // 12/11 junto com as colunas: não há mais traço para explicar.
+  // No lugar dela, quando um pedido reúne várias RCs, dizer isso — o
+  // número de linhas é menor que o de itens, e isso tem de ter nome.
+  var _juntados = L.filter(function(l){ return (+l.nRcs || 1) > 1; });
+  if (_juntados.length) {
+    var _itensJunt = _juntados.reduce(function(m, l){ return m + (+l.nRcs || 1); }, 0);
     h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:.4rem;line-height:1.6">ℹ '
-      + (_semOp ? '<strong>' + cpNum(_semOp) + '</strong> linha(s) sem <strong>Oportunidade</strong>: '
-                + 'o item não veio de uma oportunidade — a BU traz o campo vazio para ele. ' : '')
-      + (_semIt ? '<strong>' + cpNum(_semIt) + '</strong> linha(s) sem <strong>Item da OP</strong>: '
-                + (_rjBuIx && _rjBuIx.pedidos
-                    ? 'a BU não traz oportunidade para esses itens — é item que não veio de uma '
-                      + 'oportunidade. (BU com ' + cpNum(_rjBuIx.pedidos) + ' pedido(s).)'
-                    : '<strong style="color:var(--am)">Ainda não li nenhuma BU nesta base.</strong> '
-                      + 'Suba a BU em Controle de Pedidos › Status B — é dela que vêm RC, item, '
-                      + 'oportunidade e item da OP.')
-                : '')
-      + '</div>';
+      + '<strong>' + cpNum(_juntados.length) + '</strong> pedido(s) aparecem em mais de uma RC ('
+      + cpNum(_itensJunt) + ' itens ao todo) e estão aqui como uma linha só — o rejeite é do '
+      + 'pedido, e resolver o pedido resolve todas.</div>';
   }
   h += '<div id="rj-trat-status-' + pref + '" style="font-size:11px;margin-top:.4rem;min-height:14px"></div>'
     + '<div style="overflow:auto;max-height:520px;margin-top:.4rem"><table><thead><tr>'
@@ -18777,11 +18790,12 @@ function rjGradeHTML(L, extras, idPrefixo, extrasNoFim){
     var velho = (+l.sla || 0) >= 3;
     var temMotivo = !!t.motivo;
     h += '<tr' + (velho ? ' style="background:var(--vmc)"' : '') + '>'
-      + '<td style="font-weight:600">' + cpEsc(l.rc || '—') + '</td>'
-      + '<td>' + cpEsc(l.itemRc || '—') + '</td>'
-      + '<td style="font-size:10.5px">' + cpEsc(l.oport || '—') + '</td>'
-      + '<td>' + cpEsc(l.itemOp || '—') + '</td>'
-      + '<td style="font-weight:700;color:var(--az)">' + cpEsc(l.pedido) + '</td>'
+      + '<td style="font-weight:700;color:var(--az)">' + cpEsc(l.pedido)
+      +   ((+l.nRcs || 1) > 1
+            ? ' <span style="font-weight:500;font-size:10px;color:var(--tx2)" '
+              + 'title="o mesmo pedido em mais de uma RC — é um rejeite só">('
+              + cpNum(l.nRcs) + ' RCs)</span>' : '')
+      + '</td>'
       + '<td style="font-size:10.5px' + (l.semDono ? ';color:var(--vm);font-weight:700' : '') + '">'
       +   (l.comprador ? cpEsc(l.comprador) : '<span title="pedido não achado na medição">sem comprador</span>')
       + '</td>'
@@ -18845,19 +18859,40 @@ var RJ_EXTRA_SUP_GOV = RJ_EXTRA_SUP.concat([
       var d = gpDias(gppDesde('rejsup', rjsChaveLb(l.rc, l.itemRc)));
       return d == null ? '' : String(d); } }
 ]);
+// Uma linha por PEDIDO, como no Fornecedor (12/11). Quando o mesmo
+// pedido aparece em várias RCs, elas viram uma linha só: o padrão e a
+// justificativa de cada uma são juntados, porque podem ser diferentes e
+// nenhum pode sumir calado.
 function rjsLinhasGrade(linhas){
-  var out = (linhas || []).map(function(l){
-    return {
+  var porPedido = {}, out = [];
+  (linhas || []).forEach(function(l){
+    var ped = _rjsN(l.pedido) || '';
+    var j = porPedido[ped];
+    if (j && ped) {
+      j.nRcs++;
+      if ((+l.slaPedido || 0) > (j.sla || 0)) j.sla = +l.slaPedido || 0;
+      [['padrao', l.padrao], ['justificativa', l.justificativa]].forEach(function(par){
+        var v = String(par[1] || '').trim();
+        if (v && j[par[0]].indexOf(v) === -1)
+          j[par[0]] = j[par[0]] ? (j[par[0]] + ' · ' + v) : v;
+      });
+      if (!j.comprador && l.comprador) { j.comprador = l.comprador; j.semDono = false; }
+      return;
+    }
+    var n = {
       // a medição manda a RC como 0036932094 e o item como 00010; a
-      // tela mostra sem os zeros, que foi o que o André pediu em 11/11
+      // tela mostra sem os zeros, que foi o que o André pediu em 11/11.
+      // Desde 12/11 elas não aparecem — ficam só como chave interna.
       rc:_rjsN(l.rc) || '', itemRc:_rjsN(l.itemRc) || '',
       oport: l.oport || rjItemOpPar(l.rc, l.itemRc)[1],
       itemOp: rjItemOpPar(l.rc, l.itemRc)[0],
       pedido:l.pedido || '', comprador:l.comprador || '',
-      sla: +l.slaPedido || 0,
+      sla: +l.slaPedido || 0, nRcs: 1,
       padrao:l.padrao || '', justificativa:l.justificativa || '',
       semDono: !l.comprador
     };
+    if (ped) porPedido[ped] = n;
+    out.push(n);
   });
   out.sort(function(a, b){
     if ((b.sla || 0) !== (a.sla || 0)) return (b.sla || 0) - (a.sla || 0);
@@ -21365,7 +21400,8 @@ function rjsBaixarLado(lado){
     });
     if (!lista.length) { alert('Não há itens neste recorte.'); return; }
     var g = rjsLinhasGrade(lista);
-    var cab = ['RC','Item','Oportunidade','Item da OP','Pedido','Comprador','SLA Pedido',
+    // as mesmas colunas da tela: uma linha por pedido, sem RC
+    var cab = ['Pedido','Comprador','SLA Pedido',
                'Motivo','Conclusão','Padrão rejeição','Justificativa',
                'Parado desde','Dias parado'];
     var aoa = [cab];
@@ -21373,8 +21409,7 @@ function rjsBaixarLado(lado){
       var t = rjTrat(l);
       var d = gppDesde('rejsup', rjsChaveLb(l.rc, l.itemRc));
       var dias = gpDias(d);
-      aoa.push([l.rc, l.itemRc, l.oport, l.itemOp, l.pedido,
-                l.comprador || '(sem comprador)', +l.sla || 0,
+      aoa.push([l.pedido, l.comprador || '(sem comprador)', +l.sla || 0,
                 t.motivo, t.conclusao, l.padrao, l.justificativa,
                 d ? cpDataBR(d) : '', dias == null ? '' : dias]);
     });
@@ -22040,17 +22075,16 @@ function gpCopiar(){
 function gpBaixarExcel(){
   try {
     if (_gpCard === 'rejeitados') {
-      // Mesmas colunas da tela desde 11/11 — uma linha por ITEM, com o
+      // Mesmas colunas da tela — uma linha por PEDIDO desde 12/11, com o
       // comprador vindo do cruzamento com a medição e com o que o
       // comprador já escreveu em Motivo e Conclusão.
-      var cabR = ['RC','Item','Oportunidade','Item da OP','Pedido','Comprador',
-                  'SLA Pedido','Motivo da recusa','Motivo','Conclusão',
-                  'Grupo','Fornecedor','Rejeitado em','Prazo recusa'];
+      var cabR = ['Pedido','Comprador','SLA Pedido','Motivo da recusa',
+                  'Motivo','Conclusão','Grupo','Fornecedor','Rejeitado em',
+                  'Prazo recusa'];
       var aoaR = [cabR];
       rjLinhasItens(rjItens()).forEach(function(l){
         var t = rjTrat(l);
-        aoaR.push([l.rc, l.itemRc, l.oport, l.itemOp, l.pedido,
-                   l.comprador || '(sem comprador)', +l.sla || 0,
+        aoaR.push([l.pedido, l.comprador || '(sem comprador)', +l.sla || 0,
                    l.motivoRej, t.motivo, t.conclusao,
                    l.grupo, l.forn, l.dataRej ? cpDataBR(l.dataRej) : '', l.prazo]);
       });
