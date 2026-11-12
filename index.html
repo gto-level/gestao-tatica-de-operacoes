@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '12/11 19:30';
+var GTO_BUILD = '12/11 21:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -16165,6 +16165,11 @@ function mdItensDaAtividade(ch){
     var dia = (typeof mdDataSel === 'function') ? (_mdCfg.dataDist || mdDataSel()) : '';
     _mdBase.itens.forEach(function(i){
       var c = mdPromoveParaEmitir(i, dia) ? 'emitir' : i.statusChave;
+      // a conclusão do card Emitir pedido manda aqui também: senão a
+      // tabela ofereceria para distribuir o que não pode sair
+      var ef = mdEfeitoEmitir(i);
+      if (ef === 'fora' || ef === 'retido') return;
+      if (ef) c = ef;
       if (quais.indexOf(c) !== -1) n++;
     });
   }
@@ -18057,6 +18062,207 @@ function gpChave(it){ return String(it.rc || '') + '|' + String(it.seq || ''); }
 var GOV_SEM_NEGOCIACAO = ['patecgm','pateciden'];
 function gpSemNegociacao(ch){ return GOV_SEM_NEGOCIACAO.indexOf(ch) !== -1; }
 
+// ══ A TRATATIVA DO CARD EMITIR PEDIDO (12/11) ════════════════════
+// Pedido do André: no card Emitir pedido, um comentário livre e uma
+// conclusão com sete opções, cada uma com a sua consequência.
+//
+//   PATEC          → o item muda de fila: vai para Abrir PATEC ID não
+//   Devolução      → conclui o item por esse motivo (sai dos cards)
+//   Republicação   → conclui o item por esse motivo (sai dos cards)
+//   Negociação     → vai para Negociar preço, levando o comentário
+//   Chamado        → FICA no card, mas não apto a emitir
+//   Ag. fornecedor → idem
+//   Ag. requisitante → idem
+//
+// Os três últimos são espera, não desfecho: o item continua na fila e
+// só volta a ser emitível quando a conclusão for apagada. Por isso a
+// ação deles se chama "segura" — ela não tira o item de lugar nenhum,
+// só trava a emissão.
+//
+// Tudo fica em config/emitir_tratativa, com um retrato do item junto:
+// o concluído sai do MAPA depois de alguns dias, e sem o retrato a
+// consulta futura mostraria uma chave sem nome.
+var EMI_CONCLUSOES = [
+  { k:'patec',        nome:'PATEC',            acao:'mover',    destino:'pateciden' },
+  { k:'devolucao',    nome:'Devolução',        acao:'concluir' },
+  { k:'republicacao', nome:'Republicação',     acao:'concluir' },
+  { k:'chamado',      nome:'Chamado',          acao:'segura' },
+  { k:'agforn',       nome:'Ag. fornecedor',   acao:'segura' },
+  { k:'agreq',        nome:'Ag. requisitante', acao:'segura' },
+  { k:'negociacao',   nome:'Negociação',       acao:'mover',    destino:'negociar' }
+];
+var EMI_DOC = 'emitir_tratativa';
+var EMI_MAX = 3000;
+var _emiTrat = { itens:{}, atualizadoEm:'', atualizadoPor:'' };
+
+function emiRegra(k){
+  for (var i = 0; i < EMI_CONCLUSOES.length; i++)
+    if (EMI_CONCLUSOES[i].k === k) return EMI_CONCLUSOES[i];
+  return null;
+}
+function emiNome(k){ var r = emiRegra(k); return r ? r.nome : (k || ''); }
+function emiDe(chave){
+  return _emiTrat.itens[chave] || { comentario:'', conclusao:'' };
+}
+
+// O que a conclusão faz com o item: '' nada, 'fora' concluído, 'retido'
+// preso na fila sem poder emitir, ou a chave da fila de destino.
+function emiEfeito(chave){
+  var t = _emiTrat.itens[chave];
+  if (!t || !t.conclusao) return '';
+  var r = emiRegra(t.conclusao);
+  if (!r) return '';
+  if (r.acao === 'concluir') return 'fora';
+  if (r.acao === 'segura') return 'retido';
+  return r.destino;
+}
+
+async function emiCarregar(){
+  try {
+    var db = getDB(); if (!db) return;
+    var d = await db.collection('config').doc(EMI_DOC).get();
+    if (d && d.exists) {
+      var T = d.data() || {};
+      _emiTrat = { itens:T.itens || {}, atualizadoEm:T.atualizadoEm || '',
+                   atualizadoPor:T.atualizadoPor || '' };
+    }
+  } catch (e) { console.warn('emiCarregar:', e); }
+}
+
+async function emiGravar(){
+  try {
+    var db = getDB(); if (!db) return false;
+    _emiTrat.atualizadoEm = new Date().toISOString();
+    _emiTrat.atualizadoPor = cpQuem();
+    await db.collection('config').doc(EMI_DOC).set(_emiTrat);
+    return true;
+  } catch (e) { console.warn('emiGravar:', e); return false; }
+}
+
+// O retrato do item, guardado junto com a tratativa. Sem ele, a
+// consulta de um concluído de três meses atrás traria só "36886812|10".
+function emiRetrato(it){
+  if (!it) return {};
+  return { rc:it.rc || '', seq:it.seq || '', op:it.op || '', itemOp:it.itemOp || '',
+           sla:+it.sla || 0, seg:it.seg || '', texto:it.texto || '',
+           centro:it.centro || '', valor:+it.valor || 0 };
+}
+
+async function emiSalvar(chave, campo, valor, elTexto){
+  if (!chave) return;
+  var o = _emiTrat.itens[chave];
+  if (!o) {
+    if (Object.keys(_emiTrat.itens).length >= EMI_MAX) {
+      emiRecado('<span style="color:var(--vm)">✗ A base de tratativas está cheia ('
+        + cpNum(EMI_MAX) + '). Exporte os concluídos antes de continuar.</span>');
+      return;
+    }
+    o = _emiTrat.itens[chave] = { comentario:'', conclusao:'' };
+    var it = null;
+    gpItens().forEach(function(x){ if (gpChave(x) === chave) it = x; });
+    o.item = emiRetrato(it);
+  }
+  o[campo] = String(valor == null ? '' : valor).trim();
+  if (campo === 'conclusao') {
+    var r = o.conclusao ? emiRegra(o.conclusao) : null;
+    o.em = o.conclusao ? new Date().toISOString() : '';
+    o.por = o.conclusao ? cpQuem() : '';
+    // a conclusão apagada devolve o item à fila, apta — é o caminho de
+    // volta que o André pediu para chamado, ag. fornecedor e ag.
+    // requisitante
+    o.acao = r ? r.acao : '';
+    o.destino = (r && r.destino) ? r.destino : '';
+  }
+  if (!o.comentario && !o.conclusao) delete _emiTrat.itens[chave];
+  var ok = await emiGravar();
+  emiRecado(ok ? '<span style="color:var(--vd)">✔ guardado</span>'
+               : '<span style="color:var(--vm)">✗ a base recusou — o que você escolheu NÃO '
+                 + 'foi guardado</span>');
+  // a escolha muda de card, de contagem e de aptidão: a tela inteira
+  // precisa ser redesenhada, não só a linha
+  if (campo === 'conclusao') { try { gpRender(); } catch (e) {} }
+}
+
+// A consulta dos concluídos: eles saíram dos cards, e sem um lugar
+// para olhar "concluir" viraria "sumir".
+var _emiVendo = false;
+function emiVerConcluidos(){
+  _emiVendo = !_emiVendo;
+  var box = document.getElementById('emi-concluidos');
+  if (!box) return;
+  if (!_emiVendo) { box.innerHTML = ''; return; }
+  var L = emiConcluidos();
+  if (!L.length) {
+    box.innerHTML = '<div class="al al-b" style="font-size:11.5px">Nenhum item concluído por '
+      + 'devolução ou republicação ainda.</div>';
+    return;
+  }
+  var h = '<div class="al al-b" style="font-size:11.5px;margin-bottom:.4rem">'
+    + '<strong>' + cpNum(L.length) + '</strong> item(ns) concluído(s), guardados no Firebase. '
+    + 'Eles não aparecem em card nenhum — esta é a consulta.'
+    + ' <button class="btn btn-s" style="font-size:10.5px;padding:2px 8px" '
+    + 'onclick="emiBaixarConcluidos()">⬇ Baixar Excel</button></div>'
+    + '<div style="overflow:auto;max-height:260px;margin-bottom:.6rem"><table><thead><tr>'
+    + '<th>RC</th><th>Item</th><th>Oportunidade</th><th>Item op.</th>'
+    + '<th>Conclusão</th><th>Comentário</th><th>Concluído em</th><th>Por</th>'
+    + '</tr></thead><tbody>';
+  L.forEach(function(x){
+    h += '<tr><td style="font-weight:700;color:var(--az)">' + cpEsc(x.rc) + '</td>'
+      + '<td>' + cpEsc(x.seq) + '</td>'
+      + '<td>' + cpEsc(x.op || '—') + '</td>'
+      + '<td>' + cpEsc(x.itemOp || '—') + '</td>'
+      + '<td style="font-weight:600">' + cpEsc(x.nome) + '</td>'
+      + '<td style="font-size:10.5px">' + cpEsc(x.comentario || '—') + '</td>'
+      + '<td style="font-size:10.5px">' + (x.em ? cpDataBR(String(x.em).slice(0, 10)) : '—') + '</td>'
+      + '<td style="font-size:10.5px">' + cpEsc(x.por || '—') + '</td></tr>';
+  });
+  box.innerHTML = h + '</tbody></table></div>';
+}
+
+function emiBaixarConcluidos(){
+  try {
+    var L = emiConcluidos();
+    if (!L.length) { alert('Não há itens concluídos.'); return; }
+    var cab = ['RC','Item','Oportunidade','Item da OP','Segmento','Conclusão',
+               'Comentário','Concluído em','Por'];
+    var aoa = [cab];
+    L.forEach(function(x){
+      aoa.push([x.rc, x.seq, x.op, x.itemOp, x.seg, x.nome, x.comentario,
+                x.em ? cpDataBR(String(x.em).slice(0, 10)) : '', x.por]);
+    });
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = cab.map(function(c){ return { wch: Math.max(11, Math.min(34, c.length + 6)) }; });
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Concluidos');
+    XLSX.writeFile(wb, 'Emitir_concluidos_' + String(cpHojeISO()).replace(/-/g, '') + '.xlsx');
+  } catch (e) { alert('Não consegui gerar o Excel: ' + e.message); }
+}
+
+function emiRecado(html){
+  var st = document.getElementById('emi-status');
+  if (!st) return;
+  st.innerHTML = html;
+  if (/guardado/.test(html)) setTimeout(function(){ if (st) st.innerHTML = ''; }, 2500);
+}
+
+// Os concluídos, para consulta: saem da base, não do MAPA do dia.
+function emiConcluidos(){
+  var out = [];
+  Object.keys(_emiTrat.itens || {}).forEach(function(k){
+    var t = _emiTrat.itens[k];
+    if (!t.conclusao) return;
+    var r = emiRegra(t.conclusao);
+    if (!r || r.acao !== 'concluir') return;
+    var i = t.item || {};
+    out.push({ chave:k, rc:i.rc || k.split('|')[0], seq:i.seq || k.split('|')[1],
+               op:i.op || '', itemOp:i.itemOp || '', seg:i.seg || '',
+               conclusao:t.conclusao, nome:emiNome(t.conclusao),
+               comentario:t.comentario || '', em:t.em || '', por:t.por || '' });
+  });
+  out.sort(function(a, b){ return String(b.em).localeCompare(String(a.em)); });
+  return out;
+}
+
 // O estado de um item: onde ele cai hoje e por quê.
 function gpEstado(it){
   var k = gpChave(it);
@@ -18078,9 +18284,21 @@ function gpEstado(it){
   var card = ch;
   // negociação madura empurra o item para Emitir pedido
   if ((ch === 'negociar' || ch === 'dpv') && liberado) card = 'emitir';
+  // ── a conclusão do card Emitir pedido manda no destino ──
+  // Só vale para quem está em Emitir pedido: a regra é de lá. Item que
+  // o MAPA já traz em outra fila segue o MAPA.
+  var tr = emiDe(k), efeito = '', retido = false, concluido = false;
+  if (card === 'emitir') {
+    efeito = emiEfeito(k);
+    if (efeito === 'fora') { card = ''; concluido = true; }
+    else if (efeito === 'retido') { retido = true; }
+    else if (efeito) { card = efeito; }
+  }
   return { chave:k, origem:ch, card:card,
            comentario: man.comentario || '', dataNeg: dataNeg,
            libera: libera, liberado: liberado,
+           emiComentario: tr.comentario || '', emiConclusao: tr.conclusao || '',
+           emiEfeito: efeito, retido: retido, concluido: concluido,
            fonte: man.data ? 'digitada'
                  : (it.negociacao ? 'aba do MAPA' : (lb.negociacao ? 'levelboard' : '')),
            fornecedor: it.fornGanhador || lb.fornecedor || '',
@@ -18096,6 +18314,8 @@ function gpContar(){
   GOV_CARDS.forEach(function(x){ c[x.chave] = 0; aguardando[x.chave] = 0; comData[x.chave] = 0; origem[x.chave] = 0; });
   gpItens().forEach(function(it){
     var e = gpEstado(it);
+    // concluído (devolução, republicação) não está em card nenhum
+    if (!e.card) return;
     c[e.card] = (c[e.card] || 0) + 1;
     origem[e.origem] = (origem[e.origem] || 0) + 1;
     if (e.dataNeg) comData[e.origem] = (comData[e.origem] || 0) + 1;
@@ -18269,6 +18489,7 @@ function gpRenderDetalhe(){
   });
   var editavel = (_gpCard === 'negociar' || _gpCard === 'dpv');
   var dePatec  = (_gpCard === 'patec' || _gpCard === 'patecman');
+  var deEmitir = (_gpCard === 'emitir');
   var semNeg   = gpSemNegociacao(_gpCard);
   // Dias parado: nos dois de PATEC conta da data de NEGOCIAÇÃO, que é
   // data real e vale já no primeiro dia; em Emitir Pedido não existe
@@ -18283,13 +18504,22 @@ function gpRenderDetalhe(){
     return dePatec ? (e.dataNeg || '') : gppDesdeCom('emitir', e.chave, e.libera);
   };
 
+  var nRetidos = lista.filter(function(x){ return x.e.retido; }).length;
   var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
-    + '<span>' + cpEsc(govNomeCard(_gpCard)) + ' — ' + cpNum(lista.length) + ' RC(s)</span>'
-    + '<span style="display:flex;gap:8px">'
+    + '<span>' + cpEsc(govNomeCard(_gpCard)) + ' — ' + cpNum(lista.length) + ' RC(s)'
+    +   (deEmitir && nRetidos
+          ? ' <span style="font-weight:500;font-size:11.5px;color:var(--am)">· '
+            + cpNum(nRetidos) + ' parado(s) por conclusão</span>' : '')
+    + '</span>'
+    + '<span style="display:flex;gap:8px;align-items:center">'
+    +   (deEmitir ? '<span id="emi-status" style="font-size:11px;min-height:14px"></span>'
+                  + '<button class="btn btn-s" onclick="emiVerConcluidos()">📁 Concluídos ('
+                  + cpNum(emiConcluidos().length) + ')</button>' : '')
     +   '<button class="btn btn-s" onclick="gpCopiar()">📋 Copiar</button>'
     +   '<button class="btn btn-s" onclick="gpBaixarExcel()">⬇ Baixar Excel</button>'
     +   '<button class="btn btn-s" onclick="gpAbrirCard(\'' + _gpCard + '\')">✕ Fechar</button>'
-    + '</span></div>';
+    + '</span></div>'
+    + (deEmitir ? '<div id="emi-concluidos"></div>' : '');
   if (!lista.length) {
     h += '<div style="font-size:12px;color:var(--tx2)">Nenhuma RC neste card.</div></div>';
     box.innerHTML = h; return;
@@ -18302,6 +18532,7 @@ function gpRenderDetalhe(){
     + (temParado ? '<th>Parado desde</th>'
         + '<th style="text-align:right" title="' + cpEsc(tituloParado) + '">Dias parado</th>' : '')
     + (editavel ? '<th>Comentário</th>' : '')
+    + (deEmitir ? '<th>Comentário</th><th>Conclusão</th>' : '')
     + (semNeg ? '' : '<th>Situação</th>') + '</tr></thead><tbody>';
   lista.forEach(function(x){
     var it = x.it, e = x.e;
@@ -18334,6 +18565,23 @@ function gpRenderDetalhe(){
         +  ' onchange="gpTrocarComentario(\'' + cpEsc(e.chave) + '\', this.value)"'
         +  ' style="font-size:10.5px;padding:3px 6px;border:1px solid var(--brd);border-radius:5px;width:160px"></td>';
     }
+    if (deEmitir) {
+      var idc = 'emi-c-' + cpEsc(e.chave).replace(/[^0-9a-zA-Z]/g, '_');
+      h += '<td><input type="text" value="' + cpEsc(e.emiComentario) + '"'
+        +  ' placeholder="o que está acontecendo"'
+        +  ' onchange="emiSalvar(\'' + cpEsc(e.chave) + '\', \'comentario\', this.value)"'
+        +  ' style="font-size:10.5px;padding:3px 6px;border:1px solid '
+        +    (e.emiComentario ? 'var(--vd)' : 'var(--brd)') + ';border-radius:5px;width:180px"></td>'
+        +  '<td><select id="' + idc + '"'
+        +  ' onchange="emiSalvar(\'' + cpEsc(e.chave) + '\', \'conclusao\', this.value)"'
+        +  ' style="font-size:10.5px;padding:3px 6px;border-radius:5px;border:1px solid '
+        +    (e.emiConclusao ? 'var(--az)' : 'var(--brd)') + '">'
+        +  '<option value="">— em branco —</option>'
+        +  EMI_CONCLUSOES.map(function(o){
+               return '<option value="' + o.k + '"' + (e.emiConclusao === o.k ? ' selected' : '')
+                    + '>' + cpEsc(o.nome) + '</option>'; }).join('')
+        +  '</select></td>';
+    }
     h += (semNeg ? '' : '<td style="font-size:10px">' + gpSelo(e) + '</td>') + '</tr>';
   });
   h += '</tbody></table></div>';
@@ -18354,6 +18602,18 @@ function gpRenderDetalhe(){
       + 'Digite a data em que negociou. Dois dias úteis depois, o item sai deste card e '
       + 'aparece em <strong>Emitir pedido</strong>, mesmo que o MAPA do dia continue trazendo '
       + 'ele como negociação.</div>';
+  }
+  if (deEmitir) {
+    h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:8px;line-height:1.8">'
+      + 'A <strong>conclusão</strong> decide o destino do item: '
+      + '<strong>PATEC</strong> manda para Abrir PATEC ID não · '
+      + '<strong>Negociação</strong> manda para Negociar preço, levando o comentário · '
+      + '<strong>Devolução</strong> e <strong>Republicação</strong> concluem o item, que sai '
+      + 'dos cards e fica guardado para consulta · '
+      + '<strong>Chamado</strong>, <strong>Ag. fornecedor</strong> e '
+      + '<strong>Ag. requisitante</strong> mantêm o item aqui, mas <strong>sem poder ser '
+      + 'emitido</strong> — para voltar a ficar apto, apague a conclusão (— em branco —).'
+      + '</div>';
   }
   if (semNeg) {
     h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:8px">'
@@ -21715,6 +21975,12 @@ function gpFunilCockpit(){
 }
 
 function gpSelo(e){
+  // o travado pela conclusão vem antes de tudo: ele está na fila, mas
+  // não pode ser emitido, e isso é o que o comprador precisa ver
+  if (e.retido) return '<span style="background:var(--amc);color:var(--am);'
+    + 'border:1px solid var(--am);border-radius:4px;padding:1px 5px;font-weight:700"'
+    + ' title="apague a conclusão para o item voltar a ficar apto">PARADO · '
+    + cpEsc(emiNome(e.emiConclusao).toUpperCase()) + '</span>';
   if (e.card !== e.origem) return '<span style="background:var(--vdc);color:var(--vd);border:1px solid var(--vd);'
     + 'border-radius:4px;padding:1px 5px;font-weight:700">VEIO DE ' + cpEsc(govNomeCard(e.origem).toUpperCase()) + '</span>';
   if (e.dataNeg && !e.liberado) return '<span style="background:var(--amc);color:var(--am);border:1px solid var(--am);'
@@ -21971,6 +22237,9 @@ async function gpAbrir(){
                    atualizadoEm:M.atualizadoEm || '', atualizadoPor:M.atualizadoPor || '' };
       }
       await gpCarregarResp();
+      // a tratativa do card Emitir pedido: ela muda em que card o item
+      // cai, então precisa estar carregada antes do primeiro desenho
+      await emiCarregar();
       // histórico de presença dos dois cards que não têm data própria
       await Promise.all([gppCarregar('emitir'), gppCarregar('rejsup')]);
       var d4 = await db.collection('config').doc('governanca_cockpit').get();
@@ -22295,6 +22564,47 @@ async function _ctrlIxMapa(data){
     }
   } catch (e) { console.warn('_ctrlIxMapa:', e); }
   return ix;
+}
+
+// ── DE QUAL MAPA SAI O "JÁ CONCLUÍDO" (12/11) ────────────────────
+// Concluir um Abrir PATEC é SUMIR dos status de abrir PATEC. Para
+// saber isso é preciso ter o MAPA na mão — e até agora só valia o
+// MAPA carregado nesta sessão (_mdBase). Quem abrisse a Governança
+// sem passar antes pela Distribuição do MAPA via a coluna Concluídos
+// zerada em todo mundo, que foi o que o André viu.
+//
+// Mas o MAPA de cada dia está gravado em governanca_mapa. Então,
+// quando não há MAPA carregado, procuro o mais novo que estiver lá,
+// andando para trás a partir de hoje. Devolvo também QUAL dia foi
+// usado: a conta muda conforme o MAPA, e a tela tem de dizer de onde
+// ela saiu.
+var _ctrlMapaCache = null;
+async function _ctrlVivosAgora(){
+  if (_mdBase && _mdBase.itens && _mdBase.itens.length) {
+    return { vivos: _ctrlAindaNoMapa(), de: 'carregado', data: '', tem: true };
+  }
+  if (_ctrlMapaCache) return _ctrlMapaCache;
+  var vivos = {}, achou = '', itens = null;
+  try {
+    var db = getDB();
+    if (db) {
+      var d = new Date(cpHojeISO() + 'T12:00:00');
+      for (var k = 0; k < 10 && !itens; k++) {
+        var iso = d.toISOString().slice(0, 10);
+        var doc = await db.collection(GP_COL).doc(iso).get();
+        if (doc && doc.exists) {
+          var dd = doc.data() || {};
+          if ((dd.itens || []).length) { itens = dd.itens; achou = dd.data || iso; }
+        }
+        d.setDate(d.getDate() - 1);
+      }
+    }
+  } catch (e) { console.warn('_ctrlVivosAgora:', e); }
+  (itens || []).forEach(function(i){
+    if (CTRL_PATEC.indexOf(i.statusChave) !== -1) vivos[i.rc + '|' + i.seq] = i.statusChave;
+  });
+  _ctrlMapaCache = { vivos:vivos, de:'gravado', data:achou, tem: !!itens };
+  return _ctrlMapaCache;
 }
 
 // O que o MAPA de agora ainda traz nos status de abrir PATEC.
@@ -22896,8 +23206,9 @@ async function monCombinadoDe(ini, fim){
   } catch (e) { console.warn('monMontarCombinado:', e); }
   dists.sort(function(a, b){ return a.data < b.data ? -1 : 1; });
 
-  var vivos = _ctrlAindaNoMapa();
-  var temMapa = !!(_mdBase && _mdBase.itens && _mdBase.itens.length);
+  var mp = await _ctrlVivosAgora();
+  var vivos = mp.vivos;
+  var temMapa = mp.tem;
   var hoje = cpHojeISO();
 
   var monta = function(chaves, feitoDe){
@@ -22935,6 +23246,7 @@ async function monCombinadoDe(ini, fim){
 
   return {
     temMapa: temMapa, dists: dists.length, ini:ini, fim:fim,
+    mapaDe: mp.data, mapaCarregado: mp.de === 'carregado',
     patec: monta(CTRL_PATEC, function(i){ return temMapa && !vivos[i.rc + '|' + i.seq]; }),
     neg:   monta(CTRL_NEG,   function(i){ var x = _gpNeg[i.rc + '|' + i.seq]; return !!(x && x.data); })
   };
@@ -23055,10 +23367,23 @@ function gvRenderCombinado(){
   }
   if (bp) bp.innerHTML = monBlocoCombinado(_gvComb.patec,
       'Abrir PATEC (grupo de mercadoria obrigatório e idêntico não)',
-      _gvComb.temMapa ? '' : '⚠ Suba o MAPA de hoje na Distribuição do MAPA — é ele que diz '
-        + 'o que já saiu do status de abrir PATEC. Sem ele, nada aparece como concluído.');
+      gvAvisoMapa(_gvComb));
   if (bn) bn.innerHTML = monBlocoCombinado(_gvComb.neg,
       'Negociação (preço excessivo e acima do limite DPV)', '');
+}
+
+// De qual MAPA saiu a coluna Concluídos. Sem isso, "0 concluídos" pode
+// ser trabalho não feito OU MAPA faltando, e os dois se parecem.
+function gvAvisoMapa(c){
+  if (!c) return '';
+  if (c.mapaCarregado) return '';
+  if (!c.temMapa)
+    return '⚠ Não há MAPA carregado nem gravado nos últimos dias. É o MAPA que diz o que já '
+      + 'saiu do status de abrir PATEC — sem ele, <strong>ninguém aparece como concluído</strong>. '
+      + 'Suba o MAPA de hoje na Distribuição do MAPA.';
+  return 'ℹ Concluído = saiu dos status de abrir PATEC no MAPA de <strong>'
+    + cpDataBR(c.mapaDe) + '</strong>, que é o mais novo gravado. '
+    + 'Suba o MAPA de hoje para a conta ficar do dia.';
 }
 
 function gvMonVisao(v){
@@ -23604,16 +23929,29 @@ function monBlocoCombinado(r, titulo, aviso){
     + '<td style="text-align:right;font-weight:800;color:var(--vm)">' + cpNum(r.total.vencido) + '</td>'
     + '<td style="text-align:right;font-weight:800">' + pct + '%</td><td></td><td></td>'
     + '</tr></tfoot></table></div>';
+  // A segunda tabela é a MESMA conta, repartida pelo dia em que o item
+  // foi distribuído — a de cima responde "quem", esta responde
+  // "quando". O André perguntou como ler isto; sem título, duas tabelas
+  // coladas com as mesmas colunas parecem a mesma coisa duas vezes.
   if (r.dias.length > 1) {
-    h += '<div style="overflow:auto;max-height:200px;margin-top:.7rem"><table><thead><tr>'
+    h += '<div style="font-size:11px;color:var(--tx2);margin:.9rem 0 .3rem;line-height:1.6">'
+      + '<strong>Por dia de distribuição</strong> — os mesmos ' + cpNum(r.total.recebido)
+      + ' itens de cima, agora pelo dia em que saíram na distribuição. '
+      + 'A soma dos Distribuídos aqui é igual ao total da equipe.</div>'
+      + '<div style="overflow:auto;max-height:200px"><table><thead><tr>'
       + '<th>Distribuição de</th><th style="text-align:right">Distribuídos</th>'
-      + '<th style="text-align:right">Concluídos</th><th style="text-align:right">Vencidos</th>'
+      + '<th style="text-align:right">Concluídos</th>'
+      + '<th style="text-align:right">Em aberto</th>'
+      + '<th style="text-align:right">Vencidos</th>'
       + '<th style="text-align:right">%</th></tr></thead><tbody>';
     r.dias.forEach(function(d){
       var q = d.recebido ? Math.round(d.feito * 100 / d.recebido) : 0;
+      var aberto = d.recebido - d.feito;
       h += '<tr><td>' + cpDataBR(d.data) + '</td>'
         + '<td style="text-align:right">' + cpNum(d.recebido) + '</td>'
         + '<td style="text-align:right;color:var(--vd)">' + cpNum(d.feito) + '</td>'
+        + '<td style="text-align:right;color:' + (aberto ? 'var(--am)' : 'var(--tx2)') + '">'
+        +   cpNum(aberto) + '</td>'
         + '<td style="text-align:right;color:' + (d.vencido ? 'var(--vm)' : 'var(--tx2)') + '">'
         +   cpNum(d.vencido) + '</td>'
         + '<td style="text-align:right;font-weight:600">' + q + '%</td></tr>';
@@ -23636,8 +23974,7 @@ function monRenderCombinado(){
   }
   box.innerHTML = monBlocoCombinado(_monComb.neg, 'Negociação (preço excessivo e acima do limite DPV)', '')
     + monBlocoCombinado(_monComb.patec, 'Abrir PATEC (grupo de mercadoria obrigatório e idêntico não)',
-        _monComb.temMapa ? '' : '⚠ Suba o MAPA de hoje na Distribuição do MAPA — é ele que diz o que '
-          + 'já saiu do status de abrir PATEC. Sem ele, nada aparece como concluído.')
+        gvAvisoMapa(_monComb))
     + '<div style="font-size:10.5px;color:var(--tx2)">'
     + 'Na negociação conta como feito o item com <strong>data de negociação</strong> preenchida na '
     + 'Governança. No abrir PATEC conta como feito o item que <strong>não aparece mais</strong> nos '
@@ -24613,6 +24950,26 @@ function mdPromoveParaEmitir(it, dia){
   try { return mdAptoPedido(it, dia).apto; } catch (e) { return false; }
 }
 
+// PATEC e Negociação mudam o item de fila: ele sai de Emitir pedido e
+// passa a ser distribuído na fila de destino, com o comentário junto
+// quando for negociação — foi o que o André pediu.
+function mdMoverPorConclusao(itens){
+  return (itens || []).map(function(it){
+    var ef = mdEfeitoEmitir(it);
+    if (!ef || ef === 'fora' || ef === 'retido') return it;
+    var c = {};
+    Object.keys(it).forEach(function(k){ c[k] = it[k]; });
+    c.statusChave = ef;
+    c.statusOriginal = it.statusChave;
+    c.deConclusao = true;
+    try {
+      var t = emiDe(String(it.rc || '') + '|' + String(it.seq || ''));
+      if (ef === 'negociar' && t.comentario) c.comentario = t.comentario;
+    } catch (e) {}
+    return c;
+  });
+}
+
 function mdPromoverNegociados(itens, dia){
   return (itens || []).map(function(it){
     if (!mdPromoveParaEmitir(it, dia)) return it;
@@ -24644,12 +25001,26 @@ function mdContaEmissao(dia){
   return r;
 }
 
+// A conclusão do card Emitir pedido também vale aqui (12/11). Sem
+// isto, o item marcado como "Chamado" sairia na distribuição do dia
+// seguinte como se estivesse pronto para emitir, e o marcado como
+// Devolução continuaria sendo repartido depois de concluído.
+function mdEfeitoEmitir(it){
+  if (!it || it.statusChave !== 'emitir') return '';
+  try { return emiEfeito(String(it.rc || '') + '|' + String(it.seq || '')); }
+  catch (e) { return ''; }
+}
+
 function mdEntraNaDistribuicao(it, dia){
   var achou = false;
   for (var i = 0; i < MD_STATUS.length; i++) {
     if (MD_STATUS[i].chave === it.statusChave) { achou = true; break; }
   }
   if (!achou) return false;
+  // concluído sai; chamado / ag. fornecedor / ag. requisitante ficam na
+  // fila mas não podem ser emitidos, então não são distribuídos
+  var ef = mdEfeitoEmitir(it);
+  if (ef === 'fora' || ef === 'retido') return false;
   if (MD_PRECISA_APTO.indexOf(it.statusChave) !== -1) return mdAptoPedido(it, dia).apto;
   return true;
 }
@@ -25428,6 +25799,8 @@ async function mdDistribuir(){
   // a negociação que já cumpriu os 2 dias úteis entra como Emitir
   // Pedido, exatamente como a Governança mostra
   itensMapa = mdPromoverNegociados(itensMapa, _diaDist);
+  // e a conclusão do card Emitir pedido muda o item de fila
+  itensMapa = mdMoverPorConclusao(itensMapa);
   // Os rejeitados NÃO entram mais aqui: desde 11/11 cada rejeite já
   // nasce com dono — quem criou o pedido —, e isso é resolvido na tela
   // de rejeitados, pelo cruzamento com a medição.
@@ -26022,6 +26395,10 @@ async function mdCarregarDia(data){
 async function mdCarregarBasesGov(){
   try {
     var db = getDB(); if (!db) return;
+    // a conclusão do card Emitir pedido tira item da distribuição e
+    // muda outros de fila: sem ela, a distribuição do dia seguinte
+    // mandaria para a equipe o que já foi concluído ou está travado
+    try { await emiCarregar(); } catch (e0) {}
     var d = await Promise.all([
       db.collection('config').doc('governanca_rejeitados').get(),
       db.collection('config').doc('governanca_negociacao').get(),
