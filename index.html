@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '12/11 09:40';
+var GTO_BUILD = '12/11 10:15';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -18098,13 +18098,13 @@ function gpRender(){
           ? '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
             + cpNum(n - (ct.comData[x.chave] || 0)) + ' sem data de negociação</div>'
           : '')
-      + (x.chave === 'rejeitados'
+      // 12/11: a linha de detalhe saiu do card a pedido do André. A conta
+      // completa — linhas do arquivo, outros grupos, fora do prazo —
+      // continua na tela de Rejeite, embaixo do nome do arquivo. Aqui
+      // fica só o recado de quem ainda não subiu planilha nenhuma.
+      + (x.chave === 'rejeitados' && !_gpRej.lidas
           ? '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
-            + (_gpRej.lidas ? cpNum(_gpRej.lidas) + ' linhas · ' + cpNum(_gpRej.fora)
-                              + ' de outros grupos'
-                              + ((+_gpRej.foraPrazo || 0)
-                                  ? ' · ' + cpNum(_gpRej.foraPrazo) + ' fora do prazo' : '')
-                            : 'suba a planilha em Controle de Pedidos › Rejeite') + '</div>'
+            + 'suba a planilha em Controle de Pedidos › Rejeite</div>'
           : '')
       + (x.chave === 'rejsup'
           ? (function(){
@@ -18120,17 +18120,13 @@ function gpRender(){
             + (_gpCock.total ? cpEsc(CP_COCKPIT.psmv) + ' · emitido · ' + cpEsc(CP_COCKPIT.gerente)
                              : 'suba a medição no Controle de Pedidos') + '</div>'
           : '')
-      + (x.chave === 'memorizados'
+      + (x.chave === 'memorizados' && !n
           ? '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
-            + (n ? 'status 2 · sem eliminação · escolha o período'
-                 : 'suba a medição no Controle de Pedidos') + '</div>'
+            + 'suba a medição no Controle de Pedidos</div>'
           : '')
-      + (x.chave === 'statusb'
+      + (x.chave === 'statusb' && !_gpSB.data
           ? '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
-            + (_gpSB.data
-                ? 'a duplicar · BU de ' + cpDataBR(_gpSB.data)
-                  + (gpSBMarcados().length ? ' · ' + cpNum(gpSBMarcados().length) + ' já duplicada(s)' : '')
-                : 'suba a BU em Controle de Pedidos › Status B') + '</div>'
+            + 'suba a BU em Controle de Pedidos › Status B</div>'
           : '')
       + '</div>';
   });
