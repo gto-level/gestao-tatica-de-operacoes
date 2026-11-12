@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '12/11 18:05';
+var GTO_BUILD = '12/11 19:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1160,6 +1160,16 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
 
     <!-- ══════════════════ MÓDULO PEDIDOS ══════════════════ -->
     <div class="page" id="p-governanca-pedidos">
+
+      <!-- ══ as duas abas da Governança (12/11) ══ -->
+      <div class="stabs" style="margin-bottom:1rem">
+        <button class="stab active" id="gv-sub-btn-pedidos"
+          onclick="gvSubTab('pedidos', this)">🏛️ Governança de pedidos</button>
+        <button class="stab" id="gv-sub-btn-monitor"
+          onclick="gvSubTab('monitor', this)">📡 Monitoramento</button>
+      </div>
+
+      <div id="gv-sub-pedidos">
       <div class="cd">
         <div class="cd-t" style="justify-content:space-between">
           <span>🏛️ Governança de pedidos</span>
@@ -1182,6 +1192,75 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         </div>
       </div>
       <div id="gp-detalhe"></div>
+      </div><!-- /gv-sub-pedidos -->
+
+      <!-- ══════════ MONITORAMENTO DA GOVERNANÇA ══════════ -->
+      <div id="gv-sub-monitor" style="display:none">
+
+        <div class="cd" style="border-top:3px solid var(--azm)">
+          <div class="cd-t" style="justify-content:space-between">
+            <span>📅 Período da análise</span>
+            <span style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+              <span>
+                <label style="display:block;font-size:10px;color:var(--tx2);font-weight:600;margin-bottom:3px">DATA INICIAL</label>
+                <input type="date" id="gv-ini" onchange="gvMonAnalisar()"
+                  style="font-size:12.5px;padding:5px 9px;border:1.5px solid var(--brd);border-radius:7px;font-weight:600;color:var(--az)">
+              </span>
+              <span>
+                <label style="display:block;font-size:10px;color:var(--tx2);font-weight:600;margin-bottom:3px">DATA FINAL</label>
+                <input type="date" id="gv-fim" onchange="gvMonAnalisar()"
+                  style="font-size:12.5px;padding:5px 9px;border:1.5px solid var(--brd);border-radius:7px;font-weight:600;color:var(--az)">
+              </span>
+              <span>
+                <label style="display:block;font-size:10px;color:var(--tx2);font-weight:600;margin-bottom:3px">META POR DIA</label>
+                <input type="number" id="gv-meta" min="1" step="1" onchange="gvMonAnalisar()"
+                  style="width:92px;font-size:12.5px;padding:5px 9px;border:1.5px solid var(--brd);border-radius:7px;font-weight:600">
+              </span>
+              <button class="btn btn-p" onclick="gvMonAnalisar()">🔍 Analisar</button>
+            </span>
+          </div>
+          <div id="gv-mon-aviso" style="font-size:11.5px;color:var(--tx2);line-height:1.7"></div>
+        </div>
+
+        <div class="cd">
+          <div class="cd-t">🔁 Emitidos x convertidos por comprador</div>
+          <div id="gv-conversao"></div>
+        </div>
+
+        <div class="cd">
+          <div class="cd-t">📈 Controle de abertura de PATEC</div>
+          <div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.8rem">
+            Tudo que foi <strong>distribuído</strong> no período, por comprador. Conta como
+            concluído o item que não aparece mais nos status de Abrir PATEC do MAPA de hoje.
+            <strong>Vencidos</strong> é o item ainda em aberto depois do prazo combinado da
+            atividade — a data em que foi distribuído mais os dias úteis dela.
+          </div>
+          <div id="gv-ctrl-patec"></div>
+        </div>
+
+        <div class="cd">
+          <div class="cd-t">📉 Controle de negociação</div>
+          <div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.8rem">
+            Tudo que foi <strong>distribuído</strong> no período em Negociar preço e Negociar
+            acima do limite DPV. Conta como concluído o item que já tem
+            <strong>data de negociação</strong> preenchida na Governança.
+          </div>
+          <div id="gv-ctrl-neg"></div>
+        </div>
+
+        <div class="cd">
+          <div class="cd-t" style="justify-content:space-between">
+            <span>📊 Meta planejada x resultado da equipe</span>
+            <span style="display:flex;gap:8px;align-items:center">
+              <button class="btn btn-p" id="gv-v-dia" onclick="gvMonVisao('dia')">Dia a dia</button>
+              <button class="btn btn-s" id="gv-v-acum" onclick="gvMonVisao('acum')">Acumulado</button>
+            </span>
+          </div>
+          <div style="position:relative;height:330px"><canvas id="gv-grafico"></canvas></div>
+          <div id="gv-graf-nota" style="font-size:10.5px;color:var(--tx2);line-height:1.7;margin-top:.6rem"></div>
+        </div>
+
+      </div><!-- /gv-sub-monitor -->
     </div>
 
     <div class="page" id="p-pedidos">
@@ -22505,9 +22584,13 @@ function monEscolher(ini){
 // ── a série do gráfico ────────────────────────────────────────────
 // Devolve números puros: é por aqui que o teste confere a regra, sem
 // depender do Chart.js.
-function monSerie(){
-  var m = monMedAtual();
-  if (!m) return null;
+// 12/11: a Governança ganhou uma aba de Monitoramento com período
+// livre (data inicial e final digitadas), então a série deixou de ser
+// só a da medição escolhida. Sem argumento, continua sendo a medição —
+// é o que a aba do Controle de Pedidos usa.
+function monSerie(medOpc){
+  var m = medOpc || monMedAtual();
+  if (!m || !m.inicio || !m.fim) return null;
   var dias = monDiasUteis(m.inicio, m.fim);
   if (!dias.length) return { med:m, dias:[], vazio:true };
   var idx = {};
@@ -22515,6 +22598,12 @@ function monSerie(){
   var meta = Math.max(1, Math.round(+m.meta || MON_META_PADRAO));
   var real = dias.map(function(){ return null; });
   var rolados = [], hoje = cpHojeISO();
+
+  // a repartição de cada dia, para o card poder dizer de que é feito o
+  // número — foi a terceira vez que o André comparou "feitos" com
+  // "emitidos" e eles não batiam porque um inclui o memorizado
+  var realMem = dias.map(function(){ return 0; });
+  var realEmi = dias.map(function(){ return 0; });
 
   (_cpHist || []).forEach(function(h){
     if (!h.data || h.data < m.inicio || h.data > m.fim) return;
@@ -22526,6 +22615,8 @@ function monSerie(){
     }
     var i = idx[alvo];
     real[i] = (real[i] === null ? 0 : real[i]) + (+h.total || 0);
+    realMem[i] += +h.memorizado || 0;
+    realEmi[i] += +h.emitido || 0;
   });
 
   // ── QUEM MANDA NO NÚMERO DO DIA (12/11) ────────────────────────
@@ -22555,7 +22646,8 @@ function monSerie(){
     var porDia = {};
     ((_monConv && _monConv.conv) || []).forEach(function(c){
       if (!c.dia || cpEstaFora(c.nome)) return;
-      porDia[c.dia] = (porDia[c.dia] || 0) + (+c.mem || 0) + (+c.emi || 0);
+      var o = porDia[c.dia] || (porDia[c.dia] = { mem:0, emi:0 });
+      o.mem += +c.mem || 0; o.emi += +c.emi || 0;
     });
     if (!Object.keys(porDia).length) return;
     var daMedicao = {};
@@ -22566,12 +22658,15 @@ function monSerie(){
         alvo = monProxUtilNaLista(d, dias);
         if (alvo === null) return;
       }
-      daMedicao[alvo] = (daMedicao[alvo] || 0) + porDia[d];
+      var o2 = daMedicao[alvo] || (daMedicao[alvo] = { mem:0, emi:0 });
+      o2.mem += porDia[d].mem; o2.emi += porDia[d].emi;
     });
     dias.forEach(function(d, i){
       if (d > hoje) return;
       if (daMedicao[d] === undefined) return;
-      real[i] = daMedicao[d];
+      real[i] = daMedicao[d].mem + daMedicao[d].emi;
+      realMem[i] = daMedicao[d].mem;
+      realEmi[i] = daMedicao[d].emi;
       preenchidos.push(d);
     });
   })();
@@ -22599,6 +22694,11 @@ function monSerie(){
     if (real[i] !== null) { soma += real[i]; comDado++; feito += real[i]; }
     realAcum.push(i <= ultimo ? soma : null);
   });
+  var feitoMem = 0, feitoEmi = 0;
+  dias.forEach(function(_, i){
+    if (real[i] === null) return;
+    feitoMem += realMem[i]; feitoEmi += realEmi[i];
+  });
   var ritmo = comDado ? feito / comDado : 0;
   var projecao = dias.map(function(_, i){
     if (ultimo < 0 || i < ultimo) return null;
@@ -22615,7 +22715,8 @@ function monSerie(){
            planAcum:planAcum, realAcum:realAcum, projecao:projecao,
            rolados:rolados, semMedicao:semMedicao, ultimo:ultimo,
            preenchidos:preenchidos, ixPreench:ixPreench, doRegistro:doRegistro,
-           feito:feito, comDado:comDado, ritmo:ritmo,
+           feito:feito, feitoMem:feitoMem, feitoEmi:feitoEmi,
+           realMem:realMem, realEmi:realEmi, comDado:comDado, ritmo:ritmo,
            planTotal: meta * dias.length,
            decorridos: decorridos, esperadoHoje: esperadoHoje, gap: gap,
            ultimoDecorrido: decorridos ? dias[decorridos - 1] : '',
@@ -22771,11 +22872,17 @@ async function monCarregarConversao(){
 // foi feito e se ainda está no prazo combinado daquela atividade.
 async function monMontarCombinado(){
   var m = monMedAtual();
-  _monComb = null;
-  if (!m) return;
+  _monComb = m ? await monCombinadoDe(m.inicio, m.fim) : null;
+}
+
+// O mesmo cálculo, para um período qualquer — é o que a aba de
+// Monitoramento da Governança usa, com as datas que o André digita.
+async function monCombinadoDe(ini, fim){
+  if (!ini || !fim) return null;
+  var m = { inicio:ini, fim:fim };
   var dists = [];
   try {
-    var db = getDB(); if (!db) return;
+    var db = getDB(); if (!db) return null;
     var snap = await db.collection(MD_COL).get();
     snap.forEach(function(doc){
       var d = doc.data() || {};
@@ -22826,11 +22933,168 @@ async function monMontarCombinado(){
              itens:itens, total:tot };
   };
 
-  _monComb = {
-    temMapa: temMapa, dists: dists.length,
+  return {
+    temMapa: temMapa, dists: dists.length, ini:ini, fim:fim,
     patec: monta(CTRL_PATEC, function(i){ return temMapa && !vivos[i.rc + '|' + i.seq]; }),
     neg:   monta(CTRL_NEG,   function(i){ var x = _gpNeg[i.rc + '|' + i.seq]; return !!(x && x.data); })
   };
+}
+
+// ══ MONITORAMENTO DENTRO DA GOVERNANÇA (12/11) ═══════════════════
+// Pedido do André: a Governança passa a ter duas abas — a de pedidos,
+// que já existia, e uma de Monitoramento. A diferença para o
+// Monitoramento do Controle de Pedidos é o recorte: lá o período é a
+// medição cadastrada; aqui são duas datas que ele digita, e elas valem
+// para TUDO na aba. É a pergunta "como foi de tal dia a tal dia",
+// que a medição não responde quando o recorte não coincide com ela.
+//
+// Os números são os mesmos cálculos das outras telas, chamados com
+// outro período — não há conta nova aqui. Duas telas com a mesma
+// pergunta e contas separadas foi o que já deu divergência antes.
+var _gvMonVisao = 'dia';
+var _gvComb = null;
+
+function gvSubTab(qual, btn){
+  ['pedidos','monitor'].forEach(function(k){
+    var el = document.getElementById('gv-sub-' + k);
+    if (el) el.style.display = (k === qual) ? 'block' : 'none';
+    var b = document.getElementById('gv-sub-btn-' + k);
+    if (b) b.className = 'stab' + (k === qual ? ' active' : '');
+  });
+  if (btn) btn.className = 'stab active';
+  if (qual === 'monitor') gvMonAbrir();
+}
+
+// A primeira abertura sugere um período: o da medição de hoje, se
+// houver; senão, os últimos 30 dias. Sugerir é diferente de impor —
+// as datas ficam lá, editáveis.
+async function gvMonAbrir(){
+  var ei = document.getElementById('gv-ini');
+  var ef = document.getElementById('gv-fim');
+  var em = document.getElementById('gv-meta');
+  if (!ei || !ef) return;
+  if (!ei.value || !ef.value) {
+    var m = null;
+    try { await monCarregarLista(); m = monMedDeHoje() || monMedAtual(); } catch (e) {}
+    if (m) {
+      ei.value = m.inicio; ef.value = m.fim;
+      if (em && !em.value) em.value = m.meta || MON_META_PADRAO;
+    } else {
+      var d = new Date(); var fim = cpHojeISO();
+      d.setDate(d.getDate() - 30);
+      ei.value = d.toISOString().slice(0, 10); ef.value = fim;
+      if (em && !em.value) em.value = MON_META_PADRAO;
+    }
+  }
+  if (em && !em.value) em.value = MON_META_PADRAO;
+  await gvMonAnalisar();
+}
+
+function gvMonPeriodo(){
+  var ei = document.getElementById('gv-ini');
+  var ef = document.getElementById('gv-fim');
+  var em = document.getElementById('gv-meta');
+  var ini = (ei && ei.value) || '';
+  var fim = (ef && ef.value) || '';
+  // data virada: em vez de devolver vazio e deixar a tela muda, troco
+  // as duas e digo isso no aviso
+  var virada = !!(ini && fim && ini > fim);
+  if (virada) { var t = ini; ini = fim; fim = t; }
+  return { ini:ini, fim:fim, virada:virada,
+           meta: Math.max(1, Math.round(+((em && em.value) || MON_META_PADRAO))) };
+}
+
+async function gvMonAnalisar(){
+  var p = gvMonPeriodo();
+  var av = document.getElementById('gv-mon-aviso');
+  if (!p.ini || !p.fim) {
+    if (av) av.innerHTML = '<span style="color:var(--am)">Informe a data inicial e a final '
+      + 'para eu montar os números.</span>';
+    return;
+  }
+  if (av) av.innerHTML = '⏳ Juntando os números de ' + cpDataBR(p.ini) + ' a '
+    + cpDataBR(p.fim) + '...';
+
+  // as bases de que esta aba depende, carregadas uma vez
+  try { await cpCarregarFora(); } catch (e) {}
+  try { await cpCarregarHistorico(); } catch (e2) {}
+  try { await monCarregarConversao(); } catch (e3) {}
+  try { await monCarregarLista(); } catch (e4) {}
+
+  // o período desta aba é um "período escolhido" como o dos outros
+  // cards — assim o recorte da conversão é exatamente o mesmo código
+  _monPer.gv = { modo:'esc', ini:p.ini, fim:p.fim };
+  monRenderConversao('gv', 'gv-conversao', null);
+
+  _gvComb = await monCombinadoDe(p.ini, p.fim);
+  gvRenderCombinado();
+  gvRenderGrafico();
+
+  if (av) {
+    var nDist = _gvComb ? _gvComb.dists : 0;
+    av.innerHTML = 'De <strong>' + cpDataBR(p.ini) + '</strong> a <strong>'
+      + cpDataBR(p.fim) + '</strong>, meta de <strong>' + cpNum(p.meta)
+      + '</strong> por dia útil. '
+      + (nDist ? cpNum(nDist) + ' distribuição(ões) do MAPA dentro do período.'
+               : '<span style="color:var(--am)">Nenhuma distribuição do MAPA guardada neste '
+                 + 'período — os dois controles abaixo ficam vazios.</span>')
+      + (p.virada ? ' <span style="color:var(--am)">As datas estavam invertidas; '
+                    + 'usei da menor para a maior.</span>' : '');
+  }
+}
+
+function gvRenderCombinado(){
+  var bp = document.getElementById('gv-ctrl-patec');
+  var bn = document.getElementById('gv-ctrl-neg');
+  if (!_gvComb) {
+    var vazio = '<div style="font-size:12px;color:var(--tx2)">Sem distribuição guardada '
+      + 'neste período.</div>';
+    if (bp) bp.innerHTML = vazio;
+    if (bn) bn.innerHTML = vazio;
+    return;
+  }
+  if (bp) bp.innerHTML = monBlocoCombinado(_gvComb.patec,
+      'Abrir PATEC (grupo de mercadoria obrigatório e idêntico não)',
+      _gvComb.temMapa ? '' : '⚠ Suba o MAPA de hoje na Distribuição do MAPA — é ele que diz '
+        + 'o que já saiu do status de abrir PATEC. Sem ele, nada aparece como concluído.');
+  if (bn) bn.innerHTML = monBlocoCombinado(_gvComb.neg,
+      'Negociação (preço excessivo e acima do limite DPV)', '');
+}
+
+function gvMonVisao(v){
+  _gvMonVisao = (v === 'acum') ? 'acum' : 'dia';
+  ['dia','acum'].forEach(function(k){
+    var b = document.getElementById('gv-v-' + k);
+    if (b) b.className = 'btn ' + (_gvMonVisao === k ? 'btn-p' : 'btn-s');
+  });
+  gvRenderGrafico();
+}
+
+function gvRenderGrafico(){
+  var p = gvMonPeriodo();
+  var nota = document.getElementById('gv-graf-nota');
+  var s = null;
+  try { s = monSerie({ inicio:p.ini, fim:p.fim, meta:p.meta }); } catch (e) {}
+  monRenderGrafico('gv-grafico', s, _gvMonVisao);
+  if (!nota) return;
+  if (!s || s.vazio) {
+    nota.innerHTML = 'Sem dias úteis neste período.';
+    return;
+  }
+  // o gráfico sem a tabela de dias, como ele pediu — então a origem de
+  // cada número vai aqui embaixo, em uma linha
+  nota.innerHTML = '<strong>' + cpNum(s.feito) + '</strong> feitos em '
+    + cpNum(s.comDado) + ' dia(s) · meta de ' + cpNum(s.meta) + '/dia × '
+    + cpNum(s.dias.length) + ' dia(s) útil(eis) = ' + cpNum(s.planTotal) + '.'
+    + (s.feitoMem + s.feitoEmi
+        ? ' São ' + cpNum(s.feitoMem) + ' memorizados + ' + cpNum(s.feitoEmi) + ' emitidos.'
+        : '')
+    + (s.preenchidos.length
+        ? ' ' + cpNum(s.preenchidos.length) + ' dia(s) contados pela última medição (ponto azul).'
+        : '')
+    + (s.semMedicao.length
+        ? ' <span style="color:var(--am)">' + cpNum(s.semMedicao.length)
+          + ' dia(s) sem nenhum número.</span>' : '');
 }
 
 // ── abrir, atualizar e desenhar ───────────────────────────────────
@@ -23129,8 +23393,14 @@ function monRenderResumo(){
         cpNum(s.decorridos) + ' já passaram · ' + cpNum(faltam) + ' a vir')
     + monCard('META DA MEDIÇÃO', cpNum(s.planTotal),
         cpNum(s.meta) + '/dia × ' + cpNum(s.dias.length) + ' dias', 'var(--azm)', 'var(--azc)')
+    // a repartição no lugar da contagem de dias: "feitos" inclui o
+    // memorizado, e é por isso que ele nunca bate com o card de
+    // emitidos. Dizer isso aqui mata a dúvida antes dela nascer.
     + monCard('FEITOS ATÉ AGORA', cpNum(s.feito),
-        cpNum(s.comDado) + ' dia(s) com medição', 'var(--vd)', 'var(--vdc)')
+        (s.feitoMem + s.feitoEmi)
+          ? cpNum(s.feitoMem) + ' memorizados + ' + cpNum(s.feitoEmi) + ' emitidos'
+          : cpNum(s.comDado) + ' dia(s) com medição',
+        'var(--vd)', 'var(--vdc)')
     + monCard('RITMO POR DIA', s.comDado ? cpNum(Math.round(s.ritmo)) : '—',
         s.comDado ? (s.ritmo >= s.meta ? 'acima da meta' : 'abaixo da meta') : 'sem medição ainda',
         s.ritmo >= s.meta ? 'var(--vd)' : 'var(--am)',
@@ -23191,11 +23461,17 @@ function monRenderResumo(){
   }
 }
 
-function monRenderGrafico(){
-  var el = document.getElementById('mon-grafico');
+var _monCharts = {};
+function monRenderGrafico(idCanvas, serie, visao){
+  var alvo = idCanvas || 'mon-grafico';
+  var el = document.getElementById(alvo);
   if (!el) return;
-  var s = monSerie();
-  if (_monChart) { try { _monChart.destroy(); } catch (e) {} _monChart = null; }
+  var s = serie || monSerie();
+  var _monVisao = visao || window._monVisao;
+  if (_monCharts[alvo]) { try { _monCharts[alvo].destroy(); } catch (e) {} _monCharts[alvo] = null; }
+  if (alvo === 'mon-grafico' && _monChart) {
+    try { _monChart.destroy(); } catch (e2) {} _monChart = null;
+  }
   if (!s || s.vazio || typeof Chart === 'undefined') return;
   var rot = s.dias.map(function(d){ return cpDataBR(d).slice(0, 5); });
   var dados = (_monVisao === 'acum')
@@ -23222,7 +23498,7 @@ function monRenderGrafico(){
           pointBorderColor: s.dias.map(function(d){
             return s.ixPreench[d] ? '#1A4A8A' : '#0E9E6A'; }) } ];
   try {
-    _monChart = new Chart(el, {
+    _monCharts[alvo] = new Chart(el, {
       type:'line',
       data:{ labels:rot, datasets:dados },
       options:{ responsive:true, maintainAspectRatio:false,
@@ -23232,6 +23508,7 @@ function monRenderGrafico(){
         scales:{ y:{ beginAtZero:true, ticks:{ font:{ size:10 } } },
                  x:{ ticks:{ font:{ size:9 }, maxRotation:0, autoSkipPadding:8 } } } }
     });
+    if (alvo === 'mon-grafico') _monChart = _monCharts[alvo];
   } catch (e) { console.warn('monRenderGrafico:', e); }
 }
 
@@ -23446,10 +23723,11 @@ function monPerRedesenhar(k){
 }
 
 // ── emitidos x convertidos ────────────────────────────────────────
-function monConvLinhas(){
+function monConvLinhas(k){
+  k = k || 'conv';
   var por = {};
   (_monConv.conv || []).forEach(function(c){
-    if (!monPerDentro('conv', c.dia)) return;
+    if (!monPerDentro(k, c.dia)) return;
     if (cpEstaFora(c.nome)) return;
     var o = por[c.nome] || (por[c.nome] =
       { nome:c.nome, mem:0, emi:0, lib:0, aguard:0, rej:0, outro:0 });
@@ -23462,15 +23740,20 @@ function monConvLinhas(){
     t.mem += p.mem; t.emi += p.emi; t.lib += p.lib;
     t.aguard += p.aguard; t.rej += p.rej; t.outro += p.outro; return t;
   }, { mem:0, emi:0, lib:0, aguard:0, rej:0, outro:0 });
-  return { lista:lista, total:tot, per:monPerAtual('conv') };
+  return { lista:lista, total:tot, per:monPerAtual(k) };
 }
 
-function monRenderConversao(){
-  var pb = document.getElementById('mon-per-conv');
-  if (pb) pb.innerHTML = monPerHTML('conv');
-  var box = document.getElementById('mon-conversao');
+function monRenderConversao(k, idBox, idPer){
+  k = k || 'conv';
+  // a aba da Governança não tem o seletor de três modos: lá o período
+  // são as duas datas do topo, e valem para a aba inteira
+  if (idPer !== null) {
+    var pb = document.getElementById(idPer || 'mon-per-conv');
+    if (pb) pb.innerHTML = monPerHTML(k);
+  }
+  var box = document.getElementById(idBox || 'mon-conversao');
   if (!box) return;
-  var r = monConvLinhas();
+  var r = monConvLinhas(k);
   var cab = '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.8rem">'
     + 'Da medição de momento. <strong>Emitido</strong> é tudo que virou pedido — '
     + 'STATUS_PROCESSO <strong>3, 5 ou 8</strong>, sem código de eliminação. O pedido fica em 3 só '
