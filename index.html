@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/11 23:10';
+var GTO_BUILD = '15/11 00:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -2839,6 +2839,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
           <button class="stab" id="cp-sub-btn-base" onclick="cpSubTab('base',this)">📥 Montar base</button>
           <button class="stab active" id="cp-sub-btn-pedidos" onclick="cpSubTab('pedidos',this)">📦 Controle de Pedidos</button>
           <button class="stab" id="cp-sub-btn-mapa" onclick="cpSubTab('mapa',this)">🗺️ Distribuição do MAPA</button>
+          <button class="stab" id="cp-sub-btn-fechar" onclick="cpSubTab('fechar',this)">🔒 Fechamento do dia</button>
           <button class="stab" id="cp-sub-btn-acomp" onclick="cpSubTab('acomp',this)">✅ Acompanhamento</button>
           <!-- 14/11: as duas saíram da barra. O que elas respondem — do que
                foi distribuído, quanto já andou — está na Governança ›
@@ -2904,6 +2905,26 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
             </div>
             <div id="mb-med-resumo" style="font-size:12px;margin-top:.6rem"></div>
           </div>
+        </div>
+
+        <!-- ══ FECHAMENTO DO DIA — individual, no formato do PATEC ══ -->
+        <div id="cp-sub-fechar" style="display:none">
+          <div class="cd" style="border-top:3px solid var(--az)">
+            <div class="cd-t" style="justify-content:space-between">
+              <span>🔒 Fechamento do dia</span>
+              <span style="display:flex;gap:8px;align-items:center">
+                <input type="date" id="fdp-data" onchange="fdpAbrir()"
+                  style="font-size:12px;padding:5px 9px;border:1.5px solid var(--brd);border-radius:7px;font-weight:600">
+                <button class="btn btn-s" onclick="fdpAbrir()">↻ Atualizar</button>
+              </span>
+            </div>
+            <div style="font-size:11px;color:var(--tx2);line-height:1.8">
+              Este é o <strong>seu</strong> dia: o que foi distribuído para você, o que já saiu
+              e o que falta explicar. Depois de finalizar, o seu fechamento entra no consolidado
+              da aba <strong>Acompanhamento</strong> — inclusive onde você trabalhou.
+            </div>
+          </div>
+          <div id="fdp-corpo"></div>
         </div>
 
         <!-- ══ ACOMPANHAMENTO — o que foi distribuído foi feito? ══ -->
@@ -14794,6 +14815,13 @@ async function acpAvaliar(data){
     o.aJustificar = o.emissao.itens.filter(function(i){ return i.precisa; }).length
                   + o.neg.itens.filter(function(i){ return i.precisa; }).length;
     o.justificados = o.aJustificar - o.pendentes;
+    // o fechamento do dia: onde trabalhou, folga e se já fechou
+    o.local = g.local || '';
+    o.folga = !!g.folga;
+    o.fechado = !!g.fechado;
+    o.fechadoEm = (g.fechado && g.fechado.em) || '';
+    o.declaradoNeg = (g.declaradoNeg === undefined || g.declaradoNeg === null)
+                       ? null : Math.round(+g.declaradoNeg || 0);
     o.distribuidos = o.emissao.total + o.abrir.distribuidos + o.neg.meta;
     o.feitos = o.emissao.emitidos + o.abrir.saiu + o.neg.feito;
     o.pct = o.distribuidos ? Math.round(o.feitos * 100 / o.distribuidos) : 0;
@@ -14808,9 +14836,15 @@ async function acpAvaliar(data){
     t.sem += p.emissao.sem; t.abrirSaiu += p.abrir.saiu;
     t.abrirDeclarado += p.abrir.declarado; t.negFeito += p.neg.feito;
     t.negMeta += p.neg.meta;
+    if (p.fechado) t.fecharam++;
+    if (p.folga) t.folga++;
+    else if (p.local === 'Presencial') t.presencial++;
+    else if (p.local === 'Home Office') t.home++;
+    else t.semLocal++;
     return t;
   }, { distribuidos:0, feitos:0, aJustificar:0, pendentes:0, emitidos:0,
-       memorizados:0, sem:0, abrirSaiu:0, abrirDeclarado:0, negFeito:0, negMeta:0 });
+       memorizados:0, sem:0, abrirSaiu:0, abrirDeclarado:0, negFeito:0, negMeta:0,
+       fecharam:0, presencial:0, home:0, folga:0, semLocal:0 });
   tot.pct = tot.distribuidos ? Math.round(tot.feitos * 100 / tot.distribuidos) : 0;
   _acpAval = { data:data, lista:lista, total:tot, temDist: !!dist,
                mapaDe: mp.data, mapaCarregado: mp.de === 'carregado', temMapa: mp.tem };
@@ -14901,9 +14935,17 @@ async function acpDesenhar(){
           t.aJustificar ? 'var(--am)' : 'var(--tx2)', t.aJustificar ? 'var(--amc)' : 'var(--cin)')
       + monCard('SEM JUSTIFICATIVA', cpNum(t.pendentes), 'ninguém explicou ainda',
           t.pendentes ? 'var(--vm)' : 'var(--vd)', t.pendentes ? 'var(--vmc)' : 'var(--vdc)')
+      + monCard('FECHARAM O DIA', cpNum(t.fecharam) + '/' + cpNum(r.lista.length),
+          (t.semLocal ? cpNum(t.semLocal) + ' sem informar o local' : 'todos informaram'),
+          t.fecharam === r.lista.length ? 'var(--vd)' : 'var(--am)',
+          t.fecharam === r.lista.length ? 'var(--vdc)' : 'var(--amc)')
+      + monCard('ONDE TRABALHARAM', cpNum(t.presencial) + ' · ' + cpNum(t.home),
+          '🏢 presencial · 🏠 home' + (t.folga ? ' · ' + cpNum(t.folga) + ' de folga' : ''),
+          'var(--azm)', 'var(--azc)')
       + '</div>'
       + '<div style="overflow:auto;margin-bottom:1.2rem"><table><thead><tr>'
-      +   '<th>Comprador</th><th style="text-align:right">Distribuído</th>'
+      +   '<th>Comprador</th><th>Local</th><th>Fechou?</th>'
+      +   '<th style="text-align:right">Distribuído</th>'
       +   '<th style="text-align:right">Feito</th><th style="text-align:right">%</th>'
       +   '<th style="text-align:right" title="Pedido emitido na medição">Emitidos</th>'
       +   '<th style="text-align:right" title="Parou em memorizado — pede justificativa">Memorizados</th>'
@@ -14917,6 +14959,10 @@ async function acpDesenhar(){
       var ruim = p.pendentes > 0;
       h += '<tr' + (ruim ? ' style="background:var(--vmc)"' : '') + '>'
         + '<td style="font-weight:600">' + cpEsc(p.nome) + '</td>'
+        + '<td style="font-size:10.5px">' + acpSeloLocal(p) + '</td>'
+        + '<td style="font-size:10.5px;font-weight:700;color:'
+        +   (p.fechado ? 'var(--vd)' : 'var(--am)') + '">'
+        +   (p.fechado ? 'fechou' : 'em aberto') + '</td>'
         + '<td style="text-align:right;font-weight:700">' + cpNum(p.distribuidos) + '</td>'
         + '<td style="text-align:right;font-weight:700;color:var(--vd)">' + cpNum(p.feitos) + '</td>'
         + '<td style="text-align:right;font-weight:800;color:'
@@ -14948,6 +14994,13 @@ async function acpDesenhar(){
   // ── a parte de cada um ──
   ver.forEach(function(p){ h += acpBlocoPessoa(p, r); });
   box.innerHTML = h;
+}
+
+function acpSeloLocal(p){
+  if (p.folga) return '<span style="color:var(--am);font-weight:700">🌴 folga</span>';
+  if (p.local === 'Presencial') return '🏢 Presencial';
+  if (p.local === 'Home Office') return '🏠 Home Office';
+  return '<span style="color:var(--vm)">não informou</span>';
 }
 
 function acpSeloAbrir(p){
@@ -15066,6 +15119,297 @@ function acpBlocoPessoa(p, r){
     h += '</tbody></table></div>';
   }
   return h + '</div>';
+}
+
+// ══ FECHAMENTO DO DIA — a versão de Pedidos (14/11) ══════════════
+// Pedido do André: "cada comprador tem a sua demanda de forma
+// individual... tudo que não foi feito ele precisa se justificar; após
+// ele fechar o dia vai aparecer de forma consolidada na aba
+// acompanhamento. Precisa ter o mesmo formato que tem no módulo PATEC,
+// e também mostrar quem ficou home e quem ficou presencial".
+//
+// O formato do PATEC: composição das atividades, folga, onde trabalhou,
+// e o botão de finalizar. Aqui a composição é a distribuição do dia, e
+// o que ele justifica são as três coisas que a régua do Acompanhamento
+// não consegue provar sozinha.
+//
+// Tudo grava no MESMO documento do Acompanhamento — é o mesmo dia e a
+// mesma pessoa. Dois documentos para o mesmo fato divergem no primeiro
+// ajuste, e o consolidado passaria a mentir.
+var FDP_LOCAIS = ['Presencial', 'Home Office'];
+
+async function acpSalvarCampo(nome, campo, valor){
+  var dataAlvo = acpDataSel();
+  if (_acpDia.data !== dataAlvo) await acpCarregar(dataAlvo);
+  var k = cpNormNome(nome);
+  var g = _acpDia.pessoas[k] || (_acpDia.pessoas[k] = { declarado:{}, just:{} });
+  g[campo] = valor;
+  var ok = await acpGravar();
+  acpRecado(ok ? '<span style="color:var(--vd)">✔ guardado</span>'
+                : '<span style="color:var(--vm)">✗ a base recusou</span>');
+  return ok;
+}
+
+async function fdpLocal(local){
+  await acpSalvarCampo(acpEuSou(), 'local', local);
+  await fdpRender();
+}
+async function fdpFolga(){
+  var g = acpDe(acpEuSou());
+  await acpSalvarCampo(acpEuSou(), 'folga', !g.folga);
+  await fdpRender();
+}
+async function fdpDeclararNeg(n){
+  await acpSalvarCampo(acpEuSou(), 'declaradoNeg', Math.max(0, Math.round(+n || 0)));
+  await fdpRender();
+}
+
+// O que ainda impede o fechamento. Devolver a lista, e não um booleano,
+// é o que permite a tela dizer O QUE falta em vez de só recusar.
+function fdpPendencias(p){
+  var g = acpDe(p.nome), faltas = [];
+  if (g.folga) return faltas;              // dia de folga não cobra nada
+  if (!g.local) faltas.push('dizer onde você trabalhou hoje');
+  if (p.abrir.distribuidos) {
+    ACP_ABRIR.forEach(function(f){
+      var pf = p.abrir.porFila[f] || {};
+      if (pf.distribuidos && !pf.declarou)
+        faltas.push('informar quantos abriu em ' + mdStatusNome(f));
+    });
+  }
+  if (p.neg.meta && (g.declaradoNeg === undefined || g.declaradoNeg === null))
+    faltas.push('informar quantas negociações você fez');
+  var semJust = p.emissao.itens.filter(function(i){ return i.precisa && !i.justificado; }).length;
+  if (semJust) faltas.push('justificar ' + cpNum(semJust) + ' pedido(s) não emitido(s)');
+  return faltas;
+}
+
+async function fdpFechar(){
+  var r = _acpAval;
+  if (!r) return;
+  var eu = acpEuSou();
+  var p = r.lista.filter(function(x){ return cpNormNome(x.nome) === cpNormNome(eu); })[0];
+  if (!p) return;
+  var faltas = fdpPendencias(p);
+  if (faltas.length) {
+    var av = document.getElementById('fdp-aviso');
+    if (av) av.innerHTML = '<div class="al al-a" style="font-size:12px">⚠ Antes de fechar, '
+      + 'falta: <strong>' + cpEsc(faltas.join(' · ')) + '</strong>.</div>';
+    return;
+  }
+  await acpSalvarCampo(eu, 'fechado', { em:new Date().toISOString(), por:cpQuem() });
+  await fdpRender();
+}
+
+async function fdpAbrir(){
+  var el = document.getElementById('fdp-data');
+  if (el && !el.value) el.value = cpHojeISO();
+  var box = document.getElementById('fdp-corpo');
+  if (box) box.innerHTML = '<div style="font-size:12px;color:var(--tx2)">⏳ Montando o seu dia...</div>';
+  // a aba de Acompanhamento e esta leem a mesma coisa; quem carrega é
+  // a mesma função, para não existirem duas versões do mesmo número
+  var d = document.getElementById('acp-data');
+  if (d) d.value = (el && el.value) ? el.value : cpHojeISO();
+  try { await acpAbrir(); } catch (e) {}
+  await fdpRender();
+}
+
+async function fdpRender(){
+  var box = document.getElementById('fdp-corpo');
+  if (!box) return;
+  var data = acpDataSel();
+  var r = _acpAval && _acpAval.data === data ? _acpAval : await acpAvaliar(data);
+  var eu = acpEuSou();
+  var p = (r.lista || []).filter(function(x){ return cpNormNome(x.nome) === cpNormNome(eu); })[0];
+  var g = acpDe(eu);
+  var h = '<div id="fdp-aviso"></div>';
+
+  if (!r.temDist) {
+    box.innerHTML = '<div class="al al-a" style="font-size:12px">Não há distribuição guardada '
+      + 'em ' + cpDataBR(data) + '. Sem distribuição não há dia para fechar.</div>';
+    return;
+  }
+  if (!p) {
+    box.innerHTML = '<div class="al al-b" style="font-size:12px">Nada foi distribuído para '
+      + '<strong>' + cpEsc(eu) + '</strong> em ' + cpDataBR(data) + '. Nada a fechar.</div>';
+    return;
+  }
+
+  // ── composição do que foi distribuído, com o que já foi feito ──
+  var comp = [
+    { rot:'Emitir pedido / PATEC', dist:p.emissao.total, feito:p.emissao.emitidos },
+    { rot:'Abrir PATEC', dist:p.abrir.distribuidos, feito:p.abrir.saiu },
+    { rot:'Negociação', dist:p.neg.meta, feito:p.neg.feito }
+  ];
+  h += '<div class="cd"><div class="cd-t">📦 O que foi distribuído para você em '
+    + cpDataBR(data) + '</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">';
+  comp.forEach(function(c){
+    var pct = c.dist ? Math.round(c.feito * 100 / c.dist) : 0;
+    h += '<div style="background:var(--cin);border:1.5px solid var(--brd);border-radius:11px;'
+      + 'padding:.8rem;text-align:center">'
+      + '<div style="font-size:10px;font-weight:700;color:var(--tx2)">' + cpEsc(c.rot.toUpperCase())
+      +   '</div>'
+      + '<div style="font-size:24px;font-weight:800;color:var(--az);line-height:1.2">'
+      +   cpNum(c.feito) + '<span style="font-size:14px;color:var(--tx2)"> / '
+      +   cpNum(c.dist) + '</span></div>'
+      + '<div style="font-size:10px;color:' + (pct >= 100 ? 'var(--vd)' : 'var(--tx2)') + '">'
+      +   (c.dist ? pct + '% feito' : 'nada distribuído') + '</div></div>';
+  });
+  h += '</div></div>';
+
+  var fechado = !!g.fechado;
+
+  // ── folga ──
+  h += '<div class="cd" style="background:var(--amc);border:1.5px solid var(--am)">'
+    + '<div class="cd-t" style="margin-bottom:.4rem">🌴 Teve folga?</div>'
+    + '<div style="font-size:12px;color:var(--tx2);margin-bottom:.7rem">Marque se você não '
+    + 'trabalhou neste dia. O que foi distribuído não é cobrado e o dia fecha sem '
+    + 'justificativa.</div>'
+    + '<button class="btn ' + (g.folga ? 'btn-p' : 'btn-s') + '"'
+    +   (fechado ? ' disabled' : '') + ' onclick="fdpFolga()">'
+    +   (g.folga ? '✓ Dia marcado como folga — clique para desfazer'
+                 : '🌴 Registrar folga neste dia') + '</button>'
+    + '</div>';
+
+  // ── onde trabalhou ──
+  h += '<div class="cd"><div class="cd-t" style="margin-bottom:.7rem">'
+    + '📍 Onde você trabalhou hoje?</div>'
+    + '<div style="display:flex;gap:10px;flex-wrap:wrap">'
+    + FDP_LOCAIS.map(function(l){
+        var on = g.local === l;
+        return '<button onclick="fdpLocal(\'' + l + '\')"' + (fechado ? ' disabled' : '')
+          + ' style="flex:1;min-width:150px;padding:12px 8px;border-radius:10px;border:2px solid '
+          + (on ? 'var(--az)' : 'var(--brd)') + ';background:' + (on ? 'var(--azc)' : '#fff')
+          + ';cursor:pointer;font-size:13px;font-weight:700;color:'
+          + (on ? 'var(--az)' : 'var(--tx2)') + '">'
+          + (l === 'Presencial' ? '🏢 ' : '🏠 ') + l + '</button>';
+      }).join('')
+    + '</div>'
+    + (!g.local ? '<div style="font-size:11px;color:var(--vm);margin-top:8px;font-weight:600">'
+                  + '⚠ Escolha para poder finalizar o dia.</div>' : '')
+    + '</div>';
+
+  if (!g.folga) {
+    // ── Abrir PATEC: quantos abriu ──
+    if (p.abrir.distribuidos) {
+      h += '<div class="cd"><div class="cd-t" style="margin-bottom:.5rem">'
+        + '📂 Abrir PATEC — quantos você abriu?</div>'
+        + '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.6rem">'
+        + 'A abertura só aparece no MAPA de amanhã. Informe o número de hoje; amanhã a tela '
+        + 'compara com o que o MAPA mostrar.</div>'
+        + '<div style="display:flex;gap:14px;flex-wrap:wrap">';
+      ACP_ABRIR.forEach(function(f){
+        var pf = p.abrir.porFila[f] || { distribuidos:0, declarado:0, declarou:false };
+        if (!pf.distribuidos) return;
+        h += '<div><label style="display:block;font-size:10px;color:var(--tx2);font-weight:700;'
+          + 'margin-bottom:4px">' + cpEsc(mdStatusNome(f).toUpperCase()) + ' · '
+          + cpNum(pf.distribuidos) + ' distribuídos</label>'
+          + '<input type="number" min="0" step="1" value="'
+          +   (pf.declarou ? cpEsc(String(pf.declarado)) : '') + '" placeholder="quantos abriu"'
+          +   (fechado ? ' disabled' : '')
+          +   ' onchange="acpSalvarDeclarado(\'' + cpEsc(p.nome) + '\', \'' + f
+          +   '\', this.value).then(fdpRender)"'
+          +   ' style="width:150px;font-size:13px;padding:7px 10px;border:1.5px solid '
+          +   (pf.declarou ? 'var(--vd)' : 'var(--vm)') + ';border-radius:7px;font-weight:600">'
+          + '</div>';
+      });
+      h += '</div></div>';
+    }
+
+    // ── Negociação: quantas fez ──
+    if (p.neg.meta) {
+      var dn = g.declaradoNeg;
+      h += '<div class="cd"><div class="cd-t" style="margin-bottom:.5rem">'
+        + '💬 Negociação — quantas você fez?</div>'
+        + '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.6rem">'
+        + 'Foram <strong>' + cpNum(p.neg.meta) + '</strong> distribuídas para você. Pela data '
+        + 'lançada no dash, o sistema conta <strong>' + cpNum(p.neg.feito) + '</strong>.</div>'
+        + '<input type="number" min="0" step="1" value="'
+        +   (dn === undefined || dn === null ? '' : cpEsc(String(dn))) + '"'
+        +   ' placeholder="quantas você fez"' + (fechado ? ' disabled' : '')
+        +   ' onchange="fdpDeclararNeg(this.value)"'
+        +   ' style="width:170px;font-size:13px;padding:7px 10px;border:1.5px solid '
+        +   ((dn === undefined || dn === null) ? 'var(--vm)' : 'var(--vd)')
+        +   ';border-radius:7px;font-weight:600">'
+        + ((dn !== undefined && dn !== null && +dn !== p.neg.feito)
+            ? '<div style="font-size:11px;color:var(--am);margin-top:6px">⚠ Você informou '
+              + cpNum(dn) + ' e o dash conta ' + cpNum(p.neg.feito) + '. Se fez mais do que o '
+              + 'dash vê, falta lançar a data de negociação no card.</div>' : '')
+        + '</div>';
+    }
+
+    // ── os memorizados e os que nem apareceram ──
+    var pend = p.emissao.itens.filter(function(i){ return i.precisa; });
+    h += '<div class="cd"><div class="cd-t" style="margin-bottom:.5rem">'
+      + '📝 Pedidos que não foram emitidos — ' + cpNum(pend.length) + '</div>';
+    if (!pend.length) {
+      h += '<div class="al al-ok" style="font-size:11.5px">✓ Tudo que foi distribuído para '
+        + 'emissão virou pedido. Nada a justificar.</div>';
+    } else {
+      h += '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.6rem">'
+        + 'Memorizado é o que parou no meio; "não está na medição" é o que não foi começado. '
+        + 'Escolha o motivo de cada um.</div>'
+        + '<div style="overflow:auto;max-height:380px"><table><thead><tr>'
+        +   '<th>RC</th><th>Item</th><th>Oportunidade</th><th>O que está</th>'
+        +   '<th>Motivo</th><th>Comentário</th></tr></thead><tbody>';
+      pend.forEach(function(i){
+        h += '<tr' + (i.justificado ? '' : ' style="background:var(--vmc)"') + '>'
+          + '<td style="font-weight:700;color:var(--az)">' + cpEsc(i.rc) + '</td>'
+          + '<td>' + cpEsc(i.seq) + '</td>'
+          + '<td>' + cpEsc(i.op || '—') + '</td>'
+          + '<td style="font-size:10.5px;font-weight:600;color:var(--am)">'
+          +   (i.status === 'memorizado' ? 'memorizado' : 'não está na medição') + '</td>'
+          + '<td><select' + (fechado ? ' disabled' : '')
+          +   ' onchange="acpSalvarJust(\'' + cpEsc(p.nome) + '\', \'' + cpEsc(i.chave)
+          +   '\', \'m\', this.value).then(fdpRender)"'
+          +   ' style="font-size:10.5px;padding:3px 6px;border-radius:5px;border:1px solid '
+          +   (i.motivo ? 'var(--vd)' : 'var(--vm)') + '">'
+          +   '<option value="">— escolha —</option>'
+          +   ACP_MOTIVOS.map(function(m){
+                return '<option value="' + cpEsc(m) + '"'
+                  + (i.motivo === m ? ' selected' : '') + '>' + cpEsc(m) + '</option>'; }).join('')
+          +   '</select></td>'
+          + '<td><input type="text" value="' + cpEsc(i.comentario) + '" placeholder="opcional"'
+          +   (fechado ? ' disabled' : '')
+          +   ' onchange="acpSalvarJust(\'' + cpEsc(p.nome) + '\', \'' + cpEsc(i.chave)
+          +   '\', \'c\', this.value).then(fdpRender)"'
+          +   ' style="width:220px;font-size:10.5px;padding:3px 6px;border-radius:5px;'
+          +   'border:1px solid var(--brd)"></td></tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+    h += '</div>';
+  }
+
+  // ── fechar ──
+  if (fechado) {
+    h += '<div class="cd" style="background:var(--vdc);border:1.5px solid var(--vd);'
+      + 'text-align:center;padding:1.5rem">'
+      + '<div style="font-size:32px;margin-bottom:8px">✅</div>'
+      + '<div style="font-size:15px;font-weight:700;color:var(--vd)">Dia finalizado!</div>'
+      + '<div style="font-size:12px;color:var(--tx2);margin-top:4px">'
+      +   cpDataBR(data) + ' · ' + cpEsc(g.local || (g.folga ? 'folga' : '—'))
+      +   ' · fechado em ' + cpDataBR(String(g.fechado.em).slice(0, 10)) + '</div>'
+      + '<div style="margin-top:10px"><button class="btn btn-s" onclick="fdpReabrir()">'
+      +   '↩ Reabrir para corrigir</button></div></div>';
+  } else {
+    var faltas = fdpPendencias(p);
+    h += '<div class="cd">'
+      + (faltas.length
+          ? '<div style="font-size:11.5px;color:var(--am);margin-bottom:.6rem">Falta: <strong>'
+            + cpEsc(faltas.join(' · ')) + '</strong>.</div>'
+          : '<div style="font-size:11.5px;color:var(--vd);margin-bottom:.6rem">'
+            + 'Tudo preenchido. Pode fechar o dia.</div>')
+      + '<button class="btn btn-p" style="font-size:14px;padding:10px 28px;background:var(--vd)"'
+      +   ' onclick="fdpFechar()">🔒 Finalizar meu dia</button></div>';
+  }
+  box.innerHTML = h;
+}
+
+async function fdpReabrir(){
+  await acpSalvarCampo(acpEuSou(), 'fechado', null);
+  await fdpRender();
 }
 
 function acpRecado(html){
@@ -15370,7 +15714,7 @@ function mbRender(){
 }
 
 function cpSubTab(qual, btn){
-  ['base','pedidos','mapa','acomp','ctrlpatec','ctrlneg','statusb','rejeite','monitor']
+  ['base','pedidos','mapa','fechar','acomp','ctrlpatec','ctrlneg','statusb','rejeite','monitor']
     .forEach(function(k){
     var el = document.getElementById('cp-sub-' + k);
     if (el) el.style.display = (qual === k) ? 'block' : 'none';
@@ -15386,6 +15730,7 @@ function cpSubTab(qual, btn){
   // fora: dentro do ADM quem carregava era o setAdmTab, e no módulo novo
   // não havia ninguém — por isso o dia e o histórico vinham vazios.
   if (qual === 'base')      mbAbrir();
+  if (qual === 'fechar')    fdpAbrir();
   if (qual === 'acomp')     acpAbrir();
   if (qual === 'pedidos')   cpAbrir();
   if (qual === 'mapa')      mdAbrir();
