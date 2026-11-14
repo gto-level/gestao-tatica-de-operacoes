@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/11 15:10';
+var GTO_BUILD = '14/11 19:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -2835,6 +2835,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
       <div id="adm-controle-pedidos" class="adm-tab" style="display:none">
 
         <div class="stabs" style="margin-bottom:1rem">
+          <button class="stab" id="cp-sub-btn-base" onclick="cpSubTab('base',this)">📥 Montar base</button>
           <button class="stab active" id="cp-sub-btn-pedidos" onclick="cpSubTab('pedidos',this)">📦 Controle de Pedidos</button>
           <button class="stab" id="cp-sub-btn-mapa" onclick="cpSubTab('mapa',this)">🗺️ Distribuição do MAPA</button>
           <button class="stab" id="cp-sub-btn-ctrlpatec" onclick="cpSubTab('ctrlpatec',this)">📈 Controle abrir PATEC</button>
@@ -2842,6 +2843,30 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
           <button class="stab" id="cp-sub-btn-statusb" onclick="cpSubTab('statusb',this)">📋 Status B</button>
           <button class="stab" id="cp-sub-btn-rejeite" onclick="cpSubTab('rejeite',this)">🚫 Rejeite</button>
           <button class="stab" id="cp-sub-btn-monitor" onclick="cpSubTab('monitor',this)">📡 Monitoramento</button>
+        </div>
+
+        <!-- ══ MONTAR BASE — todos os uploads num lugar só (14/11) ══ -->
+        <div id="cp-sub-base" style="display:none">
+          <div class="cd" style="border-top:3px solid var(--azm)">
+            <div class="cd-t" style="justify-content:space-between">
+              <span>📥 Montar a base do dia</span>
+              <button class="btn btn-s" onclick="mbRender()">↻ Conferir</button>
+            </div>
+            <div style="font-size:12px;color:var(--tx2);line-height:1.8">
+              Os arquivos que alimentam o módulo estavam <strong>cada um na sua tela</strong>.
+              Agora ficam todos aqui: você sobe de cima para baixo e vê, de relance, o que
+              ainda falta. <strong>Todas são obrigatórias</strong> — cada card diz que telas
+              ela alimenta e de quando é o arquivo que está valendo.
+              <br>O <strong>MAPA de reaproveitamento</strong> está pronto mas ainda não
+              aparece: a tabela dele está sendo refeita. Quando as regras fecharem, ele volta
+              para esta lista.
+              <br>A única que continua tendo upload na tela dela é a <strong>Medição do
+              dia</strong>, no Controle de Pedidos. Nada mudou na gravação: são os mesmos
+              arquivos, lidos pelo mesmo código e gravados na mesma base.
+            </div>
+            <div id="mb-resumo"></div>
+          </div>
+          <div id="mb-cards"></div>
         </div>
 
         <div id="cp-sub-pedidos">
@@ -2953,7 +2978,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
 
           <div class="cd">
             <div class="cd-t">🗺️ MAPA do dia</div>
-            <div style="border:2px dashed var(--brd);border-radius:10px;padding:1.3rem;text-align:center;cursor:pointer;background:var(--cin)"
+            <div class="al al-b" style="font-size:11.5px">📥 O upload desta base mudou de lugar: ele agora fica em <strong>Montar base</strong>, a primeira aba do módulo, junto com todos os outros. Aqui ficou só o que você faz com a base.</div>
+            <div style="display:none"><div style="border:2px dashed var(--brd);border-radius:10px;padding:1.3rem;text-align:center;cursor:pointer;background:var(--cin)"
               onclick="document.getElementById('md-file-input').click()"
               ondragover="event.preventDefault()" ondrop="mdDrop(event)">
               <div style="font-size:24px;margin-bottom:.3rem">📄</div>
@@ -2963,7 +2989,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               </div>
               <input type="file" id="md-file-input" accept=".xlsb,.xlsx,.xls,.csv" style="display:none"
                 onchange="mdUpload(this.files[0]); this.value='';">
-            </div>
+            </div></div>
             <div id="md-status" style="margin-top:.7rem;font-size:12px"></div>
             <div id="md-resumo"></div>
             <div style="display:flex;gap:8px;margin-top:.9rem;flex-wrap:wrap">
@@ -2995,7 +3021,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               <span>⭐ Itens prioritários</span>
               <button class="btn btn-s" onclick="mdPrioLimpar()">↺ Limpar a lista</button>
             </div>
-            <div style="border:2px dashed var(--brd);border-radius:10px;padding:1.1rem;text-align:center;cursor:pointer;background:var(--cin)"
+            <div class="al al-b" style="font-size:11.5px">📥 O upload desta base mudou de lugar: ele agora fica em <strong>Montar base</strong>, a primeira aba do módulo, junto com todos os outros. Aqui ficou só o que você faz com a base.</div>
+            <div style="display:none"><div style="border:2px dashed var(--brd);border-radius:10px;padding:1.1rem;text-align:center;cursor:pointer;background:var(--cin)"
               onclick="document.getElementById('md-prio-input').click()"
               ondragover="event.preventDefault()" ondrop="mdPrioDrop(event)">
               <div style="font-size:22px;margin-bottom:.3rem">⭐</div>
@@ -3005,7 +3032,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               </div>
               <input type="file" id="md-prio-input" accept=".xlsb,.xlsx,.xls,.csv" style="display:none"
                 onchange="mdPrioUpload(this.files[0]); this.value='';">
-            </div>
+            </div></div>
             <div id="md-prio-status" style="margin-top:.7rem;font-size:12px"></div>
             <div style="font-size:10.5px;color:var(--tx2);margin-top:6px;line-height:1.6">
               É a mesma regra que existia na Abertura de PATEC: o que está nesta lista vai
@@ -3031,7 +3058,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 guardada no histórico de lotes.
               </div>
             </div>
-            <div style="border:2px dashed var(--brd);border-radius:10px;padding:1.3rem;text-align:center;cursor:pointer;background:var(--cin)"
+            <div class="al al-b" style="font-size:11.5px">📥 O upload desta base mudou de lugar: ele agora fica em <strong>Montar base</strong>, a primeira aba do módulo, junto com todos os outros. Aqui ficou só o que você faz com a base.</div>
+            <div style="display:none"><div style="border:2px dashed var(--brd);border-radius:10px;padding:1.3rem;text-align:center;cursor:pointer;background:var(--cin)"
               onclick="document.getElementById('mdr-file-input').click()"
               ondragover="event.preventDefault()" ondrop="mdrDrop(event)">
               <div style="font-size:24px;margin-bottom:.3rem">♻️</div>
@@ -3041,7 +3069,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               </div>
               <input type="file" id="mdr-file-input" accept=".xlsb,.xlsx,.xls,.csv" style="display:none"
                 onchange="mdrUpload(this.files[0]); this.value='';">
-            </div>
+            </div></div>
             <div id="mdr-status" style="margin-top:.7rem;font-size:12px"></div>
             <div id="mdr-resumo"></div>
             <div style="font-size:10.5px;color:var(--tx2);margin-top:8px;line-height:1.6">
@@ -3058,7 +3086,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
 
           <div class="cd">
             <div class="cd-t">📊 Levelboard — negociação e fornecedor ganhador</div>
-            <div style="border:2px dashed var(--brd);border-radius:10px;padding:1.2rem;text-align:center;cursor:pointer;background:var(--cin)"
+            <div class="al al-b" style="font-size:11.5px">📥 O upload desta base mudou de lugar: ele agora fica em <strong>Montar base</strong>, a primeira aba do módulo, junto com todos os outros. Aqui ficou só o que você faz com a base.</div>
+            <div style="display:none"><div style="border:2px dashed var(--brd);border-radius:10px;padding:1.2rem;text-align:center;cursor:pointer;background:var(--cin)"
               onclick="document.getElementById('gp-lb-input').click()"
               ondragover="event.preventDefault()" ondrop="gpLbDrop(event)">
               <div style="font-size:22px;margin-bottom:.3rem">📊</div>
@@ -3068,7 +3097,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               </div>
               <input type="file" id="gp-lb-input" accept=".xlsb,.xlsx,.xls,.csv" style="display:none"
                 onchange="gpUploadLevelboard(this.files[0]); this.value='';">
-            </div>
+            </div></div>
             <div id="gp-lb-status" style="margin-top:.7rem;font-size:12px"></div>
             <div style="font-size:10.5px;color:var(--tx2);margin-top:6px;line-height:1.6">
               É daqui que a Governança tira a data de negociação dos itens de PATEC —
@@ -3133,7 +3162,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                   style="font-size:13px;padding:6px 10px;border:1.5px solid var(--brd);border-radius:7px;color:var(--az);font-weight:600">
               </div>
             </div>
-            <div style="border:2px dashed var(--brd);border-radius:10px;padding:1.3rem;text-align:center;cursor:pointer;background:var(--cin)"
+            <div class="al al-b" style="font-size:11.5px">📥 O upload desta base mudou de lugar: ele agora fica em <strong>Montar base</strong>, a primeira aba do módulo, junto com todos os outros. Aqui ficou só o que você faz com a base.</div>
+            <div style="display:none"><div style="border:2px dashed var(--brd);border-radius:10px;padding:1.3rem;text-align:center;cursor:pointer;background:var(--cin)"
               onclick="document.getElementById('stb-file-input').click()"
               ondragover="event.preventDefault()" ondrop="stbDrop(event)">
               <div style="font-size:24px;margin-bottom:.3rem">📄</div>
@@ -3143,7 +3173,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               </div>
               <input type="file" id="stb-file-input" accept=".xlsb,.xlsx,.xls,.csv" style="display:none"
                 onchange="stbUpload(this.files[0]); this.value='';">
-            </div>
+            </div></div>
             <div id="stb-status" style="margin-top:.7rem;font-size:12px"></div>
             <div id="stb-resumo"></div>
           </div>
@@ -14539,8 +14569,273 @@ function apSubAtiva(){
   var el = document.getElementById('cp-sub-abertura');
   return el && el.style.display !== 'none';
 }
+// ══ MONTAR BASE — um lugar só para subir tudo (14/11) ════════════
+// Pedido do André: "está cada um em uma tela... vamos criar uma ABA
+// apenas para subir os uploads... assim não corremos o risco de
+// esquecer nenhum. Mas essa modificação não vamos poder perder nenhum
+// dado."
+//
+// Por isso esta tela NÃO é um upload novo: cada card chama a MESMA
+// função que a tela de origem sempre chamou, lê o mesmo arquivo e grava
+// na mesma base. O que ela acrescenta é a visão de conjunto — o que já
+// subiu hoje, o que está velho e o que nunca veio — e o estado sai das
+// variáveis que já existiam, não de um registro paralelo.
+//
+// As telas de origem continuam com os seus uploads funcionando. Duas
+// portas para a mesma gravação não divergem; uma porta a menos, se eu
+// tivesse removido, poderia quebrar quem já tem o hábito.
+var MB_FONTES = [
+  { k:'medicao', nome:'Medição do dia', ico:'📡',
+    aceita:'.xlsx,.xls,.csv',
+    alimenta:'Controle de Pedidos · Monitoramento · Rejeite (quem emitiu cada pedido) · '
+           + 'coluna Pedido dos cards de emissão',
+    handler:'cpHandleUpload', obrigatorio:true,
+    estado:function(){
+      var d = _cpDia || null;
+      return { tem: !!(d && (d.total || d.arquivo)), arquivo:(d && d.arquivo) || '',
+               quando:(d && d.atualizadoEm) || '',
+               resumo: d ? (cpNum(d.memorizado || 0) + ' memorizados · '
+                            + cpNum(d.emitido || 0) + ' emitidos') : '' };
+    } },
+  { k:'mapa', nome:'MAPA do dia', ico:'🗺️',
+    aceita:'.xlsb,.xlsx,.xls,.csv',
+    alimenta:'Distribuição do MAPA · Governança de pedidos · Controle abrir PATEC',
+    handler:'mdUpload', obrigatorio:true,
+    estado:function(){
+      var b = _mdBase;
+      return { tem: !!(b && b.total), arquivo:(b && b.arquivo) || '',
+               quando:(b && b.lidoEm) || '',
+               resumo: b ? (cpNum(b.total) + ' itens') : '' };
+    } },
+  { k:'bu', nome:'BU — Status B', ico:'📋',
+    aceita:'.xlsb,.xlsx,.xls,.csv',
+    alimenta:'Status B · RC, item, oportunidade e item da OP do Rejeite',
+    handler:'stbUpload', obrigatorio:true,
+    estado:function(){
+      var d = _stbDia;
+      return { tem: !!(d && (d.itens || []).length), arquivo:(d && d.arquivo) || '',
+               quando:(d && d.atualizadoEm) || '',
+               resumo: d ? (cpNum((d.itens || []).length) + ' itens a duplicar') : '' };
+    } },
+  { k:'rejforn', nome:'Rejeite Fornecedor', ico:'🏭',
+    aceita:'.xlsb,.xlsx,.xls,.csv',
+    alimenta:'Rejeite Fornecedor · Apresentação do rejeite · Rejeites por comprador',
+    handler:'gpUploadRejeitados', obrigatorio:true,
+    estado:function(){
+      var r = _gpRej;
+      return { tem: !!(r && (r.itens || []).length), arquivo:(r && r.arquivo) || '',
+               quando:(r && r.atualizadoEm) || '',
+               resumo: r ? (cpNum((r.itens || []).length) + ' no prazo de recusa'
+                            + ((+r.foraPrazo || 0) ? ' · ' + cpNum(r.foraPrazo)
+                               + ' fora do prazo fora da conta' : '')) : '' };
+    } },
+  { k:'rejmed', nome:'Medição do Rejeite Supervisor', ico:'👤',
+    aceita:'.xlsb,.xlsx,.xls,.csv',
+    alimenta:'Rejeite Supervisor · quem é o comprador de cada rejeite',
+    handler:'rjsUploadMedicao', obrigatorio:true,
+    estado:function(){
+      var m = _rjsMed;
+      return { tem: !!(m && (m.itens || []).length), arquivo:(m && m.arquivo) || '',
+               quando:(m && m.atualizadoEm) || '',
+               resumo: m ? (cpNum((m.itens || []).length) + ' itens em status 8') : '' };
+    } },
+  { k:'rodrigo', nome:'Planilha do Rodrigo', ico:'📑',
+    aceita:'.xlsb,.xlsx,.xls,.csv',
+    alimenta:'Rejeite Supervisor — SLA do pedido, padrão de rejeição e justificativa',
+    handler:'rjsUploadRodrigo', obrigatorio:true,
+    estado:function(){
+      var r = _rjsRod;
+      return { tem: !!(r && r.nCockpit), arquivo:(r && r.arquivo) || '',
+               quando:(r && r.atualizadoEm) || '',
+               resumo: r ? (cpNum(r.nCockpit || 0) + ' pedidos no cockpit · '
+                            + cpNum(r.nMotivos || 0) + ' com padrão') : '' };
+    } },
+  { k:'levelboard', nome:'Levelboard', ico:'📊',
+    aceita:'.xlsb,.xlsx,.xls,.csv',
+    alimenta:'data de negociação do PATEC · fornecedor ganhador · item da OP',
+    handler:'gpUploadLevelboard', obrigatorio:true,
+    estado:function(){
+      var l = _gpLb;
+      return { tem: !!(l && l.lidas), arquivo:(l && l.arquivo) || '',
+               quando:(l && l.atualizadoEm) || '',
+               resumo: l ? (cpNum(l.lidas || 0) + ' linhas · ' + cpNum(l.uteis || 0)
+                            + ' com data') : '' };
+    } },
+  { k:'prio', nome:'Prioritários da Abertura', ico:'⭐',
+    aceita:'.xlsb,.xlsx,.xls,.csv',
+    alimenta:'Distribuição do MAPA — estes itens vão na frente, depois do prazo da oportunidade',
+    handler:'mdPrioUpload', obrigatorio:true,
+    estado:function(){
+      var p2 = _mdPrio;
+      return { tem: !!(p2 && p2.lidas), arquivo:(p2 && p2.arquivo) || '',
+               quando:(p2 && p2.atualizadoEm) || '',
+               resumo: p2 ? (cpNum(p2.itens || 0) + ' itens marcados') : '' };
+    } },
+  // 14/11: o reap fica PRONTO mas OCULTO. "Vamos criar o campo de
+  // upload, porém por enquanto deixa ele oculto, pois a tabela ainda
+  // não está pronta, estamos trabalhando nela para criar as regras
+  // corretas." O card existe, o leitor existe, a conta existe — só não
+  // aparece. Trocar oculto para false devolve tudo.
+  { k:'reap', nome:'MAPA de reaproveitamento', ico:'♻️',
+    aceita:'.xlsb,.xlsx,.xls,.csv',
+    alimenta:'Distribuição do MAPA — a linha Reaproveitamento',
+    handler:'mdrUpload', obrigatorio:true, oculto:true,
+    estado:function(){
+      var b = _mdrBase;
+      return { tem: !!(b && b.total), arquivo:(b && b.arquivo) || '',
+               quando:(b && b.lidoEm) || '',
+               resumo: b ? (cpNum(b.total) + ' itens de reap') : '' };
+    } }
+];
+
+function mbFonte(k){
+  for (var i = 0; i < MB_FONTES.length; i++) if (MB_FONTES[i].k === k) return MB_FONTES[i];
+  return null;
+}
+
+// O arquivo é lido pela função de sempre; o que esta tela faz depois é
+// redesenhar o conjunto, para o card mostrar o que entrou.
+async function mbSubir(k, file){
+  var f = mbFonte(k);
+  if (!f || !file) return;
+  var st = document.getElementById('mb-st-' + k);
+  if (st) st.innerHTML = '⏳ lendo <strong>' + cpEsc(file.name) + '</strong>...';
+  var recado = '';
+  try {
+    var fn = window[f.handler];
+    if (typeof fn !== 'function') throw new Error('não achei o leitor ' + f.handler);
+    await fn(file);
+  } catch (e) {
+    recado = '<span style="color:var(--vm)">✗ ' + cpEsc(e.message) + '</span>';
+  }
+  // o redesenho troca o innerHTML dos cards e levaria o recado junto:
+  // por isso ele é escrito DEPOIS, no elemento novo
+  mbRender();
+  var st2 = document.getElementById('mb-st-' + k);
+  if (st2) st2.innerHTML = recado;
+}
+
+function mbDrop(k, ev){
+  ev.preventDefault();
+  var f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+  if (f) mbSubir(k, f);
+}
+
+// "De hoje", "de ontem" ou "de tal dia" — é essa a pergunta que ele faz
+// ao olhar a tela, não a hora exata.
+function mbQuando(iso, arquivo){
+  if (!iso) return arquivo ? 'sem data registrada' : '';
+  var d = String(iso).slice(0, 10);
+  var hoje = cpHojeISO();
+  if (d === hoje) return 'de hoje';
+  var ont = new Date(hoje + 'T12:00:00'); ont.setDate(ont.getDate() - 1);
+  if (d === ont.toISOString().slice(0, 10)) return 'de ontem';
+  return 'de ' + cpDataBR(d);
+}
+function mbEhDeHoje(iso){ return !!iso && String(iso).slice(0, 10) === cpHojeISO(); }
+
+async function mbAbrir(){
+  // o estado vem das bases já gravadas: quem abre a aba direto, sem
+  // passar pelas outras, tem de ver o que já existe
+  try { await cpCarregarDia(cpDataSel()); } catch (e) {}
+  // levelboard, negociação e rejeitados vêm juntos neste carregador,
+  // que já existia para a distribuição
+  try { await mdCarregarBasesGov(); } catch (e) {}
+  try { await mdPrioCarregar(); } catch (e) {}
+  try { await rjAbrir(); } catch (e) {}
+  try { await stbCarregar(stbDataSel()); } catch (e) {}
+  mbRender();
+}
+
+function mbRender(){
+  var box = document.getElementById('mb-cards');
+  var res = document.getElementById('mb-resumo');
+  if (!box) return;
+  var faltam = [], velhos = [], ok = 0;
+  // o oculto não entra em nada: nem na lista, nem na conta, nem no
+  // "pode distribuir" — senão a tela cobraria um arquivo que ela mesma
+  // não oferece
+  var estados = MB_FONTES.filter(function(f){ return !f.oculto; }).map(function(f){
+    var e = { tem:false, arquivo:'', quando:'', resumo:'' };
+    try { e = f.estado() || e; } catch (x) {}
+    if (!e.tem) faltam.push(f.nome);
+    else if (!mbEhDeHoje(e.quando) && e.quando) { velhos.push(f.nome); ok++; }
+    else ok++;
+    return { f:f, e:e };
+  });
+
+  if (res) {
+    res.innerHTML = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:.9rem">'
+      + '<div style="flex:1;min-width:150px;background:var(--vdc);border:1.5px solid var(--vd);'
+      +   'border-radius:10px;padding:.7rem .9rem;text-align:center">'
+      +   '<div style="font-size:22px;font-weight:800;color:var(--vd)">' + cpNum(ok) + '</div>'
+      +   '<div style="font-size:10px;font-weight:700;color:var(--tx2)">BASES CARREGADAS</div></div>'
+      + '<div style="flex:1;min-width:150px;background:' + (faltam.length ? 'var(--vmc)' : 'var(--cin)')
+      +   ';border:1.5px solid ' + (faltam.length ? 'var(--vm)' : 'var(--brd)')
+      +   ';border-radius:10px;padding:.7rem .9rem;text-align:center">'
+      +   '<div style="font-size:22px;font-weight:800;color:'
+      +     (faltam.length ? 'var(--vm)' : 'var(--tx2)') + '">' + cpNum(faltam.length) + '</div>'
+      +   '<div style="font-size:10px;font-weight:700;color:var(--tx2)">AINDA FALTAM</div></div>'
+      + '<div style="flex:1;min-width:150px;background:' + (velhos.length ? 'var(--amc)' : 'var(--cin)')
+      +   ';border:1.5px solid ' + (velhos.length ? 'var(--am)' : 'var(--brd)')
+      +   ';border-radius:10px;padding:.7rem .9rem;text-align:center">'
+      +   '<div style="font-size:22px;font-weight:800;color:'
+      +     (velhos.length ? 'var(--am)' : 'var(--tx2)') + '">' + cpNum(velhos.length) + '</div>'
+      +   '<div style="font-size:10px;font-weight:700;color:var(--tx2)">NÃO SÃO DE HOJE</div></div>'
+      + '</div>'
+      + (faltam.length
+          ? '<div class="al al-a" style="font-size:11.5px;margin-top:.7rem">⚠ Ainda falta subir: '
+            + '<strong>' + cpEsc(faltam.join(' · ')) + '</strong>. Todas as planilhas são '
+            + 'obrigatórias: sem elas a distribuição e as telas de Rejeite e Status B ficam '
+            + 'incompletas.</div>'
+          : '<div class="al al-ok" style="font-size:11.5px;margin-top:.7rem">✓ As '
+            + cpNum(estados.length) + ' bases estão carregadas. Pode distribuir.</div>')
+      + (velhos.length
+          ? '<div style="font-size:11px;color:var(--am);margin-top:.5rem">⏱ Não são de hoje: '
+            + cpEsc(velhos.join(' · ')) + '. Elas continuam valendo — só não são do dia.</div>'
+          : '');
+  }
+
+  var h = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));'
+    + 'gap:.8rem;margin-top:1rem">';
+  estados.forEach(function(x){
+    var f = x.f, e = x.e;
+    var cor = !e.tem ? 'var(--vm)'
+                     : (mbEhDeHoje(e.quando) || !e.quando ? 'var(--vd)' : 'var(--am)');
+    var selo = !e.tem
+      ? '<span style="color:var(--vm);font-weight:700">não subiu</span>'
+      : '<span style="color:' + cor + ';font-weight:700">' + cpEsc(mbQuando(e.quando, e.arquivo))
+        + '</span>';
+    h += '<div class="cd" style="border-top:3px solid ' + cor + ';margin:0">'
+      + '<div class="cd-t" style="justify-content:space-between;margin-bottom:.5rem">'
+      +   '<span style="font-size:13px">' + f.ico + ' ' + cpEsc(f.nome)
+      + '</span>'
+      +   selo
+      + '</div>'
+      + '<div style="font-size:10.5px;color:var(--tx2);line-height:1.6;margin-bottom:.6rem">'
+      +   'Alimenta: ' + cpEsc(f.alimenta) + '</div>'
+      + '<div ondragover="event.preventDefault()" onDrop="mbDrop(\'' + f.k + '\', event)"'
+      +   ' style="border:1.5px dashed var(--brd);border-radius:9px;padding:.7rem;'
+      +   'text-align:center;background:var(--cin)">'
+      +   '<input type="file" id="mb-in-' + f.k + '" accept="' + f.aceita + '" style="display:none"'
+      +     ' onchange="mbSubir(\'' + f.k + '\', this.files[0]); this.value=\'\';">'
+      +   '<button class="btn btn-s" onclick="document.getElementById(\'mb-in-' + f.k
+      +     '\').click()">📎 Escolher arquivo</button>'
+      +   '<div style="font-size:10px;color:var(--tx2);margin-top:5px">ou arraste aqui</div>'
+      + '</div>'
+      + '<div id="mb-st-' + f.k + '" style="font-size:11px;margin-top:.5rem;min-height:14px"></div>'
+      + (e.tem
+          ? '<div style="font-size:10.5px;color:var(--tx2);line-height:1.6">'
+            + (e.arquivo ? '<strong>' + cpEsc(e.arquivo) + '</strong>' : 'arquivo sem nome')
+            + (e.resumo ? ' — ' + e.resumo : '') + '</div>'
+          : '')
+      + '</div>';
+  });
+  box.innerHTML = h + '</div>';
+}
+
 function cpSubTab(qual, btn){
-  ['pedidos','mapa','ctrlpatec','ctrlneg','statusb','rejeite','monitor'].forEach(function(k){
+  ['base','pedidos','mapa','ctrlpatec','ctrlneg','statusb','rejeite','monitor'].forEach(function(k){
     var el = document.getElementById('cp-sub-' + k);
     if (el) el.style.display = (qual === k) ? 'block' : 'none';
     var b = document.getElementById('cp-sub-btn-' + k);
@@ -14554,6 +14849,7 @@ function cpSubTab(qual, btn){
   // Cada sub-aba carrega a própria base ao abrir. A de Pedidos ficava de
   // fora: dentro do ADM quem carregava era o setAdmTab, e no módulo novo
   // não havia ninguém — por isso o dia e o histórico vinham vazios.
+  if (qual === 'base')      mbAbrir();
   if (qual === 'pedidos')   cpAbrir();
   if (qual === 'mapa')      mdAbrir();
   if (qual === 'ctrlpatec') ctpAbrir();
@@ -16627,6 +16923,10 @@ async function mdUpload(file){
       _mdBase = null; mdRenderResumo(); return;
     }
     _mdBase = r;
+    // a hora da leitura, para a tela Montar base poder dizer se o MAPA
+    // que está valendo é o de hoje — ele é lido no navegador e não
+    // carregava carimbo nenhum
+    _mdBase.lidoEm = new Date().toISOString();
     // o MAPA também sabe o item da oportunidade de cada RC: vai para o
     // mesmo mapa acumulado que alimenta a coluna Item da OP do rejeite
     try {
@@ -19565,17 +19865,14 @@ function rjFornecedorHTML(){
                         + '<button class="btn btn-s" onclick="gpBaixarExcel()">⬇ Baixar Excel</button>' : '')
     +     '<button class="btn btn-s" onclick="rjAbrir()">↻ Atualizar</button>'
     +   '</span></div>'
+    + '<div class="al al-b" style="font-size:11.5px">📥 O upload desta base mudou de lugar: ele agora fica em <strong>Montar base</strong>, a primeira aba do módulo, junto com todos os outros.</div>'
+    + '<div style="display:none">'
     + '<div style="border:2px dashed var(--brd);border-radius:10px;padding:1.1rem;text-align:center;cursor:pointer;background:var(--cin)"'
     +   ' onclick="document.getElementById(\'gp-rej-input\').click()"'
     +   ' ondragover="event.preventDefault()" ondrop="gpRejDrop(event)">'
-    +   '<div style="font-size:22px;margin-bottom:.3rem">📥</div>'
-    +   '<div style="font-size:13px;font-weight:600">Arraste aqui a planilha de rejeitados</div>'
-    +   '<div style="font-size:11px;color:var(--tx2);margin-top:4px">'
-    +     '.xlsx, .xlsb ou .csv — conto só os grupos de compras da nossa lista ('
-    +     GP_GRUPOS.length + ')</div>'
     +   '<input type="file" id="gp-rej-input" accept=".xlsb,.xlsx,.xls,.csv" style="display:none"'
     +     ' onchange="gpUploadRejeitados(this.files[0]); this.value=\'\';">'
-    + '</div>'
+    + '</div></div>'
     + '<div id="gp-rej-status" style="margin-top:.7rem;font-size:12px">' + rjOrigemHTML(itens) + '</div>'
     + rjPrazoBotoesHTML()
     + (itens.length
@@ -21539,33 +21836,26 @@ function rjSupervisorHTML(){
   }
 
   // ── o upload da medição, aqui mesmo ───────────────────────────
-  h += '<div style="border:2px dashed var(--brd);border-radius:10px;padding:.8rem;text-align:center;'
+  h += '<div class="al al-b" style="font-size:11.5px">📥 O upload desta base mudou de lugar: ele agora fica em <strong>Montar base</strong>, a primeira aba do módulo, junto com todos os outros.</div>'
+    + '<div style="display:none">'
+    + '<div style="border:2px dashed var(--brd);border-radius:10px;padding:.8rem;text-align:center;'
     +   'cursor:pointer;background:var(--cin);margin-bottom:.6rem"'
     +   ' onclick="document.getElementById(\'rjs-med-input\').click()"'
     +   ' ondragover="event.preventDefault()" ondrop="rjsMedDrop(event)">'
-    +   '<div style="font-size:18px;margin-bottom:.2rem">📊</div>'
-    +   '<div style="font-size:13px;font-weight:600">Arraste aqui a medição</div>'
-    +   '<div style="font-size:11px;color:var(--tx2);margin-top:4px">'
-    +     'é o mesmo arquivo do <strong>Controle de Pedidos</strong> — subir por aqui poupa a ida '
-    +     'e volta e mostra o resultado na hora</div>'
     +   '<input type="file" id="rjs-med-input" accept=".xlsb,.xlsx,.xls,.csv" style="display:none"'
     +     ' onchange="rjsUploadMedicao(this.files[0]); this.value=\'\';">'
     + '</div>'
-    + '<div id="rjs-med-status" style="margin-bottom:.8rem;font-size:12px"></div>';
+    + '<div id="rjs-med-status" style="margin-bottom:.8rem;font-size:12px"></div></div>';
 
   // ── o upload do Rodrigo ───────────────────────────────────────
-  h += '<div style="border:2px dashed var(--brd);border-radius:10px;padding:1rem;text-align:center;'
+  h += '<div style="display:none">'
+    + '<div style="border:2px dashed var(--brd);border-radius:10px;padding:1rem;text-align:center;'
     +   'cursor:pointer;background:var(--cin)"'
     +   ' onclick="document.getElementById(\'rjs-rod-input\').click()"'
     +   ' ondragover="event.preventDefault()" ondrop="rjsRodDrop(event)">'
-    +   '<div style="font-size:20px;margin-bottom:.2rem">📥</div>'
-    +   '<div style="font-size:13px;font-weight:600">Arraste aqui a planilha do Rodrigo</div>'
-    +   '<div style="font-size:11px;color:var(--tx2);margin-top:4px">'
-    +     'leio a aba <strong>Último cockpit</strong> (SLA do pedido) e a aba <strong>Dados</strong> '
-    +     '(padrão de rejeição e justificativa)</div>'
     +   '<input type="file" id="rjs-rod-input" accept=".xlsb,.xlsx,.xls,.csv" style="display:none"'
     +     ' onchange="rjsUploadRodrigo(this.files[0]); this.value=\'\';">'
-    + '</div>'
+    + '</div></div>'
     + '<div id="rjs-rod-status" style="margin-top:.6rem;font-size:12px">'
     +   (_rjsRod.arquivo
         ? '<span style="color:var(--tx2)">Último arquivo: <strong>' + cpEsc(_rjsRod.arquivo) + '</strong>'
@@ -24924,6 +25214,7 @@ async function mdrUpload(file){
   try {
     var r = await mdrLerArquivo(file);
     _mdrBase = r.total ? r : null;
+    if (_mdrBase) _mdrBase.lidoEm = new Date().toISOString();
     _mdDist = null;
     if (!r.total) {
       if (st) st.innerHTML = '<span style="color:var(--am)">⚠ ' + cpEsc(r.aviso) + '</span>';
