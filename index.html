@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/11 20:20';
+var GTO_BUILD = '14/11 20:50';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -2852,7 +2852,13 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                para a mesma tabela. Escondidas, não removidas. -->
           <button class="stab" id="cp-sub-btn-statusb" style="display:none" onclick="cpSubTab('statusb',this)">📋 Status B</button>
           <button class="stab" id="cp-sub-btn-rejeite" style="display:none" onclick="cpSubTab('rejeite',this)">🚫 Rejeite</button>
-          <button class="stab" id="cp-sub-btn-monitor" onclick="cpSubTab('monitor',this)">📡 Monitoramento</button>
+          <!-- 14/11: o Monitoramento também saiu da barra. O que ele
+               mostra está na Governança › Monitoramento, com período
+               livre. O que SÓ existia aqui era o cadastro da medição
+               (início, fim e meta/dia), que alimenta os cards do topo —
+               por isso ele mudou para a aba Montar base, no fim da
+               página, em vez de sumir junto. -->
+          <button class="stab" id="cp-sub-btn-monitor" style="display:none" onclick="cpSubTab('monitor',this)">📡 Monitoramento</button>
         </div>
 
         <!-- ══ MONTAR BASE — todos os uploads num lugar só (14/11) ══ -->
@@ -2880,6 +2886,22 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
             <div id="mb-resumo"></div>
           </div>
           <div id="mb-cards"></div>
+          <div class="cd" id="mb-medicao">
+            <div class="cd-t" style="justify-content:space-between">
+              <span>🗓️ Período da medição</span>
+              <span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <select id="mb-mon-escolha" onchange="monEscolher(this.value)"
+                  style="font-size:12.5px;padding:5px 9px;border:1.5px solid var(--brd);border-radius:7px;font-weight:600"></select>
+                <button class="btn btn-p" onclick="mbAbrirFormMedicao()">📅 Informar período da medição</button>
+              </span>
+            </div>
+            <div style="font-size:11px;color:var(--tx2);line-height:1.7">
+              É daqui que saem a <strong>meta do projeto</strong> e o <strong>gap</strong> dos
+              cards do topo. Este cadastro morava no Monitoramento do Controle de Pedidos, que
+              saiu da barra — então ele veio para cá, que é onde o dia começa.
+            </div>
+            <div id="mb-med-resumo" style="font-size:12px;margin-top:.6rem"></div>
+          </div>
         </div>
 
         <div id="cp-sub-pedidos">
@@ -14756,7 +14778,37 @@ async function mbAbrir(){
   try { await mdPrioCarregar(); } catch (e) {}
   try { await rjAbrir(); } catch (e) {}
   try { await stbCarregar(stbDataSel()); } catch (e) {}
+  try { await monCarregarLista(); monPintarEscolha(); } catch (e) {}
   mbRender();
+  mbPintarMedicao();
+}
+
+// O formulário de cadastro da medição é ÚNICO: ele mora no bloco do
+// Monitoramento e é movido para a aba Montar base quando chamado daqui.
+// Mover em vez de copiar é a mesma escolha do resto do arquivo — duas
+// cópias do mesmo formulário divergem no primeiro ajuste.
+function mbAbrirFormMedicao(){
+  var f = document.getElementById('mon-form');
+  var destino = document.getElementById('mb-medicao');
+  if (f && destino && f.parentNode !== destino) destino.appendChild(f);
+  monAbrirForm();
+}
+
+function mbPintarMedicao(){
+  var box = document.getElementById('mb-med-resumo');
+  if (!box) return;
+  var m = monMedAtual();
+  if (!m) {
+    box.innerHTML = '<span style="color:var(--am)">Nenhuma medição informada — os cards de '
+      + 'meta e gap do topo ficam sem base. Informe o período para eles valerem.</span>';
+    return;
+  }
+  var dias = 0;
+  try { dias = monDiasUteis(m.inicio, m.fim).length; } catch (e) {}
+  box.innerHTML = 'Medição de <strong>' + cpDataBR(m.inicio) + '</strong> a <strong>'
+    + cpDataBR(m.fim) + '</strong> · meta de <strong>' + cpNum(m.meta) + '</strong> por dia útil'
+    + (dias ? ' · <strong>' + cpNum(dias) + '</strong> dias úteis = '
+              + cpNum(m.meta * dias) + ' no período' : '') + '.';
 }
 
 function mbRender(){
@@ -23972,17 +24024,26 @@ function monRender(){
 }
 
 function monPintarEscolha(){
+  // a mesma lista em dois lugares: o Monitoramento (escondido desde
+  // 14/11) e a aba Montar base, que é por onde ele passa agora
+  var html = !_monMeds.length
+    ? '<option value="">nenhuma medição informada</option>'
+    : (function(){
+        var atual = monMedAtual();
+        return _monMeds.map(function(m){
+          return '<option value="' + m.inicio + '"'
+            + (atual && m.inicio === atual.inicio ? ' selected' : '') + '>'
+            + cpDataBR(m.inicio) + ' a ' + cpDataBR(m.fim) + ' · meta '
+            + cpNum(m.meta) + '/dia</option>';
+        }).join('');
+      })();
+  var sel2 = document.getElementById('mb-mon-escolha');
+  if (sel2) sel2.innerHTML = html;
+  mbPintarMedicao();
   var sel = document.getElementById('mon-escolha');
   if (!sel) return;
-  if (!_monMeds.length) {
-    sel.innerHTML = '<option value="">nenhuma medição informada</option>';
-    return;
-  }
-  var atual = monMedAtual();
-  sel.innerHTML = _monMeds.map(function(m){
-    return '<option value="' + m.inicio + '"' + (atual && m.inicio === atual.inicio ? ' selected' : '') + '>'
-      + cpDataBR(m.inicio) + ' a ' + cpDataBR(m.fim) + ' · meta ' + cpNum(m.meta) + '/dia</option>';
-  }).join('');
+  sel.innerHTML = html;
+  if (!_monMeds.length) return;
   ['dia','acum'].forEach(function(v){
     var b = document.getElementById('mon-v-' + v);
     if (b) b.className = 'btn ' + (_monVisao === v ? 'btn-p' : 'btn-s');
