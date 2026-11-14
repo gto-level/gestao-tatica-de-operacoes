@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/11 19:40';
+var GTO_BUILD = '14/11 20:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -2838,8 +2838,13 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
           <button class="stab" id="cp-sub-btn-base" onclick="cpSubTab('base',this)">📥 Montar base</button>
           <button class="stab active" id="cp-sub-btn-pedidos" onclick="cpSubTab('pedidos',this)">📦 Controle de Pedidos</button>
           <button class="stab" id="cp-sub-btn-mapa" onclick="cpSubTab('mapa',this)">🗺️ Distribuição do MAPA</button>
-          <button class="stab" id="cp-sub-btn-ctrlpatec" onclick="cpSubTab('ctrlpatec',this)">📈 Controle abrir PATEC</button>
-          <button class="stab" id="cp-sub-btn-ctrlneg" onclick="cpSubTab('ctrlneg',this)">📉 Controle negociação</button>
+          <!-- 14/11: as duas saíram da barra. O que elas respondem — do que
+               foi distribuído, quanto já andou — está na Governança ›
+               Monitoramento, com período livre em vez de um dia só. Os
+               botões ficam escondidos, não removidos: as telas e as
+               funções continuam inteiras e voltam tirando o display:none. -->
+          <button class="stab" id="cp-sub-btn-ctrlpatec" style="display:none" onclick="cpSubTab('ctrlpatec',this)">📈 Controle abrir PATEC</button>
+          <button class="stab" id="cp-sub-btn-ctrlneg" style="display:none" onclick="cpSubTab('ctrlneg',this)">📉 Controle negociação</button>
           <button class="stab" id="cp-sub-btn-statusb" onclick="cpSubTab('statusb',this)">📋 Status B</button>
           <button class="stab" id="cp-sub-btn-rejeite" onclick="cpSubTab('rejeite',this)">🚫 Rejeite</button>
           <button class="stab" id="cp-sub-btn-monitor" onclick="cpSubTab('monitor',this)">📡 Monitoramento</button>
