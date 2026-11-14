@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/11 20:00';
+var GTO_BUILD = '14/11 20:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -2845,8 +2845,13 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                funções continuam inteiras e voltam tirando o display:none. -->
           <button class="stab" id="cp-sub-btn-ctrlpatec" style="display:none" onclick="cpSubTab('ctrlpatec',this)">📈 Controle abrir PATEC</button>
           <button class="stab" id="cp-sub-btn-ctrlneg" style="display:none" onclick="cpSubTab('ctrlneg',this)">📉 Controle negociação</button>
-          <button class="stab" id="cp-sub-btn-statusb" onclick="cpSubTab('statusb',this)">📋 Status B</button>
-          <button class="stab" id="cp-sub-btn-rejeite" onclick="cpSubTab('rejeite',this)">🚫 Rejeite</button>
+          <!-- 14/11: Status B e Rejeite também saíram da barra. As duas
+               listas já existem, iguais e editáveis, nos cards da
+               Governança de pedidos — foi o André quem pediu que fossem
+               as mesmas, em 11/11. Aqui elas viravam uma segunda porta
+               para a mesma tabela. Escondidas, não removidas. -->
+          <button class="stab" id="cp-sub-btn-statusb" style="display:none" onclick="cpSubTab('statusb',this)">📋 Status B</button>
+          <button class="stab" id="cp-sub-btn-rejeite" style="display:none" onclick="cpSubTab('rejeite',this)">🚫 Rejeite</button>
           <button class="stab" id="cp-sub-btn-monitor" onclick="cpSubTab('monitor',this)">📡 Monitoramento</button>
         </div>
 
