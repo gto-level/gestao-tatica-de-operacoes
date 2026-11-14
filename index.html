@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/11 19:00';
+var GTO_BUILD = '14/11 19:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -2857,7 +2857,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               Agora ficam todos aqui: você sobe de cima para baixo e vê, de relance, o que
               ainda falta. <strong>Todas são obrigatórias</strong> — cada card diz que telas
               ela alimenta e de quando é o arquivo que está valendo.
-              <br>O <strong>MAPA de reaproveitamento</strong> está pronto mas ainda não
+              <br>A <strong>Medição do dia</strong> é um arquivo só: ela alimenta o Controle
+              de Pedidos e o Rejeite Supervisor na mesma leitura — por isso não há card
+              separado para ele.
+              O <strong>MAPA de reaproveitamento</strong> está pronto mas ainda não
               aparece: a tabela dele está sendo refeita. Quando as regras fecharem, ele volta
               para esta lista.
               <br>A única que continua tendo upload na tela dela é a <strong>Medição do
@@ -14585,17 +14588,26 @@ function apSubAtiva(){
 // portas para a mesma gravação não divergem; uma porta a menos, se eu
 // tivesse removido, poderia quebrar quem já tem o hábito.
 var MB_FONTES = [
+  // 14/11: a Medição do Rejeite Supervisor era um card à parte e o
+  // André reparou que o arquivo era o MESMO — e é mesmo: a função dela
+  // (rjsUploadMedicao) não lê nada, ela CHAMA cpHandleUpload. Subir uma
+  // vez já alimentava as duas pontas; o segundo card só fazia o mesmo
+  // arquivo de 30 MB ser lido duas vezes. Virou um card só, que diz as
+  // duas coisas que ele produz.
   { k:'medicao', nome:'Medição do dia', ico:'📡',
     aceita:'.xlsx,.xls,.csv',
-    alimenta:'Controle de Pedidos · Monitoramento · Rejeite (quem emitiu cada pedido) · '
-           + 'coluna Pedido dos cards de emissão',
+    alimenta:'Controle de Pedidos · Monitoramento · Rejeite Supervisor · quem emitiu cada '
+           + 'pedido · coluna Pedido dos cards de emissão',
     handler:'cpHandleUpload', obrigatorio:true,
     estado:function(){
       var d = _cpDia || null;
+      var nr = (_rjsMed && _rjsMed.itens) ? _rjsMed.itens.length : 0;
       return { tem: !!(d && (d.total || d.arquivo)), arquivo:(d && d.arquivo) || '',
                quando:(d && d.atualizadoEm) || '',
                resumo: d ? (cpNum(d.memorizado || 0) + ' memorizados · '
-                            + cpNum(d.emitido || 0) + ' emitidos') : '' };
+                            + cpNum(d.emitido || 0) + ' emitidos'
+                            + (nr ? ' · ' + cpNum(nr) + ' em status 8 para o Rejeite '
+                                    + 'Supervisor' : '')) : '' };
     } },
   { k:'mapa', nome:'MAPA do dia', ico:'🗺️',
     aceita:'.xlsb,.xlsx,.xls,.csv',
@@ -14628,16 +14640,6 @@ var MB_FONTES = [
                resumo: r ? (cpNum((r.itens || []).length) + ' no prazo de recusa'
                             + ((+r.foraPrazo || 0) ? ' · ' + cpNum(r.foraPrazo)
                                + ' fora do prazo fora da conta' : '')) : '' };
-    } },
-  { k:'rejmed', nome:'Medição do Rejeite Supervisor', ico:'👤',
-    aceita:'.xlsb,.xlsx,.xls,.csv',
-    alimenta:'Rejeite Supervisor · quem é o comprador de cada rejeite',
-    handler:'rjsUploadMedicao', obrigatorio:true,
-    estado:function(){
-      var m = _rjsMed;
-      return { tem: !!(m && (m.itens || []).length), arquivo:(m && m.arquivo) || '',
-               quando:(m && m.atualizadoEm) || '',
-               resumo: m ? (cpNum((m.itens || []).length) + ' itens em status 8') : '' };
     } },
   { k:'rodrigo', nome:'Planilha do Rodrigo', ico:'📑',
     aceita:'.xlsb,.xlsx,.xls,.csv',
