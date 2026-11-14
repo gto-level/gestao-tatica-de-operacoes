@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/11 00:20';
+var GTO_BUILD = '15/11 02:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1262,6 +1262,38 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         </div>
 
       </div><!-- /gv-sub-monitor -->
+    </div>
+
+    <!-- ══ GESTÃO DE JORNADA DA FRENTE (15/11) ══════════════════
+         Pedido do André: Publicação, Pedidos e Devolução passam a ter
+         Gestão de Jornada, "igual do PATEC", alimentada DE FORMA
+         INDIVIDUAL por módulo — "não pode afetar em nada o módulo
+         PATEC, nenhum dado pode ser replicado".
+         Por isso esta tela é própria, e não a do PATEC reaproveitada: a
+         de lá está presa à base do ADLV (getDBModulo('adlv')) e à lista
+         COLABS_JORNADA da equipe do PATEC. Esta grava em getDB(), que é
+         a base da frente aberta, e a equipe é digitada no próprio dash.
+    -->
+    <div class="page" id="p-jornada-mod">
+      <div class="stabs">
+        <button class="stab active" id="jor-tab-ferias" onclick="jorTab('ferias',this)">🌴 Férias</button>
+        <button class="stab" id="jor-tab-banco" onclick="jorTab('banco',this)">⏰ Banco de Horas</button>
+      </div>
+      <div id="jor-corpo"></div>
+    </div>
+
+    <div class="page" id="p-adm-mod">
+      <div class="stabs">
+        <button class="stab active" id="jadm-tab-equipe" onclick="jadmTab('equipe',this)">👥 Equipe</button>
+        <button class="stab" id="jadm-tab-ferias" onclick="jadmTab('ferias',this)">🌴 Férias</button>
+        <button class="stab" id="jadm-tab-banco" onclick="jadmTab('banco',this)">⏰ Banco de Horas</button>
+      </div>
+      <div id="jadm-corpo"></div>
+    </div>
+
+    <!-- ══ FECHAMENTO DO DIA — tópico próprio, módulo Pedidos ══ -->
+    <div class="page" id="p-fechamento-pedidos">
+      <div id="fechamento-pedidos-conteudo"></div>
     </div>
 
     <div class="page" id="p-pedidos">
@@ -2839,7 +2871,6 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
           <button class="stab" id="cp-sub-btn-base" onclick="cpSubTab('base',this)">📥 Montar base</button>
           <button class="stab active" id="cp-sub-btn-pedidos" onclick="cpSubTab('pedidos',this)">📦 Controle de Pedidos</button>
           <button class="stab" id="cp-sub-btn-mapa" onclick="cpSubTab('mapa',this)">🗺️ Distribuição do MAPA</button>
-          <button class="stab" id="cp-sub-btn-fechar" onclick="cpSubTab('fechar',this)">🔒 Fechamento do dia</button>
           <button class="stab" id="cp-sub-btn-acomp" onclick="cpSubTab('acomp',this)">✅ Acompanhamento</button>
           <!-- 14/11: as duas saíram da barra. O que elas respondem — do que
                foi distribuído, quanto já andou — está na Governança ›
@@ -9808,6 +9839,19 @@ function go(id, el) {
   if (id === 'pcp-hist' && typeof pcpHistAbrir === 'function') setTimeout(pcpHistAbrir, 60);
   if (id === 'pcp-fin-proj' && typeof pcpProjAbrir === 'function') setTimeout(pcpProjAbrir, 60);
   if (id === 'apres-rejeite' && typeof arjAbrir === 'function') setTimeout(arjAbrir, 60);
+  // o Fechamento do dia virou tópico: o bloco é MOVIDO para a página
+  // dele, não copiado — uma cópia divergiria no primeiro ajuste
+  if (id === 'fechamento-pedidos' && typeof fdpMontarTopico === 'function') {
+    fdpMontarTopico();
+    setTimeout(function(){ try { fdpAbrir(); } catch (e) {} }, 60);
+  }
+  // Gestão de Jornada e ADM das frentes (Publicação / Pedidos / Devolução).
+  // Cada frente tem projeto Firebase próprio, então getDB() já separa:
+  // o que é preenchido aqui não chega ao PATEC e nem vem dele.
+  if (id === 'jornada-mod' && typeof jorAbrir === 'function')
+    setTimeout(function(){ try { jorAbrir(); } catch (e) {} }, 60);
+  if (id === 'adm-mod' && typeof jadmAbrir === 'function')
+    setTimeout(function(){ try { jadmAbrir(); } catch (e) {} }, 60);
   // Sai da página do ADM → desliga o tempo real do Controle das Equipes.
   if(id!=='adm' && typeof _cePararRT==='function') _cePararRT();
   // Plano de Ação: liberado para ADLV e FAST (cada módulo usa sua própria
@@ -15121,6 +15165,392 @@ function acpBlocoPessoa(p, r){
   return h + '</div>';
 }
 
+// ══ GESTÃO DE JORNADA DA FRENTE (15/11) ══════════════════════════
+// Própria das frentes com base própria: Pedidos, Publicação e
+// Devolução. Grava em getDB(), que é a base da frente aberta — o PATEC
+// não é tocado e nada é replicado entre módulos.
+//
+// A equipe é digitada aqui mesmo, no dash: estas frentes não têm o
+// cadastro de colaboradores do PATEC, e inventar um só para isso seria
+// mais uma lista para manter.
+var JOR_DOC = 'jornada_frente';
+var _jorDados = { equipe:[], ferias:[], banco:[], atualizadoEm:'', atualizadoPor:'' };
+var _jorTab = 'ferias', _jadmTab = 'equipe';
+
+async function jorCarregar(){
+  try {
+    var db = getDB(); if (!db) return;
+    var d = await db.collection('config').doc(JOR_DOC).get();
+    if (d && d.exists) {
+      var j = d.data() || {};
+      _jorDados = { equipe:j.equipe || [], ferias:j.ferias || [], banco:j.banco || [],
+                    atualizadoEm:j.atualizadoEm || '', atualizadoPor:j.atualizadoPor || '' };
+    }
+  } catch (e) { console.warn('jorCarregar:', e); }
+}
+
+async function jorGravar(){
+  try {
+    var db = getDB(); if (!db) return false;
+    _jorDados.atualizadoEm = new Date().toISOString();
+    _jorDados.atualizadoPor = cpQuem();
+    await db.collection('config').doc(JOR_DOC).set(_jorDados);
+    return true;
+  } catch (e) { console.warn('jorGravar:', e); return false; }
+}
+
+// Retorno = saída + dias, a mesma conta que o ADM do PATEC já usa: é o
+// dia em que a pessoa volta, não o último dia de férias.
+function jorRetorno(saida, dias){
+  if (!saida) return '';
+  var n = Math.max(1, Math.round(+dias || 30));
+  var d = new Date(saida + 'T12:00:00');
+  if (isNaN(d.getTime())) return '';
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function jorPeriodos(){
+  return (_jorDados.ferias || []).filter(function(f){ return f && f.colab; })
+    .map(function(f){
+      var o = { colab:f.colab, saida:f.saida || '', dias:Math.max(1, Math.round(+f.dias || 30)),
+                obs:f.obs || '' };
+      o.retorno = f.retorno || jorRetorno(o.saida, o.dias);
+      return o;
+    })
+    .sort(function(a, b){
+      if (!a.saida) return 1; if (!b.saida) return -1;
+      return a.saida.localeCompare(b.saida);
+    });
+}
+
+function jorResumo(){
+  var hoje = cpHojeISO();
+  var d90 = (function(){ var d = new Date(hoje + 'T12:00:00'); d.setDate(d.getDate() + 90);
+                         return d.toISOString().slice(0, 10); })();
+  var prox = null, agora = [], prog = 0;
+  jorPeriodos().forEach(function(f){
+    if (!f.saida) return;
+    if (f.saida <= hoje && f.retorno >= hoje) { agora.push(f.colab); return; }
+    if (f.saida > hoje) {
+      if (!prox) prox = f;
+      if (f.saida <= d90) prog++;
+    }
+  });
+  var saldo = 0;
+  (_jorDados.banco || []).forEach(function(b){
+    var min = (Math.round(+b.h || 0) * 60) + Math.round(+b.m || 0);
+    saldo += (b.sinal === '-' ? -min : min);
+  });
+  return { prox:prox, agora:agora, prog:prog, saldoMin:saldo };
+}
+
+function jorHoras(min){
+  var neg = min < 0, a = Math.abs(min);
+  return (neg ? '−' : '+') + Math.floor(a / 60) + 'h' + String(a % 60).padStart(2, '0');
+}
+
+function jorTab(qual, btn){
+  _jorTab = qual;
+  ['ferias','banco'].forEach(function(k){
+    var b = document.getElementById('jor-tab-' + k);
+    if (b) b.className = 'stab' + (k === qual ? ' active' : '');
+  });
+  jorRender();
+}
+
+async function jorAbrir(){
+  var box = document.getElementById('jor-corpo');
+  if (box) box.innerHTML = '<div style="font-size:12px;color:var(--tx2)">⏳ Carregando...</div>';
+  await jorCarregar();
+  jorRender();
+}
+
+function jorRender(){
+  var box = document.getElementById('jor-corpo');
+  if (!box) return;
+  var r = jorResumo();
+  var h = '';
+  if (!(_jorDados.equipe || []).length) {
+    box.innerHTML = '<div class="al al-a" style="font-size:12px">Nenhuma pessoa cadastrada '
+      + 'nesta frente ainda. Vá em <strong>ADM › Equipe</strong> e informe os nomes — é de lá '
+      + 'que saem as férias e o banco de horas desta tela.</div>';
+    return;
+  }
+  if (_jorTab === 'ferias') {
+    h += '<div class="kgrid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));'
+      + 'margin-bottom:1rem">'
+      + '<div class="kc ok"><div class="kc-l">Próxima saída</div>'
+      +   '<div class="kc-v" style="font-size:16px">' + cpEsc(r.prox ? r.prox.colab : '—')
+      +   '</div><div class="kc-s">' + (r.prox ? cpDataBR(r.prox.saida) : '—') + '</div></div>'
+      + '<div class="kc bad"><div class="kc-l">Em férias agora</div>'
+      +   '<div class="kc-v" style="font-size:16px">'
+      +   cpEsc(r.agora.length ? r.agora.join(', ') : 'Ninguém') + '</div></div>'
+      + '<div class="kc"><div class="kc-l">Programadas</div>'
+      +   '<div class="kc-v" style="color:var(--az)">' + cpNum(r.prog) + '</div>'
+      +   '<div class="kc-s">nos próximos 90 dias</div></div>'
+      + '</div>'
+      + '<div class="cd"><div class="cd-t">📋 Quadro de férias — ordem de saída</div>'
+      + '<div class="al al-b" style="font-size:11.5px">ℹ A primeira pessoa da lista é a '
+      + 'próxima a entrar em férias. O preenchimento é em <strong>ADM › Férias</strong>.</div>'
+      + '<div style="overflow:auto"><table><thead><tr><th>#</th><th>Colaborador</th>'
+      +   '<th>Saída</th><th style="text-align:right">Dias</th><th>Retorno</th>'
+      +   '<th>Situação</th><th>Observação</th></tr></thead><tbody>';
+    var hoje = cpHojeISO(), n = 0;
+    jorPeriodos().forEach(function(f){
+      n++;
+      var sit = !f.saida ? '<span style="color:var(--tx2)">sem data</span>'
+        : (f.retorno < hoje ? '<span style="color:var(--tx2)">concluída</span>'
+        : (f.saida <= hoje ? '<span class="pl pl-b">em férias</span>'
+        : '<span class="pl pl-ok">programada</span>'));
+      h += '<tr><td>' + n + '</td><td style="font-weight:600">' + cpEsc(f.colab) + '</td>'
+        + '<td>' + (f.saida ? cpDataBR(f.saida) : '—') + '</td>'
+        + '<td style="text-align:right">' + cpNum(f.dias) + '</td>'
+        + '<td>' + (f.retorno ? cpDataBR(f.retorno) : '—') + '</td>'
+        + '<td style="font-size:10.5px">' + sit + '</td>'
+        + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(f.obs || '—') + '</td></tr>';
+    });
+    if (!n) h += '<tr><td colspan="7" style="color:var(--tx2);font-size:12px">'
+      + 'Nenhum período de férias lançado.</td></tr>';
+    h += '</tbody></table></div></div>';
+  } else {
+    h += '<div class="kgrid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));'
+      + 'margin-bottom:1rem">'
+      + '<div class="kc"><div class="kc-l">Saldo da equipe</div>'
+      +   '<div class="kc-v" style="color:' + (r.saldoMin < 0 ? 'var(--vm)' : 'var(--vd)') + '">'
+      +   jorHoras(r.saldoMin) + '</div><div class="kc-s">soma de todos</div></div>'
+      + '<div class="kc"><div class="kc-l">Pessoas</div>'
+      +   '<div class="kc-v" style="color:var(--az)">' + cpNum((_jorDados.equipe || []).length)
+      +   '</div><div class="kc-s">nesta frente</div></div>'
+      + '</div>'
+      + '<div class="cd"><div class="cd-t">⏰ Banco de horas</div>'
+      + '<div class="al al-b" style="font-size:11.5px">ℹ O preenchimento é em '
+      + '<strong>ADM › Banco de Horas</strong>.</div>'
+      + '<div style="overflow:auto"><table><thead><tr><th>Colaborador</th>'
+      +   '<th style="text-align:right">Saldo</th><th>Observação</th>'
+      +   '</tr></thead><tbody>';
+    (_jorDados.equipe || []).forEach(function(c){
+      var b = (_jorDados.banco || []).filter(function(x){ return x.colab === c; })[0]
+            || { h:0, m:0, sinal:'+', obs:'' };
+      var min = (Math.round(+b.h || 0) * 60) + Math.round(+b.m || 0);
+      if (b.sinal === '-') min = -min;
+      h += '<tr><td style="font-weight:600">' + cpEsc(c) + '</td>'
+        + '<td style="text-align:right;font-weight:700;color:'
+        +   (min < 0 ? 'var(--vm)' : (min > 0 ? 'var(--vd)' : 'var(--tx2)')) + '">'
+        +   jorHoras(min) + '</td>'
+        + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(b.obs || '—') + '</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+  }
+  h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:.6rem">'
+    + 'Estes dados são <strong>desta frente</strong> e ficam na base dela. O PATEC tem a '
+    + 'Gestão de Jornada dele, com outros dados.'
+    + (_jorDados.atualizadoEm
+        ? ' Última alteração em ' + cpDataBR(String(_jorDados.atualizadoEm).slice(0, 10))
+          + (_jorDados.atualizadoPor ? ' por ' + cpEsc(_jorDados.atualizadoPor) : '') + '.'
+        : '')
+    + '</div>';
+  box.innerHTML = h;
+}
+
+// ── O ADM da frente: onde a jornada é preenchida ────────────────
+function jadmTab(qual, btn){
+  _jadmTab = qual;
+  ['equipe','ferias','banco'].forEach(function(k){
+    var b = document.getElementById('jadm-tab-' + k);
+    if (b) b.className = 'stab' + (k === qual ? ' active' : '');
+  });
+  jadmRender();
+}
+
+async function jadmAbrir(){
+  var box = document.getElementById('jadm-corpo');
+  if (box) box.innerHTML = '<div style="font-size:12px;color:var(--tx2)">⏳ Carregando...</div>';
+  await jorCarregar();
+  jadmRender();
+}
+
+async function jadmSalvar(){
+  var ok = await jorGravar();
+  var st = document.getElementById('jadm-status');
+  if (st) {
+    st.innerHTML = ok ? '<span style="color:var(--vd)">✔ guardado</span>'
+                      : '<span style="color:var(--vm)">✗ a base recusou</span>';
+    if (ok) setTimeout(function(){ if (st) st.innerHTML = ''; }, 2500);
+  }
+  jadmRender();
+}
+
+// equipe
+async function jadmAddPessoa(){
+  var el = document.getElementById('jadm-nome');
+  var nome = (el && el.value || '').trim();
+  if (!nome) return;
+  if ((_jorDados.equipe || []).some(function(c){ return cpNormNome(c) === cpNormNome(nome); })) {
+    var st = document.getElementById('jadm-status');
+    if (st) st.innerHTML = '<span style="color:var(--am)">já está na lista</span>';
+    return;
+  }
+  _jorDados.equipe = (_jorDados.equipe || []).concat([nome]);
+  if (el) el.value = '';
+  await jadmSalvar();
+}
+async function jadmTirarPessoa(nome){
+  // o histórico da pessoa fica: tirar da equipe não apaga férias nem
+  // banco, para o quadro do mês passado continuar fazendo sentido
+  _jorDados.equipe = (_jorDados.equipe || []).filter(function(c){ return c !== nome; });
+  await jadmSalvar();
+}
+
+// férias
+async function jadmAddFerias(){
+  _jorDados.ferias = (_jorDados.ferias || []).concat([
+    { colab:(_jorDados.equipe || [])[0] || '', saida:'', dias:30, retorno:'', obs:'' }]);
+  await jadmSalvar();
+}
+async function jadmSetFerias(i, campo, valor){
+  var f = (_jorDados.ferias || [])[i];
+  if (!f) return;
+  f[campo] = (campo === 'dias') ? Math.max(1, Math.round(+valor || 30)) : valor;
+  // o retorno é recalculado sempre que saída ou dias mudam
+  if (campo === 'saida' || campo === 'dias') f.retorno = jorRetorno(f.saida, f.dias);
+  await jadmSalvar();
+}
+async function jadmTirarFerias(i){
+  _jorDados.ferias = (_jorDados.ferias || []).filter(function(_, k){ return k !== i; });
+  await jadmSalvar();
+}
+
+// banco de horas
+async function jadmSetBanco(colab, campo, valor){
+  var lista = _jorDados.banco || (_jorDados.banco = []);
+  var b = lista.filter(function(x){ return x.colab === colab; })[0];
+  if (!b) { b = { colab:colab, h:0, m:0, sinal:'+', obs:'' }; lista.push(b); }
+  if (campo === 'h' || campo === 'm') b[campo] = Math.max(0, Math.round(+valor || 0));
+  else b[campo] = valor;
+  await jadmSalvar();
+}
+
+function jadmRender(){
+  var box = document.getElementById('jadm-corpo');
+  if (!box) return;
+  var eq = _jorDados.equipe || [];
+  var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
+    + '<span>⚙️ ADM da frente — jornada</span>'
+    + '<span id="jadm-status" style="font-size:11px;min-height:14px"></span></div>'
+    + '<div style="font-size:11px;color:var(--tx2);line-height:1.7">'
+    + 'O que você preencher aqui aparece no tópico <strong>Gestão de Jornada</strong> desta '
+    + 'frente. É uma base por frente: o PATEC não enxerga isto, e isto não enxerga o PATEC.'
+    + '</div></div>';
+
+  if (_jadmTab === 'equipe') {
+    h += '<div class="cd"><div class="cd-t">👥 Quem trabalha nesta frente</div>'
+      + '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.7rem">'
+      + 'Os nomes são digitados aqui mesmo — esta frente não usa o cadastro de colaboradores '
+      + 'do PATEC. É esta lista que alimenta as abas de Férias e Banco de Horas.</div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:.8rem">'
+      +   '<input type="text" id="jadm-nome" placeholder="nome do colaborador"'
+      +     ' onkeydown="if(event.key===\'Enter\')jadmAddPessoa()"'
+      +     ' style="flex:1;min-width:220px;font-size:13px;padding:7px 10px;'
+      +     'border:1.5px solid var(--brd);border-radius:7px">'
+      +   '<button class="btn btn-p" onclick="jadmAddPessoa()">+ Incluir</button></div>';
+    if (!eq.length) {
+      h += '<div style="font-size:12px;color:var(--tx2)">Ninguém cadastrado ainda.</div>';
+    } else {
+      h += '<div style="overflow:auto"><table><thead><tr><th>#</th><th>Colaborador</th>'
+        + '<th style="width:70px"></th></tr></thead><tbody>';
+      eq.forEach(function(c, i){
+        h += '<tr><td>' + (i + 1) + '</td><td style="font-weight:600">' + cpEsc(c) + '</td>'
+          + '<td><button class="btn btn-s" style="font-size:10.5px;padding:2px 8px"'
+          +   ' onclick="jadmTirarPessoa(\'' + cpEsc(c).replace(/'/g, "\\'") + '\')">remover</button>'
+          + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+    h += '</div>';
+  }
+
+  if (_jadmTab === 'ferias') {
+    h += '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
+      + '<span>🌴 Férias</span>'
+      + '<button class="btn btn-p" onclick="jadmAddFerias()">+ Novo período</button></div>'
+      + '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.7rem">'
+      + 'O retorno é calculado sozinho: saída + dias. Uma pessoa pode ter mais de um '
+      + 'período.</div>';
+    if (!eq.length) {
+      h += '<div class="al al-a" style="font-size:12px">Cadastre a equipe primeiro, na aba '
+        + '<strong>Equipe</strong>.</div></div>';
+    } else {
+      h += '<div style="overflow:auto"><table><thead><tr><th>Colaborador</th><th>Saída</th>'
+        +   '<th style="width:80px">Dias</th><th>Retorno</th><th>Observação</th>'
+        +   '<th style="width:70px"></th></tr></thead><tbody>';
+      (_jorDados.ferias || []).forEach(function(f, i){
+        h += '<tr><td><select onchange="jadmSetFerias(' + i + ', \'colab\', this.value)"'
+          +   ' style="font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid var(--brd)">'
+          +   '<option value="">—</option>'
+          +   eq.map(function(c){ return '<option value="' + cpEsc(c) + '"'
+                + (f.colab === c ? ' selected' : '') + '>' + cpEsc(c) + '</option>'; }).join('')
+          +   '</select></td>'
+          + '<td><input type="date" value="' + cpEsc(f.saida || '') + '"'
+          +   ' onchange="jadmSetFerias(' + i + ', \'saida\', this.value)"'
+          +   ' style="font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid var(--brd)"></td>'
+          + '<td><input type="number" min="1" step="1" value="' + cpEsc(String(f.dias || 30)) + '"'
+          +   ' onchange="jadmSetFerias(' + i + ', \'dias\', this.value)"'
+          +   ' style="width:70px;font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid var(--brd)"></td>'
+          + '<td style="font-size:11px">' + (f.retorno ? cpDataBR(f.retorno)
+              : (f.saida ? cpDataBR(jorRetorno(f.saida, f.dias)) : '—')) + '</td>'
+          + '<td><input type="text" value="' + cpEsc(f.obs || '') + '" placeholder="opcional"'
+          +   ' onchange="jadmSetFerias(' + i + ', \'obs\', this.value)"'
+          +   ' style="width:180px;font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid var(--brd)"></td>'
+          + '<td><button class="btn btn-s" style="font-size:10.5px;padding:2px 8px"'
+          +   ' onclick="jadmTirarFerias(' + i + ')">remover</button></td></tr>';
+      });
+      if (!(_jorDados.ferias || []).length)
+        h += '<tr><td colspan="6" style="font-size:12px;color:var(--tx2)">'
+          + 'Nenhum período lançado.</td></tr>';
+      h += '</tbody></table></div></div>';
+    }
+  }
+
+  if (_jadmTab === 'banco') {
+    h += '<div class="cd"><div class="cd-t">⏰ Banco de Horas</div>'
+      + '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.7rem">'
+      + 'Saldo de cada um: sinal, horas e minutos.</div>';
+    if (!eq.length) {
+      h += '<div class="al al-a" style="font-size:12px">Cadastre a equipe primeiro, na aba '
+        + '<strong>Equipe</strong>.</div>';
+    } else {
+      h += '<div style="overflow:auto"><table><thead><tr><th>Colaborador</th><th>Sinal</th>'
+        +   '<th style="width:80px">Horas</th><th style="width:80px">Minutos</th>'
+        +   '<th>Observação</th></tr></thead><tbody>';
+      eq.forEach(function(c){
+        var b = (_jorDados.banco || []).filter(function(x){ return x.colab === c; })[0]
+              || { h:0, m:0, sinal:'+', obs:'' };
+        var esc = cpEsc(c).replace(/'/g, "\\'");
+        h += '<tr><td style="font-weight:600">' + cpEsc(c) + '</td>'
+          + '<td><select onchange="jadmSetBanco(\'' + esc + '\', \'sinal\', this.value)"'
+          +   ' style="font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid var(--brd)">'
+          +   '<option value="+"' + (b.sinal !== '-' ? ' selected' : '') + '>+ a favor</option>'
+          +   '<option value="-"' + (b.sinal === '-' ? ' selected' : '') + '>− devendo</option>'
+          +   '</select></td>'
+          + '<td><input type="number" min="0" step="1" value="' + cpEsc(String(b.h || 0)) + '"'
+          +   ' onchange="jadmSetBanco(\'' + esc + '\', \'h\', this.value)"'
+          +   ' style="width:70px;font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid var(--brd)"></td>'
+          + '<td><input type="number" min="0" max="59" step="1" value="' + cpEsc(String(b.m || 0)) + '"'
+          +   ' onchange="jadmSetBanco(\'' + esc + '\', \'m\', this.value)"'
+          +   ' style="width:70px;font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid var(--brd)"></td>'
+          + '<td><input type="text" value="' + cpEsc(b.obs || '') + '" placeholder="opcional"'
+          +   ' onchange="jadmSetBanco(\'' + esc + '\', \'obs\', this.value)"'
+          +   ' style="width:200px;font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid var(--brd)"></td>'
+          + '</tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+    h += '</div>';
+  }
+  box.innerHTML = h;
+}
+
 // ══ FECHAMENTO DO DIA — a versão de Pedidos (14/11) ══════════════
 // Pedido do André: "cada comprador tem a sua demanda de forma
 // individual... tudo que não foi feito ele precisa se justificar; após
@@ -15201,7 +15631,21 @@ async function fdpFechar(){
   await fdpRender();
 }
 
+// O bloco do fechamento nasceu como sub-aba do Controle de Pedidos e
+// virou tópico em 15/11. Em vez de duplicar o HTML, ele é MOVIDO para a
+// página do tópico na primeira vez que alguém entra — é o mesmo que o
+// módulo Pedidos já faz com o bloco do Controle de Pedidos.
+function fdpMontarTopico(){
+  try {
+    var bloco = document.getElementById('cp-sub-fechar');
+    var destino = document.getElementById('fechamento-pedidos-conteudo');
+    if (bloco && destino && bloco.parentNode !== destino) destino.appendChild(bloco);
+    if (bloco) bloco.style.display = 'block';
+  } catch (e) { console.warn('fdpMontarTopico:', e); }
+}
+
 async function fdpAbrir(){
+  fdpMontarTopico();
   var el = document.getElementById('fdp-data');
   if (el && !el.value) el.value = cpHojeISO();
   var box = document.getElementById('fdp-corpo');
@@ -15714,7 +16158,7 @@ function mbRender(){
 }
 
 function cpSubTab(qual, btn){
-  ['base','pedidos','mapa','fechar','acomp','ctrlpatec','ctrlneg','statusb','rejeite','monitor']
+  ['base','pedidos','mapa','acomp','ctrlpatec','ctrlneg','statusb','rejeite','monitor']
     .forEach(function(k){
     var el = document.getElementById('cp-sub-' + k);
     if (el) el.style.display = (qual === k) ? 'block' : 'none';
@@ -15730,7 +16174,6 @@ function cpSubTab(qual, btn){
   // fora: dentro do ADM quem carregava era o setAdmTab, e no módulo novo
   // não havia ninguém — por isso o dia e o histórico vinham vazios.
   if (qual === 'base')      mbAbrir();
-  if (qual === 'fechar')    fdpAbrir();
   if (qual === 'acomp')     acpAbrir();
   if (qual === 'pedidos')   cpAbrir();
   if (qual === 'mapa')      mdAbrir();
@@ -52079,6 +52522,17 @@ const PERMS_SIDEBAR = {
   // Só existem dentro do módulo Pedidos, que tem Firebase próprio
   'governanca-pedidos': { icon:'🏛️', label:'Governança',           mod:'EXECUÇÃO', soPedidos:true },
   'pedidos':        { icon:'📦', label:'Controle de Pedidos',      mod:'EXECUÇÃO', soPedidos:true },
+  // 15/11: o Fechamento do dia saiu de dentro do Controle de Pedidos e
+  // virou tópico, logo abaixo dele. É a tela que CADA comprador abre
+  // todo fim de expediente — escondida numa aba, ninguém achava.
+  'fechamento-pedidos': { icon:'🔒', label:'Fechamento do dia',    mod:'EXECUÇÃO', soPedidos:true },
+  // 15/11: Jornada e ADM próprios das três frentes com base própria.
+  // jornadaFrentes é o que faz esses dois aparecerem apesar das regras
+  // de soPedidos/soFrente — e só nessas três.
+  'jornada-mod':    { icon:'🗓', label:'Gestão de Jornada',       mod:'EXECUÇÃO',
+                      jornadaFrentes:['pedidos','adlv_republicacao','adlv_devolucao'] },
+  'adm-mod':        { icon:'⚙️', label:'ADM',                     mod:'EXECUÇÃO', soAdm:true,
+                      jornadaFrentes:['pedidos','adlv_republicacao','adlv_devolucao'] },
   'apres-rejeite':  { icon:'🖥️', label:'Apresentação',             mod:'EXECUÇÃO', soPedidos:true },
   // Frente ADLV · Reunião — três telas, abastecidas por upload
   'reuniao-adlv':       { icon:'📊', label:'Status Carteira', mod:'EXECUÇÃO', soFrente:'adlv_reuniao' },
@@ -53081,6 +53535,12 @@ function authMontarSidebar(emailParam){
   const _soPcp = (typeof modSoPcp === 'function') && modSoPcp(_moduloAtivo);
   const _soReu = (typeof modSoProprias === 'function') && modSoProprias(_moduloAtivo);
   Object.entries(PERMS_SIDEBAR).forEach(([key, cfg]) => {
+    // Jornada e ADM das frentes: passam por cima das regras de
+    // soPedidos/soFrente, mas só nas frentes que a própria entrada
+    // lista. Fora delas, não existem.
+    const _jor = !!(cfg.jornadaFrentes && cfg.jornadaFrentes.indexOf(_moduloAtivo) !== -1);
+    if(cfg.jornadaFrentes && !_jor) return;
+    if(!_jor){
     // Cada frente com base própria mostra só as telas dela.
     if(_soPcp !== !!cfg.soPcp) return;
     // Frente de Reunião: só a tela daquela frente, e a tela de uma
@@ -53096,7 +53556,10 @@ function authMontarSidebar(emailParam){
     if(cfg.hidden) return; // item oculto do menu (integrado em outra página)
     // no FAST estas telas vivem em ADM › Dados de Consulta
     if(cfg.hiddenFast && _moduloAtivo === 'fast') return;
-    if(podeVerTudo || perms.includes(key) || (_soReu && cfg.soFrente === _moduloAtivo)
+    }
+    // o ADM da frente é só para quem administra
+    if(_jor && cfg.soAdm && !podeVerTudo) return;
+    if(podeVerTudo || perms.includes(key) || _jor || (_soReu && cfg.soFrente === _moduloAtivo)
        || (key === 'direcionamento' && (perms.includes('pr-estrategico') || perms.includes('governanca')))){
       if(!mods[cfg.mod]) mods[cfg.mod] = [];
       mods[cfg.mod].push({key, ...cfg});
