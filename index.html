@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/11 21:30';
+var GTO_BUILD = '14/11 23:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -2839,6 +2839,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
           <button class="stab" id="cp-sub-btn-base" onclick="cpSubTab('base',this)">📥 Montar base</button>
           <button class="stab active" id="cp-sub-btn-pedidos" onclick="cpSubTab('pedidos',this)">📦 Controle de Pedidos</button>
           <button class="stab" id="cp-sub-btn-mapa" onclick="cpSubTab('mapa',this)">🗺️ Distribuição do MAPA</button>
+          <button class="stab" id="cp-sub-btn-acomp" onclick="cpSubTab('acomp',this)">✅ Acompanhamento</button>
           <!-- 14/11: as duas saíram da barra. O que elas respondem — do que
                foi distribuído, quanto já andou — está na Governança ›
                Monitoramento, com período livre em vez de um dia só. Os
@@ -2903,6 +2904,31 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
             </div>
             <div id="mb-med-resumo" style="font-size:12px;margin-top:.6rem"></div>
           </div>
+        </div>
+
+        <!-- ══ ACOMPANHAMENTO — o que foi distribuído foi feito? ══ -->
+        <div id="cp-sub-acomp" style="display:none">
+          <div class="cd" style="border-top:3px solid var(--azm)">
+            <div class="cd-t" style="justify-content:space-between">
+              <span>✅ Acompanhamento da distribuição</span>
+              <span style="display:flex;gap:8px;align-items:center">
+                <span id="acp-status" style="font-size:11px;min-height:14px"></span>
+                <input type="date" id="acp-data" onchange="acpAbrir()"
+                  style="font-size:12px;padding:5px 9px;border:1.5px solid var(--brd);border-radius:7px;font-weight:600">
+                <button class="btn btn-s" onclick="acpAbrir()">↻ Atualizar</button>
+              </span>
+            </div>
+            <div style="font-size:11px;color:var(--tx2);line-height:1.8">
+              Confere o que foi distribuído naquele dia contra o que a base mostra hoje, por
+              comprador. <strong>Emissão</strong> — pedido emitido na medição está feito;
+              memorizado ou ausente pede justificativa. <strong>Abrir PATEC</strong> — como a
+              abertura só aparece no MAPA do dia seguinte, o comprador informa quantos abriu e
+              a tela compara. <strong>Negociação</strong> — a meta é o que foi distribuído no
+              dia; abaixo dela, justifica.
+              <br>Cada um vê e preenche a parte dele, pelo login. Quem é ADM vê a equipe toda.
+            </div>
+          </div>
+          <div id="acp-corpo"></div>
         </div>
 
         <div id="cp-sub-pedidos">
@@ -14605,6 +14631,450 @@ function apSubAtiva(){
   var el = document.getElementById('cp-sub-abertura');
   return el && el.style.display !== 'none';
 }
+// ══ ACOMPANHAMENTO DA EQUIPE (14/11) ═════════════════════════════
+// Pedido do André: "uma vez feita a distribuição, preciso verificar se o
+// que eu distribuí para minha equipe eles estão fazendo ou se estão
+// deixando de lado o serviço".
+//
+// Três réguas diferentes, porque as três filas provam trabalho de jeitos
+// diferentes:
+//
+//  1. EMISSÃO (emitir, PATEC, PATEC manual, reap) — a medição diz. Se o
+//     item virou PEDIDO, está feito e ninguém precisa explicar nada. Se
+//     está MEMORIZADO, ele parou no meio: pede justificativa. Se não
+//     aparece em lugar nenhum da medição, ninguém encostou nele.
+//
+//  2. ABRIR PATEC — é automático e só se sabe no dia seguinte. Então o
+//     comprador DECLARA quantos abriu, por fila, e no dia seguinte o
+//     MAPA diz quantos saíram de verdade. A tela compara os dois.
+//
+//  3. NEGOCIAÇÃO — a meta é o que foi distribuído para ele naquele dia.
+//     Bateu, não se justifica; ficou abaixo, justifica o que faltou.
+//
+// Tudo por PESSOA, e a pessoa é quem está logada (colabLogado). Quem é
+// adm vê a equipe inteira; o comprador vê a parte dele e é quem
+// preenche.
+var ACP_COL = 'acompanhamento';
+var ACP_EMISSAO = ['emitir','patec','patecman','reap'];
+var ACP_ABRIR   = ['pateciden','patecgm'];
+var ACP_NEG     = ['negociar','dpv'];
+var ACP_MOTIVOS = [
+  'Aguardando fornecedor',
+  'Aguardando requisitante',
+  'Chamado aberto',
+  'Item com problema no SAP',
+  'Falta de informação técnica',
+  'Priorizei outra demanda',
+  'Outro'
+];
+var _acpDia = { data:'', pessoas:{} };
+var _acpAval = null;
+
+function acpDataSel(){
+  var el = document.getElementById('acp-data');
+  return (el && el.value) ? el.value : cpHojeISO();
+}
+function acpEhAdm(){
+  try { return !!(_authPerfil && _authPerfil.perfil === 'adm'); } catch (e) { return false; }
+}
+function acpEuSou(){ return cpQuem(); }
+
+// O balde de uma pessoa dentro do dia. Criar na hora de escrever, não na
+// de ler: assim um dia sem nada não gera documento vazio.
+function acpDe(nome){
+  var k = cpNormNome(nome);
+  return _acpDia.pessoas[k] || { declarado:{}, just:{} };
+}
+
+async function acpCarregar(data){
+  _acpDia = { data:data, pessoas:{} };
+  try {
+    var db = getDB(); if (!db) return;
+    var doc = await db.collection(ACP_COL).doc(data).get();
+    if (doc && doc.exists) {
+      var d = doc.data() || {};
+      _acpDia = { data:data, pessoas:d.pessoas || {} };
+    }
+  } catch (e) { console.warn('acpCarregar:', e); }
+}
+
+async function acpGravar(){
+  try {
+    var db = getDB(); if (!db) return false;
+    await db.collection(ACP_COL).doc(_acpDia.data).set({
+      data:_acpDia.data, pessoas:_acpDia.pessoas,
+      atualizadoEm:new Date().toISOString(), atualizadoPor:cpQuem()
+    });
+    return true;
+  } catch (e) { console.warn('acpGravar:', e); return false; }
+}
+
+// ── o que a medição diz de um item ──────────────────────────────
+// Pedido > memorizado > nada. O "nada" não é empate com memorizado: um
+// é "parou no meio", o outro é "não começou", e a cobrança é diferente.
+function acpStatusItem(rc, seq){
+  try {
+    if (gpPedidoDe(rc, seq)) return 'emitido';
+  } catch (e) {}
+  var alvo = _rjsN(rc) + '|' + _rjsN(seq);
+  var mem = (_gpMem && _gpMem.itens) ? _gpMem.itens : [];
+  for (var i = 0; i < mem.length; i++) {
+    if (_rjsN(mem[i].rc) + '|' + _rjsN(mem[i].item) === alvo) return 'memorizado';
+  }
+  return 'sem';
+}
+
+// ── a conta do dia ──────────────────────────────────────────────
+async function acpAvaliar(data){
+  var dist = await _ctrlDistSalva(data);
+  var mp = await _ctrlVivosAgora();
+  var vivos = mp.vivos;
+  var pessoas = {};
+  var pega = function(nome){
+    var k = cpNormNome(nome);
+    return pessoas[k] || (pessoas[k] = { nome:nome, chave:k,
+      emissao:{ total:0, emitidos:0, memorizados:0, sem:0, itens:[] },
+      abrir:{ distribuidos:0, saiu:0, declarado:0, porFila:{} },
+      neg:{ meta:0, feito:0, itens:[] } });
+  };
+  (((dist || {}).res || {}).lista || []).forEach(function(p){
+    var o = pega(p.nome);
+    (p.itens || []).forEach(function(i){
+      var ch = i.statusChave;
+      var chave = String(i.rc || '') + '|' + String(i.seq || '');
+      if (ACP_EMISSAO.indexOf(ch) !== -1) {
+        var st = acpStatusItem(i.rc, i.seq);
+        o.emissao.total++;
+        if (st === 'emitido') o.emissao.emitidos++;
+        else if (st === 'memorizado') o.emissao.memorizados++;
+        else o.emissao.sem++;
+        o.emissao.itens.push({ chave:chave, rc:i.rc, seq:i.seq, op:i.op || '',
+                               fila:ch, status:st, precisa: st !== 'emitido' });
+      } else if (ACP_ABRIR.indexOf(ch) !== -1) {
+        o.abrir.distribuidos++;
+        var pf = o.abrir.porFila[ch] || (o.abrir.porFila[ch] = { distribuidos:0, saiu:0, declarado:0 });
+        pf.distribuidos++;
+        if (mp.tem && !vivos[chave]) { o.abrir.saiu++; pf.saiu++; }
+      } else if (ACP_NEG.indexOf(ch) !== -1) {
+        o.neg.meta++;
+        var m = _gpNeg[chave];
+        var feito = !!(m && m.data);
+        if (feito) o.neg.feito++;
+        o.neg.itens.push({ chave:chave, rc:i.rc, seq:i.seq, op:i.op || '',
+                           fila:ch, feito:feito, precisa: !feito });
+      }
+    });
+  });
+  // o declarado e as justificativas do dia
+  Object.keys(pessoas).forEach(function(k){
+    var o = pessoas[k], g = _acpDia.pessoas[k] || { declarado:{}, just:{} };
+    ACP_ABRIR.forEach(function(f){
+      var n = Math.max(0, Math.round(+(g.declarado || {})[f] || 0));
+      o.abrir.declarado += n;
+      var pf = o.abrir.porFila[f] || (o.abrir.porFila[f] = { distribuidos:0, saiu:0, declarado:0 });
+      pf.declarado = n;
+      pf.bate = (pf.declarado === pf.saiu);
+      pf.declarou = !!(g.declarado || {})[f] || (g.declarado || {})[f] === 0;
+    });
+    o.abrir.declarou = ACP_ABRIR.some(function(f){ return o.abrir.porFila[f].declarou; });
+    o.abrir.bate = o.abrir.declarou && ACP_ABRIR.every(function(f){
+      return !o.abrir.porFila[f].distribuidos || o.abrir.porFila[f].bate; });
+    var just = g.just || {};
+    var marca = function(lista){
+      lista.forEach(function(it){
+        var j = just[it.chave];
+        it.motivo = (j && j.m) || '';
+        it.comentario = (j && j.c) || '';
+        it.justificado = !!it.motivo;
+      });
+    };
+    marca(o.emissao.itens); marca(o.neg.itens);
+    o.pendentes = o.emissao.itens.filter(function(i){ return i.precisa && !i.justificado; }).length
+                + o.neg.itens.filter(function(i){ return i.precisa && !i.justificado; }).length;
+    o.aJustificar = o.emissao.itens.filter(function(i){ return i.precisa; }).length
+                  + o.neg.itens.filter(function(i){ return i.precisa; }).length;
+    o.justificados = o.aJustificar - o.pendentes;
+    o.distribuidos = o.emissao.total + o.abrir.distribuidos + o.neg.meta;
+    o.feitos = o.emissao.emitidos + o.abrir.saiu + o.neg.feito;
+    o.pct = o.distribuidos ? Math.round(o.feitos * 100 / o.distribuidos) : 0;
+  });
+  var lista = Object.keys(pessoas).map(function(k){ return pessoas[k]; })
+    .sort(function(a, b){ return b.distribuidos - a.distribuidos
+                               || a.nome.localeCompare(b.nome); });
+  var tot = lista.reduce(function(t, p){
+    t.distribuidos += p.distribuidos; t.feitos += p.feitos;
+    t.aJustificar += p.aJustificar; t.pendentes += p.pendentes;
+    t.emitidos += p.emissao.emitidos; t.memorizados += p.emissao.memorizados;
+    t.sem += p.emissao.sem; t.abrirSaiu += p.abrir.saiu;
+    t.abrirDeclarado += p.abrir.declarado; t.negFeito += p.neg.feito;
+    t.negMeta += p.neg.meta;
+    return t;
+  }, { distribuidos:0, feitos:0, aJustificar:0, pendentes:0, emitidos:0,
+       memorizados:0, sem:0, abrirSaiu:0, abrirDeclarado:0, negFeito:0, negMeta:0 });
+  tot.pct = tot.distribuidos ? Math.round(tot.feitos * 100 / tot.distribuidos) : 0;
+  _acpAval = { data:data, lista:lista, total:tot, temDist: !!dist,
+               mapaDe: mp.data, mapaCarregado: mp.de === 'carregado', temMapa: mp.tem };
+  return _acpAval;
+}
+
+// O dia do que está na tela e o dia do que está em memória têm de ser
+// o mesmo ANTES de gravar. Sem esta guarda, trocar a data e salvar em
+// seguida escrevia a justificativa no dia errado — e o dia certo ficava
+// sem ela, sem ninguém perceber.
+async function acpSalvarJust(nome, chave, campo, valor){
+  var dataAlvo = acpDataSel();
+  if (_acpDia.data !== dataAlvo) await acpCarregar(dataAlvo);
+  var k = cpNormNome(nome);
+  var g = _acpDia.pessoas[k] || (_acpDia.pessoas[k] = { declarado:{}, just:{} });
+  var j = g.just[chave] || (g.just[chave] = {});
+  j[campo] = String(valor == null ? '' : valor).trim();
+  j.em = new Date().toISOString();
+  j.por = cpQuem();
+  if (!j.m && !j.c) delete g.just[chave];
+  var ok = await acpGravar();
+  acpRecado(ok ? '<span style="color:var(--vd)">✔ guardado</span>'
+                : '<span style="color:var(--vm)">✗ a base recusou</span>');
+  await acpDesenhar();
+}
+
+async function acpSalvarDeclarado(nome, fila, valor){
+  var dataAlvo = acpDataSel();
+  if (_acpDia.data !== dataAlvo) await acpCarregar(dataAlvo);
+  var k = cpNormNome(nome);
+  var g = _acpDia.pessoas[k] || (_acpDia.pessoas[k] = { declarado:{}, just:{} });
+  g.declarado[fila] = Math.max(0, Math.round(+valor || 0));
+  var ok = await acpGravar();
+  acpRecado(ok ? '<span style="color:var(--vd)">✔ guardado</span>'
+                : '<span style="color:var(--vm)">✗ a base recusou</span>');
+  await acpDesenhar();
+}
+
+// ── a tela ──────────────────────────────────────────────────────
+async function acpAbrir(){
+  var el = document.getElementById('acp-data');
+  if (el && !el.value) el.value = cpHojeISO();
+  var box = document.getElementById('acp-corpo');
+  if (box) box.innerHTML = '<div style="font-size:12px;color:var(--tx2)">⏳ Conferindo...</div>';
+  // os memorizados vêm do mesmo documento que a Governança lê
+  try {
+    var db = getDB();
+    if (db) {
+      var dm = await db.collection('config').doc('governanca_memorizados').get();
+      if (dm && dm.exists) {
+        var M = dm.data() || {};
+        _gpMem = { itens:M.itens || [], total:+M.total || 0, arquivo:M.arquivo || '',
+                   atualizadoEm:M.atualizadoEm || '', atualizadoPor:M.atualizadoPor || '' };
+      }
+    }
+  } catch (e) {}
+  try { if (!_rjPedIx.itens) { await rjCarregarPedIx(); gpPedidoIxLimpar(); } } catch (e) {}
+  try { await mdCarregarBasesGov(); } catch (e) {}
+  await acpDesenhar();
+}
+
+async function acpDesenhar(){
+  var data = acpDataSel();
+  if (_acpDia.data !== data) await acpCarregar(data);
+  var r = await acpAvaliar(data);
+  var box = document.getElementById('acp-corpo');
+  if (!box) return;
+  if (!r.temDist) {
+    box.innerHTML = '<div class="al al-a" style="font-size:12px">Não há distribuição guardada '
+      + 'em ' + cpDataBR(data) + '. O acompanhamento mede o que foi distribuído — sem '
+      + 'distribuição não há o que cobrar.</div>';
+    return;
+  }
+  var eu = acpEuSou(), adm = acpEhAdm();
+  var minha = r.lista.filter(function(p){ return cpNormNome(p.nome) === cpNormNome(eu); });
+  var ver = adm ? r.lista : (minha.length ? minha : []);
+  var h = '';
+
+  // ── o consolidado da equipe ──
+  if (adm) {
+    var t = r.total;
+    h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));'
+      + 'gap:12px;margin-bottom:1rem">'
+      + monCard('DISTRIBUÍDO', cpNum(t.distribuidos), cpNum(r.lista.length) + ' comprador(es)')
+      + monCard('FEITO', cpNum(t.feitos), t.pct + '% do distribuído', 'var(--vd)', 'var(--vdc)')
+      + monCard('PRECISA JUSTIFICAR', cpNum(t.aJustificar),
+          cpNum(t.justificados = t.aJustificar - t.pendentes) + ' já justificados',
+          t.aJustificar ? 'var(--am)' : 'var(--tx2)', t.aJustificar ? 'var(--amc)' : 'var(--cin)')
+      + monCard('SEM JUSTIFICATIVA', cpNum(t.pendentes), 'ninguém explicou ainda',
+          t.pendentes ? 'var(--vm)' : 'var(--vd)', t.pendentes ? 'var(--vmc)' : 'var(--vdc)')
+      + '</div>'
+      + '<div style="overflow:auto;margin-bottom:1.2rem"><table><thead><tr>'
+      +   '<th>Comprador</th><th style="text-align:right">Distribuído</th>'
+      +   '<th style="text-align:right">Feito</th><th style="text-align:right">%</th>'
+      +   '<th style="text-align:right" title="Pedido emitido na medição">Emitidos</th>'
+      +   '<th style="text-align:right" title="Parou em memorizado — pede justificativa">Memorizados</th>'
+      +   '<th style="text-align:right" title="Não aparece na medição">Sem registro</th>'
+      +   '<th>Abrir PATEC</th>'
+      +   '<th style="text-align:right">Negociação</th>'
+      +   '<th style="text-align:right">A justificar</th>'
+      +   '<th style="text-align:right">Sem justificativa</th>'
+      + '</tr></thead><tbody>';
+    r.lista.forEach(function(p){
+      var ruim = p.pendentes > 0;
+      h += '<tr' + (ruim ? ' style="background:var(--vmc)"' : '') + '>'
+        + '<td style="font-weight:600">' + cpEsc(p.nome) + '</td>'
+        + '<td style="text-align:right;font-weight:700">' + cpNum(p.distribuidos) + '</td>'
+        + '<td style="text-align:right;font-weight:700;color:var(--vd)">' + cpNum(p.feitos) + '</td>'
+        + '<td style="text-align:right;font-weight:800;color:'
+        +   (p.pct >= 80 ? 'var(--vd)' : (p.pct >= 50 ? 'var(--am)' : 'var(--vm)')) + '">'
+        +   p.pct + '%</td>'
+        + '<td style="text-align:right">' + cpNum(p.emissao.emitidos) + '</td>'
+        + '<td style="text-align:right;color:' + (p.emissao.memorizados ? 'var(--am)' : 'var(--tx2)')
+        +   '">' + cpNum(p.emissao.memorizados) + '</td>'
+        + '<td style="text-align:right;color:' + (p.emissao.sem ? 'var(--vm)' : 'var(--tx2)')
+        +   '">' + cpNum(p.emissao.sem) + '</td>'
+        + '<td style="font-size:10.5px">' + acpSeloAbrir(p) + '</td>'
+        + '<td style="text-align:right;font-size:10.5px">'
+        +   (p.neg.meta ? cpNum(p.neg.feito) + ' de ' + cpNum(p.neg.meta) : '—') + '</td>'
+        + '<td style="text-align:right">' + cpNum(p.aJustificar) + '</td>'
+        + '<td style="text-align:right;font-weight:700;color:'
+        +   (p.pendentes ? 'var(--vm)' : 'var(--vd)') + '">' + cpNum(p.pendentes) + '</td>'
+        + '</tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+
+  if (!ver.length) {
+    h += '<div class="al al-b" style="font-size:12px">Nada distribuído para <strong>'
+      + cpEsc(eu) + '</strong> em ' + cpDataBR(data) + '.</div>';
+    box.innerHTML = h;
+    return;
+  }
+
+  // ── a parte de cada um ──
+  ver.forEach(function(p){ h += acpBlocoPessoa(p, r); });
+  box.innerHTML = h;
+}
+
+function acpSeloAbrir(p){
+  if (!p.abrir.distribuidos) return '<span style="color:var(--tx2)">—</span>';
+  if (!p.abrir.declarou)
+    return '<span style="color:var(--am)">não informou · saíram ' + cpNum(p.abrir.saiu) + '</span>';
+  return '<span style="color:' + (p.abrir.bate ? 'var(--vd)' : 'var(--vm)') + ';font-weight:700">'
+    + (p.abrir.bate ? 'de acordo' : 'não bate') + '</span>'
+    + '<span style="color:var(--tx2)"> · informou ' + cpNum(p.abrir.declarado)
+    + ', saíram ' + cpNum(p.abrir.saiu) + '</span>';
+}
+
+function acpBlocoPessoa(p, r){
+  var podeEditar = acpEhAdm() || cpNormNome(p.nome) === cpNormNome(acpEuSou());
+  var h = '<div class="cd" style="border-top:3px solid var(--azm)">'
+    + '<div class="cd-t" style="justify-content:space-between">'
+    +   '<span>👤 ' + cpEsc(p.nome) + '</span>'
+    +   '<span style="font-size:11.5px;font-weight:500;color:'
+    +     (p.pendentes ? 'var(--vm)' : 'var(--vd)') + '">'
+    +     cpNum(p.feitos) + ' de ' + cpNum(p.distribuidos) + ' feitos'
+    +     (p.pendentes ? ' · ' + cpNum(p.pendentes) + ' sem justificativa' : ' · nada pendente')
+    +   '</span></div>';
+
+  // ── Abrir PATEC: o que ele declara ──
+  if (p.abrir.distribuidos) {
+    h += '<div style="font-size:11.5px;font-weight:700;margin:.2rem 0 .4rem">Abrir PATEC</div>'
+      + '<div style="font-size:10.5px;color:var(--tx2);line-height:1.6;margin-bottom:.5rem">'
+      + 'A abertura é automática e só aparece no MAPA do dia seguinte. Informe quantos você '
+      + 'abriu; quando o MAPA novo chegar, a coluna ao lado diz se bateu.'
+      + (r.temMapa && !r.mapaCarregado
+          ? ' <span style="color:var(--am)">O confronto está usando o MAPA de '
+            + cpDataBR(r.mapaDe) + '.</span>' : '')
+      + '</div>'
+      + '<div style="overflow:auto;margin-bottom:.9rem"><table><thead><tr><th>Fila</th>'
+      +   '<th style="text-align:right">Distribuídos</th>'
+      +   '<th style="text-align:right">Quantos você abriu</th>'
+      +   '<th style="text-align:right">Saíram do MAPA</th><th>Confere?</th>'
+      + '</tr></thead><tbody>';
+    ACP_ABRIR.forEach(function(f){
+      var pf = p.abrir.porFila[f] || { distribuidos:0, saiu:0, declarado:0 };
+      if (!pf.distribuidos) return;
+      h += '<tr><td>' + cpEsc(mdStatusNome(f)) + '</td>'
+        + '<td style="text-align:right;font-weight:700">' + cpNum(pf.distribuidos) + '</td>'
+        + '<td style="text-align:right">'
+        +   (podeEditar
+              ? '<input type="number" min="0" step="1" value="'
+                + (pf.declarou ? cpEsc(String(pf.declarado)) : '') + '"'
+                + ' placeholder="—" onchange="acpSalvarDeclarado(\'' + cpEsc(p.nome) + '\', \''
+                + f + '\', this.value)"'
+                + ' style="width:80px;text-align:right;font-size:11px;padding:3px 6px;'
+                + 'border:1px solid ' + (pf.declarou ? 'var(--vd)' : 'var(--brd)')
+                + ';border-radius:5px">'
+              : (pf.declarou ? cpNum(pf.declarado) : '—')) + '</td>'
+        + '<td style="text-align:right;font-weight:700">' + cpNum(pf.saiu) + '</td>'
+        + '<td style="font-size:10.5px;font-weight:700;color:'
+        +   (!pf.declarou ? 'var(--am)' : (pf.bate ? 'var(--vd)' : 'var(--vm)')) + '">'
+        +   (!pf.declarou ? 'falta informar' : (pf.bate ? 'de acordo' : 'não bate'))
+        +   (pf.declarou && !pf.bate
+                ? '<span style="font-weight:500;color:var(--tx2)"> · diferença de '
+                  + cpNum(Math.abs(pf.declarado - pf.saiu)) + '</span>' : '')
+        + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+
+  // ── emissão e negociação: o que pede justificativa ──
+  var pend = p.emissao.itens.filter(function(i){ return i.precisa; })
+    .concat(p.neg.itens.filter(function(i){ return i.precisa; }));
+  if (p.emissao.total || p.neg.meta) {
+    h += '<div style="font-size:11.5px;font-weight:700;margin:.2rem 0 .4rem">'
+      + 'Emissão e negociação</div>'
+      + '<div style="font-size:10.5px;color:var(--tx2);line-height:1.6;margin-bottom:.5rem">'
+      + 'Pedido <strong>emitido</strong> na medição não precisa de justificativa. '
+      + '<strong>Memorizado</strong> parou no meio, e o que não aparece na medição não começou — '
+      + 'esses pedem. Na negociação, a meta é o que foi distribuído no dia: '
+      + cpNum(p.neg.feito) + ' de ' + cpNum(p.neg.meta) + '.</div>';
+  }
+  if (!pend.length) {
+    h += '<div class="al al-ok" style="font-size:11.5px">✓ Nada a justificar aqui.</div>';
+  } else {
+    h += '<div style="overflow:auto;max-height:420px"><table><thead><tr>'
+      +   '<th>RC</th><th>Item</th><th>Oportunidade</th><th>Fila</th><th>O que está</th>'
+      +   '<th>Motivo</th><th>Comentário</th>'
+      + '</tr></thead><tbody>';
+    pend.forEach(function(i, idx) {
+      var est = i.fila && ACP_NEG.indexOf(i.fila) !== -1 ? 'sem data de negociação'
+              : (i.status === 'memorizado' ? 'memorizado' : 'não está na medição');
+      h += '<tr' + (i.justificado ? '' : ' style="background:var(--vmc)"') + '>'
+        + '<td style="font-weight:700;color:var(--az)">' + cpEsc(i.rc) + '</td>'
+        + '<td>' + cpEsc(i.seq) + '</td>'
+        + '<td>' + cpEsc(i.op || '—') + '</td>'
+        + '<td style="font-size:10.5px">' + cpEsc(mdStatusNome(i.fila)) + '</td>'
+        + '<td style="font-size:10.5px;font-weight:600;color:var(--am)">' + cpEsc(est) + '</td>'
+        + '<td>'
+        +   (podeEditar
+              ? '<select onchange="acpSalvarJust(\'' + cpEsc(p.nome) + '\', \'' + cpEsc(i.chave)
+                + '\', \'m\', this.value)" style="font-size:10.5px;padding:3px 6px;'
+                + 'border-radius:5px;border:1px solid '
+                + (i.motivo ? 'var(--vd)' : 'var(--vm)') + '">'
+                + '<option value="">— escolha o motivo —</option>'
+                + ACP_MOTIVOS.map(function(m){
+                    return '<option value="' + cpEsc(m) + '"'
+                      + (i.motivo === m ? ' selected' : '') + '>' + cpEsc(m) + '</option>'; }).join('')
+                + '</select>'
+              : cpEsc(i.motivo || '—')) + '</td>'
+        + '<td>'
+        +   (podeEditar
+              ? '<input type="text" value="' + cpEsc(i.comentario) + '" placeholder="opcional"'
+                + ' onchange="acpSalvarJust(\'' + cpEsc(p.nome) + '\', \'' + cpEsc(i.chave)
+                + '\', \'c\', this.value)"'
+                + ' style="width:200px;font-size:10.5px;padding:3px 6px;border-radius:5px;'
+                + 'border:1px solid var(--brd)">'
+              : cpEsc(i.comentario || '—')) + '</td>'
+        + '</tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  return h + '</div>';
+}
+
+function acpRecado(html){
+  var st = document.getElementById('acp-status');
+  if (!st) return;
+  st.innerHTML = html;
+  if (/guardado/.test(html)) setTimeout(function(){ if (st) st.innerHTML = ''; }, 2500);
+}
+
 // ══ MONTAR BASE — um lugar só para subir tudo (14/11) ════════════
 // Pedido do André: "está cada um em uma tela... vamos criar uma ABA
 // apenas para subir os uploads... assim não corremos o risco de
@@ -14900,7 +15370,8 @@ function mbRender(){
 }
 
 function cpSubTab(qual, btn){
-  ['base','pedidos','mapa','ctrlpatec','ctrlneg','statusb','rejeite','monitor'].forEach(function(k){
+  ['base','pedidos','mapa','acomp','ctrlpatec','ctrlneg','statusb','rejeite','monitor']
+    .forEach(function(k){
     var el = document.getElementById('cp-sub-' + k);
     if (el) el.style.display = (qual === k) ? 'block' : 'none';
     var b = document.getElementById('cp-sub-btn-' + k);
@@ -14915,6 +15386,7 @@ function cpSubTab(qual, btn){
   // fora: dentro do ADM quem carregava era o setAdmTab, e no módulo novo
   // não havia ninguém — por isso o dia e o histórico vinham vazios.
   if (qual === 'base')      mbAbrir();
+  if (qual === 'acomp')     acpAbrir();
   if (qual === 'pedidos')   cpAbrir();
   if (qual === 'mapa')      mdAbrir();
   if (qual === 'ctrlpatec') ctpAbrir();
