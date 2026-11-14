@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '14/11 20:50';
+var GTO_BUILD = '14/11 21:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1183,8 +1183,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         <div id="gp-cards"></div>
         <div style="font-size:10.5px;color:var(--tx2);margin-top:10px;line-height:1.6">
           Os cards saem da coluna <strong>ANALISTA_AUTOMATICO</strong> do MAPA do dia ·
-          em <strong>Negociar preço</strong> e <strong>DPV</strong>, a data que o comprador digitar
-          conta <strong>2 dias úteis</strong> e o item passa para <strong>Emitir pedido</strong> ·
+          em <strong>Negociar preço</strong> e <strong>DPV</strong>, vale <strong>só a data
+          digitada aqui</strong> — ela conta <strong>2 dias úteis</strong> e o item passa para
+          <strong>Emitir pedido</strong> ·
           em <strong>PATEC</strong> e <strong>PATEC manual</strong>, quem dá a data é a coluna
           <strong>NEGOCIACAO</strong> do levelboard · os dois de <strong>Abrir PATEC</strong> não têm
           negociação: eles ainda percorrem o fluxo do PATEC e só viram pedido quando voltarem
@@ -18438,6 +18439,8 @@ function gpChave(it){ return String(it.rc || '') + '|' + String(it.seq || ''); }
 // fluxo do PATEC e só fica apto a pedido quando reaparecer no MAPA como
 // Emitir Pedido PATEC. Então aqui não há data, não há prazo e nada migra.
 var GOV_SEM_NEGOCIACAO = ['patecgm','pateciden'];
+// Os dois cards em que SÓ a data digitada no dash conta.
+var GOV_NEG_SO_DIGITADA = ['negociar','dpv'];
 function gpSemNegociacao(ch){ return GOV_SEM_NEGOCIACAO.indexOf(ch) !== -1; }
 
 // ══ A TRATATIVA DO CARD EMITIR PEDIDO (12/11) ════════════════════
@@ -18768,7 +18771,22 @@ function gpEstado(it){
   // própria aba do MAPA do dia (coluna NEGOCIACAO das abas Emitir pedido
   // patec/manual); por último a do levelboard, que é upload à parte e pode
   // estar mais velho.
-  var dataNeg = man.data || it.negociacao || lb.negociacao || '';
+  //
+  // MENOS nos dois cards de negociação (14/11). O André: "os cards
+  // negociar preço e negociar acima do limite DPV sejam contabilizados
+  // apenas pelo dash — se a RC entrar neste card, precisa ser
+  // contabilizada apenas por ele". Ali a negociação é trabalho do
+  // comprador, e o que prova que foi feito é ele ter digitado a data
+  // aqui. Levelboard e aba do MAPA continuam valendo para PATEC e PATEC
+  // Manual, onde a data vem de fora mesmo.
+  //
+  // Isto também fecha uma divergência: o Controle de negociação sempre
+  // contou só a digitada, então um item com data vinda do levelboard
+  // saía da fila na Governança e continuava "em aberto" — e virava
+  // "vencido" — no controle.
+  var dataNeg = GOV_NEG_SO_DIGITADA.indexOf(ch) !== -1
+    ? (man.data || '')
+    : (man.data || it.negociacao || lb.negociacao || '');
   var libera  = dataNeg ? gpMaisDiasUteis(dataNeg, 2) : '';
   var liberado = !!libera && libera <= cpHojeISO();
   var card = ch;
@@ -18790,7 +18808,9 @@ function gpEstado(it){
            emiComentario: tr.comentario || '', emiConclusao: tr.conclusao || '',
            emiEfeito: efeito, retido: retido, concluido: concluido,
            fonte: man.data ? 'digitada'
-                 : (it.negociacao ? 'aba do MAPA' : (lb.negociacao ? 'levelboard' : '')),
+                 : (GOV_NEG_SO_DIGITADA.indexOf(ch) !== -1 ? ''
+                    : (it.negociacao ? 'aba do MAPA'
+                       : (lb.negociacao ? 'levelboard' : ''))),
            fornecedor: it.fornGanhador || lb.fornecedor || '',
            nmPedido: it.nmPedido || lb.nmPedido || '' };
 }
@@ -19123,7 +19143,9 @@ function gpRenderDetalhe(){
     h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:8px">'
       + 'Digite a data em que negociou. Dois dias úteis depois, o item sai deste card e '
       + 'aparece em <strong>Emitir pedido</strong>, mesmo que o MAPA do dia continue trazendo '
-      + 'ele como negociação.</div>';
+      + 'ele como negociação. <strong>Só a data digitada aqui conta</strong>: nestes dois cards '
+      + 'o levelboard e a coluna NEGOCIACAO do MAPA não entram, para o card e o Controle de '
+      + 'negociação falarem do mesmo número.</div>';
   }
   if (comDono) {
     var semDono = lista.filter(function(x){ return !gpDonoDe(x.e.chave); }).length;
@@ -25478,7 +25500,9 @@ function mdDataNegociacao(it){
   var man = (typeof _gpNeg !== 'undefined' && _gpNeg[k]) ? _gpNeg[k] : {};
   var lb  = (typeof _gpLb !== 'undefined' && _gpLb.itens) ? (_gpLb.itens[k] || {}) : {};
   // mesma ordem da Governança: a digitada vence, depois a da aba do
-  // MAPA, por último a do levelboard.
+  // MAPA, por último a do levelboard — e, nos dois cards de negociação,
+  // SÓ a digitada (14/11).
+  if (GOV_NEG_SO_DIGITADA.indexOf(it.statusChave) !== -1) return man.data || '';
   return man.data || it.negociacao || lb.negociacao || '';
 }
 
