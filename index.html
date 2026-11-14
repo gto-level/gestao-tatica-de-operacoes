@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '12/11 23:30';
+var GTO_BUILD = '14/11 15:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -16211,6 +16211,18 @@ var GOV_CARDS = [
   { chave:'statusb',    nome:'Status B',                    cor:'var(--am)',  fundo:'var(--amc)', proprio:true },
   { chave:'memorizados',nome:'Itens memorizados',            cor:'var(--azm)', fundo:'var(--azc)', proprio:true }
 ];
+// Os cards que vêm do MAPA — são os que passam pela distribuição e,
+// por isso, têm dono e número de pedido para mostrar. Os outros
+// (rejeite, cockpit, status B, memorizados) têm base própria e dono
+// próprio, que sai de outro cruzamento.
+var GOV_COM_DONO = ['emitir','patec','patecman','negociar','dpv','pateciden','patecgm'];
+// Onde o comprador escreve comentário e escolhe a conclusão.
+var GOV_TRATATIVA = ['emitir','patec','patecman'];
+// Onde o número do pedido faz sentido: só nos três de emissão. Nos
+// outros o item ainda não virou pedido, e uma coluna sempre vazia só
+// ocupa espaço e levanta dúvida.
+var GOV_COM_PEDIDO = ['emitir','patec','patecman'];
+
 var GOV_LINHAS = [
   ['emitir','patec','patecman','negociar','dpv','cockpit'],
   ['pateciden','patecgm','rejeitados','rejsup','statusb','memorizados']
@@ -18377,8 +18389,12 @@ async function gpGravarDono(lista, data){
 function gpEstado(it){
   var k = gpChave(it);
   if (gpSemNegociacao(it.statusChave)) {
+    // Abrir PATEC não tem negociação nem tratativa; os campos vão
+    // vazios para quem ler este objeto não precisar checar cada um
     return { chave:k, origem:it.statusChave, card:it.statusChave,
              comentario:'', dataNeg:'', libera:'', liberado:false, fonte:'',
+             emiComentario:'', emiConclusao:'', emiEfeito:'',
+             retido:false, concluido:false,
              fornecedor:'', nmPedido:'' };
   }
   var man = _gpNeg[k] || {};
@@ -18398,7 +18414,7 @@ function gpEstado(it){
   // Só vale para quem está em Emitir pedido: a regra é de lá. Item que
   // o MAPA já traz em outra fila segue o MAPA.
   var tr = emiDe(k), efeito = '', retido = false, concluido = false;
-  if (card === 'emitir') {
+  if (GOV_TRATATIVA.indexOf(card) !== -1) {
     efeito = emiEfeito(k);
     if (efeito === 'fora') { card = ''; concluido = true; }
     else if (efeito === 'retido') { retido = true; }
@@ -18563,7 +18579,7 @@ async function gpAbrirCard(ch){
   }
   // os três cards de emissão precisam do mesmo índice: é dele que sai a
   // coluna Pedido, virada pela chave RC + item
-  if (_gpCard === 'emitir' || _gpCard === 'patec' || _gpCard === 'patecman') {
+  if (GOV_COM_PEDIDO.indexOf(_gpCard) !== -1) {
     if (!_rjPedIx.itens) {
       await rjCarregarPedIx();
       gpPedidoIxLimpar();
@@ -18608,9 +18624,18 @@ function gpRenderDetalhe(){
   });
   var editavel = (_gpCard === 'negociar' || _gpCard === 'dpv');
   var dePatec  = (_gpCard === 'patec' || _gpCard === 'patecman');
-  var deEmitir = (_gpCard === 'emitir');
-  // os três cards de emissão mostram quem é o responsável, antes da RC
-  var comDono = (_gpCard === 'emitir' || _gpCard === 'patec' || _gpCard === 'patecman');
+  // ── onde a tratativa aparece (14/11) ──
+  // Comentário e Conclusão nasceram no Emitir pedido e passaram a valer
+  // também nos dois de PATEC: é a mesma decisão de desfecho, tomada
+  // sobre o mesmo tipo de item.
+  var deEmitir = (GOV_TRATATIVA.indexOf(_gpCard) !== -1);
+  // ── e o dono, em TODOS os cards do MAPA (14/11) ──
+  // "Os itens distribuídos precisam ir até o final com o mesmo
+  // comprador... uma vez feita a distribuição os nomes devem já
+  // aparecer nos cards." O índice é por RC+item, não por fila, então
+  // ele segue o item quando ele muda de card.
+  var comDono = (GOV_COM_DONO.indexOf(_gpCard) !== -1);
+  var comPedido = (GOV_COM_PEDIDO.indexOf(_gpCard) !== -1);
   var semNeg   = gpSemNegociacao(_gpCard);
   // Dias parado: nos dois de PATEC conta da data de NEGOCIAÇÃO, que é
   // data real e vale já no primeiro dia; em Emitir Pedido não existe
@@ -18648,7 +18673,7 @@ function gpRenderDetalhe(){
   h += '<div style="overflow:auto;max-height:560px"><table><thead><tr>'
     + (comDono ? '<th title="quem recebeu o item na distribuição">Comprador</th>' : '')
     + '<th>RC</th><th>Item</th>'
-    + (comDono ? '<th title="achado na medição do dia pela chave RC + item">Pedido</th>' : '')
+    + (comPedido ? '<th title="achado na medição do dia pela chave RC + item">Pedido</th>' : '')
     + '<th>Oportunidade</th><th>Item op.</th>'
     + '<th style="text-align:right">SLA</th><th>Segmento</th>'
     + (dePatec ? '<th>Fornecedor ganhador</th><th>NM do pedido</th>' : '')
@@ -18670,7 +18695,7 @@ function gpRenderDetalhe(){
           : '')
       + '<td style="font-weight:700;color:var(--az)">' + cpEsc(it.rc) + '</td>'
       + '<td>' + cpEsc(it.seq) + '</td>'
-      + (comDono
+      + (comPedido
           ? '<td style="font-weight:600">' + cpEsc(gpPedidoDe(it.rc, it.seq)) + '</td>' : '')
       + '<td>' + cpEsc(it.op || '—') + '</td>'
       + '<td>' + cpEsc(it.itemOp || '—') + '</td>'
@@ -18740,22 +18765,25 @@ function gpRenderDetalhe(){
     var semDono = lista.filter(function(x){ return !gpDonoDe(x.e.chave); }).length;
     h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:8px;line-height:1.7">'
       + 'A coluna <strong>Comprador</strong> é quem recebeu o item na distribuição do MAPA. '
-      + 'Item já distribuído <strong>continua com o mesmo comprador</strong> nas próximas '
-      + 'distribuições, até ser concluído. '
-      + 'A coluna <strong>Pedido</strong> vem da <strong>medição do dia</strong>, procurada '
-      + 'pela chave <strong>RC + item</strong> — em branco quer dizer que o item ainda não '
-      + 'virou pedido na medição'
-      + ((_rjPedIx && _rjPedIx.arquivo)
-          ? ' (medição de ' + cpDataBR(String(_rjPedIx.atualizadoEm || '').slice(0, 10)) + ')'
-          : '; <strong style="color:var(--am)">nenhuma medição lida ainda</strong>')
-      + '.'
+      + 'Item já distribuído <strong>continua com o mesmo comprador</strong> até ser '
+      + 'concluído, inclusive quando muda de card. '
+      + (comPedido
+          ? 'A coluna <strong>Pedido</strong> vem da <strong>medição do dia</strong>, procurada '
+            + 'pela chave <strong>RC + item</strong> — em branco quer dizer que o item ainda não '
+            + 'virou pedido na medição'
+            + ((_rjPedIx && _rjPedIx.arquivo)
+                ? ' (medição de ' + cpDataBR(String(_rjPedIx.atualizadoEm || '').slice(0, 10)) + ')'
+                : '; <strong style="color:var(--am)">nenhuma medição lida ainda</strong>')
+            + '.'
+          : '')
       + (semDono ? ' <strong>' + cpNum(semDono) + '</strong> item(ns) ainda não entraram em '
                    + 'nenhuma distribuição.' : '')
       + '</div>';
   }
   if (deEmitir) {
     h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:8px;line-height:1.8">'
-      + 'A <strong>conclusão</strong> decide o destino do item: '
+      + 'A <strong>conclusão</strong> decide o destino do item neste card e nos outros dois '
+      + 'de emissão: '
       + '<strong>PATEC</strong> manda para Abrir PATEC ID não · '
       + '<strong>Negociação</strong> manda para Negociar preço, levando o comentário · '
       + '<strong>Devolução</strong> e <strong>Republicação</strong> concluem o item, que sai '
@@ -22646,12 +22674,13 @@ function gpBaixarExcel(){
     // o Excel leva as mesmas colunas da tela: comprador e pedido nos três
     // cards de emissão, e a tratativa no Emitir pedido. Planilha que não
     // bate com a tela foi o que já deu confusão aqui mais de uma vez.
-    var _comDono = (_gpCard === 'emitir' || _gpCard === 'patec' || _gpCard === 'patecman');
-    var _comTrat = (_gpCard === 'emitir');
+    var _comDono = (GOV_COM_DONO.indexOf(_gpCard) !== -1);
+    var _comPed  = (GOV_COM_PEDIDO.indexOf(_gpCard) !== -1);
+    var _comTrat = (GOV_TRATATIVA.indexOf(_gpCard) !== -1);
     var cab = ['Card']
       .concat(_comDono ? ['Comprador'] : [])
       .concat(['RC','Item'])
-      .concat(_comDono ? ['Pedido'] : [])
+      .concat(_comPed ? ['Pedido'] : [])
       .concat(['Oportunidade','Item oport.','SLA','Segmento','Status do MAPA',
                'Data da negociação','Apto a pedido','Fornecedor ganhador','NM do pedido',
                'Comentário'])
@@ -22663,7 +22692,7 @@ function gpBaixarExcel(){
       aoa.push([govNomeCard(e.card)]
         .concat(_comDono ? [gpDonoDe(e.chave)] : [])
         .concat([it.rc, it.seq])
-        .concat(_comDono ? [gpPedidoDe(it.rc, it.seq)] : [])
+        .concat(_comPed ? [gpPedidoDe(it.rc, it.seq)] : [])
         .concat([it.op || '', it.itemOp || '', it.sla || 0,
                 it.seg || '', it.status || '',
                 e.dataNeg ? cpDataBR(e.dataNeg) : '', e.libera ? cpDataBR(e.libera) : '',
@@ -25114,6 +25143,52 @@ function mdAptoPedido(it, dia){
 // item vai COPIADO: a base lida do arquivo não é tocada, senão o
 // resumo do dia e a exportação com as colunas originais mudariam de
 // significado no meio do caminho.
+// ══ O PRAZO DA OPORTUNIDADE (14/11) ══════════════════════════════
+// Regra nova do André, e ele foi explícito: "essa seria a PRIMEIRA
+// regra a ser atendida". Sai da coluna P do MAPA, DATA_DE_ENCERRAMENTO.
+//
+// O prazo é quanto tempo faz que a oportunidade encerrou — hoje menos a
+// data de encerramento. Ele escreveu a conta na ordem inversa
+// ("encerramento - hoje"), mas o arquivo dele de 14/11 resolve a
+// dúvida: encerramento menos hoje vai de -194 a +5, então NENHUM item
+// chegaria a 60 por esse caminho e a regra nunca valeria para ninguém.
+// Pelo outro lado há 80 itens em Abrir PATEC ID não, 35 em Abrir PATEC
+// GM, 558 em Analisar PATEC Finalizado — oportunidade encerrada há
+// muito tempo e item ainda parado, que é exatamente o que uma regra de
+// prioridade existe para pescar.
+//
+// O campo já era lido (prazoDias); o que faltava era usá-lo.
+var MD_PRAZO_OP_PRIO = 60;
+
+function mdPrazoOpPrio(it){
+  if (!it) return false;
+  var d = it.prazoDias;
+  return d != null && d !== '' && (+d) >= MD_PRAZO_OP_PRIO;
+}
+
+// Quantos itens e quantas RCs estão nessa regra, por atividade. O André
+// pediu o número de RCs, não de itens: é por RC que a equipe trabalha.
+function mdContaPrazoOp(dia){
+  var r = { total:0, rcs:0, porAtv:{}, semData:0 };
+  var vistas = {}, vistasAtv = {};
+  var diaRef = dia || mdDataSel();
+  ((_mdBase && _mdBase.itens) || []).forEach(function(it){
+    var ch = mdPromoveParaEmitir(it, diaRef) ? 'emitir' : it.statusChave;
+    var ef = mdEfeitoEmitir(it);
+    if (ef === 'fora' || ef === 'retido') return;
+    if (ef) ch = ef;
+    if (it.prazoDias == null || it.prazoDias === '') { r.semData++; return; }
+    if (!mdPrazoOpPrio(it)) return;
+    r.total++;
+    if (!vistas[it.rc]) { vistas[it.rc] = 1; r.rcs++; }
+    var o = r.porAtv[ch] || (r.porAtv[ch] = { itens:0, rcs:0 });
+    o.itens++;
+    var kv = ch + '|' + it.rc;
+    if (!vistasAtv[kv]) { vistasAtv[kv] = 1; o.rcs++; }
+  });
+  return r;
+}
+
 var MD_VIRA_EMITIR = ['negociar', 'dpv'];
 
 function mdPromoveParaEmitir(it, dia){
@@ -25177,7 +25252,7 @@ function mdContaEmissao(dia){
 // seguinte como se estivesse pronto para emitir, e o marcado como
 // Devolução continuaria sendo repartido depois de concluído.
 function mdEfeitoEmitir(it){
-  if (!it || it.statusChave !== 'emitir') return '';
+  if (!it || GOV_TRATATIVA.indexOf(it.statusChave) === -1) return '';
   try { return emiEfeito(String(it.rc || '') + '|' + String(it.seq || '')); }
   catch (e) { return ''; }
 }
@@ -25217,7 +25292,8 @@ function mdBlocos(itens){
     var k = it.statusChave === 'rejeitado' ? ('REJ:' + it.rc)
           : (it.op ? ('OP:' + it.op) : ('RC:' + (it.rc || ('~' + i))));
     if (!mapa[k]) {
-      mapa[k] = { id:k, itens:[], slaMax:0, porStatus:{}, statuses:[], tipoEmitir:'', prio:false };
+      mapa[k] = { id:k, itens:[], slaMax:0, porStatus:{}, statuses:[], tipoEmitir:'',
+                  prio:false, prioOp:false, prazoOpMax:0 };
       MD_STATUS.forEach(function(x){ mapa[k].porStatus[x.chave] = 0; });
     }
     var b = mapa[k];
@@ -25225,6 +25301,13 @@ function mdBlocos(itens){
     b.porStatus[it.statusChave] = (b.porStatus[it.statusChave] || 0) + 1;
     if (it.sla > b.slaMax) b.slaMax = it.sla;
     if (it.prioritario) b.prio = true;
+    // 14/11: a primeira regra é o prazo da oportunidade. Basta um item
+    // do bloco estar nela — a oportunidade não se divide, então ela
+    // inteira sobe junto.
+    if (mdPrazoOpPrio(it)) {
+      b.prioOp = true;
+      if (it.prazoDias > (b.prazoOpMax || 0)) b.prazoOpMax = +it.prazoDias || 0;
+    }
     if (it.statusChave === 'emitir' && !b.tipoEmitir && (it.tipo === 'L' || it.tipo === 'Q')) {
       b.tipoEmitir = it.tipo;
     }
@@ -25240,6 +25323,11 @@ function mdBlocos(itens){
   // PATEC. Depois SLA maior; empate: bloco maior e depois a RC, para a
   // ordem não mudar de uma rodada para outra
   out.sort(function(a, b){
+    // o prazo da oportunidade vem antes de tudo, e entre dois dessa
+    // regra ganha o que está encerrado há mais tempo
+    if (!!b.prioOp !== !!a.prioOp) return b.prioOp ? 1 : -1;
+    if (a.prioOp && b.prioOp && b.prazoOpMax !== a.prazoOpMax)
+      return b.prazoOpMax - a.prazoOpMax;
     if (!!b.prio !== !!a.prio) return b.prio ? 1 : -1;
     if (b.slaMax !== a.slaMax) return b.slaMax - a.slaMax;
     if (b.n !== a.n) return b.n - a.n;
@@ -25345,6 +25433,10 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
         if (a.__pos !== b.__pos) return a.__pos - b.__pos;
         if (a.__fila !== b.__fila) return a.__fila < b.__fila ? -1 : 1;
       }
+      // 14/11: dentro da etapa, o prazo da oportunidade manda primeiro
+      if (!!b.prioOp !== !!a.prioOp) return b.prioOp ? 1 : -1;
+      if (a.prioOp && b.prioOp && b.prazoOpMax !== a.prazoOpMax)
+        return b.prazoOpMax - a.prazoOpMax;
       if (!!b.prio !== !!a.prio) return b.prio ? 1 : -1;
       if (b.slaMax !== a.slaMax) return b.slaMax - a.slaMax;
       if (b.n !== a.n) return b.n - a.n;
@@ -25459,6 +25551,7 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     b.itens.forEach(function(it){
       it.pessoa = melhor;
       it.mantido = !!b.__mantido;
+      it.prioPrazoOp = !!b.prioOp;
       it.foraAtividade = at.indexOf(mdAtvDe(it.statusChave)) === -1;
       pm.itens.push(it); pm.n++;
       pm.porStatus[it.statusChave] = (pm.porStatus[it.statusChave] || 0) + 1;
@@ -26111,6 +26204,16 @@ function mdRenderResumo(){
   // de PATEC ao lado. Antes era preciso ir até a Governança para
   // saber isso, e os números não batiam.
   var _em = mdContaEmissao(mdDataSel());
+  // 14/11: quantas RCs estão na regra do prazo da oportunidade, em cada
+  // card. É o mesmo tipo de informação do "+ 23 da negociação": o
+  // número de cima não diz sozinho o que vai ser priorizado.
+  var _po = mdContaPrazoOp(mdDataSel());
+  var selo = function(ch){
+    var o = _po.porAtv[ch];
+    if (!o || !o.rcs) return '';
+    return ' · <strong style="color:var(--vm)">' + cpNum(o.rcs) + ' RC(s) no prazo da '
+         + 'oportunidade</strong>';
+  };
   var h = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));'
     +   'gap:.75rem;margin-top:.9rem">'
     + card('A EMITIR — EMITIR PEDIDO', cpNum(_em.emitir.total),
@@ -26118,17 +26221,32 @@ function mdRenderResumo(){
         + (_em.emitir.daNegociacao
             ? ' · <strong style="color:var(--vd)">+ ' + cpNum(_em.emitir.daNegociacao)
               + ' da negociação</strong>'
-            : ' · nenhum vindo da negociação'),
+            : ' · nenhum vindo da negociação')
+        + selo('emitir'),
         'var(--az)')
     + card('A EMITIR — PEDIDO PATEC', cpNum(_em.patec.aptos),
         'de ' + cpNum(_em.patec.total) + ' no MAPA · '
-        + cpNum(_em.patec.total - _em.patec.aptos) + ' aguardando os 2 dias',
+        + cpNum(_em.patec.total - _em.patec.aptos) + ' aguardando os 2 dias'
+        + selo('patec'),
         'var(--vd)')
     + card('A EMITIR — PATEC MANUAL', cpNum(_em.patecman.aptos),
         'de ' + cpNum(_em.patecman.total) + ' no MAPA · '
-        + cpNum(_em.patecman.total - _em.patecman.aptos) + ' aguardando os 2 dias',
+        + cpNum(_em.patecman.total - _em.patecman.aptos) + ' aguardando os 2 dias'
+        + selo('patecman'),
         'var(--azm)')
     + '</div>'
+    + (_po.rcs
+        ? '<div style="font-size:10.5px;color:var(--tx2);margin-top:6px;line-height:1.6">'
+          + '⏱ <strong style="color:var(--vm)">' + cpNum(_po.rcs) + ' RC(s)</strong> ('
+          + cpNum(_po.total) + ' itens) estão na regra do <strong>prazo da oportunidade</strong>: '
+          + 'a oportunidade encerrou há <strong>' + cpNum(MD_PRAZO_OP_PRIO) + ' dias ou mais</strong> '
+          + '(coluna DATA_DE_ENCERRAMENTO do MAPA) e o item ainda não saiu. Eles são os '
+          + '<strong>primeiros</strong> a ser distribuídos, antes do prioritário da Abertura e '
+          + 'do SLA.'
+          + (_po.semData ? ' ' + cpNum(_po.semData) + ' item(ns) estão sem data de encerramento '
+                           + 'e ficam fora desta regra.' : '')
+          + '</div>'
+        : '')
     + (_em.emitir.daNegociacao
         ? '<div style="font-size:10.5px;color:var(--tx2);margin-top:6px;line-height:1.6">'
           + '↳ Os <strong>' + cpNum(_em.emitir.daNegociacao) + '</strong> da negociação são itens '
@@ -26151,6 +26269,8 @@ function mdRenderResumo(){
           + ' aguardando os 2 dias'
           + (ap.semData ? ' (' + cpNum(ap.semData) + ' sem data)' : '');
     }
+    // a regra do prazo da oportunidade vale para TODOS os cards
+    sub += selo(x.chave);
     h += card(x.nome.toUpperCase(), cpNum(n), sub, x.cor);
   });
   var _espera = (aptos.patec.total - aptos.patec.aptos)
