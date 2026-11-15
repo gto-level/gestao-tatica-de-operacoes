@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/11 12:30';
+var GTO_BUILD = '15/11 13:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15693,6 +15693,28 @@ function jadmRender(){
 //  · frentes com base própria (Pedidos, Publicação, Devolução): o
 //    documento config/jornada_frente que o ADM de cada uma preenche.
 var JGE_DOC_FRENTE = 'jornada_frente';
+// BUG (15/11): no PATEC a SAÍDA das férias é gravada em ISO e o RETORNO
+// em BR ('25/08/2026') — a tela de lá converte na hora de usar. Aqui a
+// data crua entrava na comparação de string, e '2026-11-15' <=
+// '25/08/2026' dá true, então um período de agosto aparecia aberto em
+// novembro e em qualquer outro dia. Agora toda data passa por aqui
+// antes de virar dado, venha de onde vier.
+function jgeIso(v){
+  if (v == null || v === '') return '';
+  if (v instanceof Date) return isNaN(v.getTime()) ? '' : v.toISOString().slice(0, 10);
+  if (typeof v === 'object' && typeof v.toDate === 'function') {   // Timestamp
+    try { return v.toDate().toISOString().slice(0, 10); } catch (e) { return ''; }
+  }
+  var t = String(v).trim();
+  var br = t.match(/^(\d{2})[\/.-](\d{2})[\/.-](\d{4})$/);
+  if (br) return br[3] + '-' + br[2] + '-' + br[1];
+  var iso = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[0];
+  return '';                                   // formato que não dá para ler
+}
+function jgeMin(h, m, seg){
+  return (Math.round(+h || 0) * 60) + Math.round(+m || 0) + Math.round((+seg || 0) / 60);
+}
 // Quem entra na consolidação. As frentes saem da MESMA lista que faz os
 // tópicos de jornada aparecerem no menu, então frente nova entra aqui
 // sozinha, sem ninguém precisar lembrar desta tela.
@@ -15741,7 +15763,8 @@ function jgeFimDeSemana(iso){
 
 // ── a leitura, uma frente por vez ───────────────────────────────
 async function jgeLerFonte(f){
-  var out = { ok:false, erro:'', ferias:[], folgas:[], banco:[], equipe:[] };
+  var out = { ok:false, erro:'', ferias:[], folgas:[], banco:[], he:[], equipe:[],
+              semData:0 };
   var db = null;
   try {
     // Frente com projeto próprio precisa de sessão naquele projeto. Se o
@@ -15764,27 +15787,53 @@ async function jgeLerFonte(f){
     if (f.tipo === 'patec') {
       var dF = await db.collection('config').doc('ferias').get();
       var dB = await db.collection('config').doc('banco_horas').get();
+      var dH = await db.collection('config').doc('banco_he').get();
       var lf = (dF && dF.exists ? (dF.data() || {}).lista : null) || [];
       var lb = (dB && dB.exists ? (dB.data() || {}).lista : null) || [];
+      var lh = (dH && dH.exists ? (dH.data() || {}).lista : null) || [];
       var nomes = {};
       lf.forEach(function(r){
         if (!r || !r.colab) return;
         nomes[r.colab] = 1;
-        if (!r.saida) return;      // linha vazia da equipe, sem período
+        var saida = jgeIso(r.saida);
+        if (!r.saida) return;                  // linha vazia da equipe, sem período
+        if (!saida) { out.semData++; return; } // data que não dá para ler
         var dias = Math.max(1, Math.round(+r.dias || 30));
-        out.ferias.push({ colab:r.colab, saida:r.saida, dias:dias,
-          retorno:r.retorno || jorRetorno(r.saida, dias), obs:r.status || '' });
+        out.ferias.push({ colab:r.colab, saida:saida, dias:dias,
+          retorno:jgeIso(r.retorno) || jorRetorno(saida, dias), obs:r.status || '' });
       });
       lb.forEach(function(r){
         if (!r || !r.colab) return;
         nomes[r.colab] = 1;
-        var extras = (Math.round(+r.horas_h || 0) * 60) + Math.round(+r.horas_m || 0)
-                   + Math.round((+r.horas_s || 0) / 60);
+        var extras = jgeMin(r.horas_h, r.horas_m, r.horas_s);
         var usadas = Math.round(+r.folgas_usadas || 0);
         out.banco.push({ colab:r.colab, min:extras - (usadas * 8 * 60), extrasMin:extras,
                          folgasUsadas:usadas, obs:r.destino || '' });
         (r.datas_folgas || []).forEach(function(d){
-          if (d && d.data) out.folgas.push({ colab:r.colab, data:d.data, obs:d.obs || '' });
+          var dt = jgeIso(d && d.data);
+          if (dt) out.folgas.push({ colab:r.colab, data:dt, obs:(d && d.obs) || '',
+                                    horasMin:null });
+        });
+      });
+      // O banco de horas detalhado: um período por mês, com vencimento e
+      // o histórico de compensação de cada um. É daqui que saem as
+      // colunas de meses em aberto e as horas já folgadas.
+      lh.forEach(function(b){
+        if (!b || !b.colab) return;
+        nomes[b.colab] = 1;
+        (b.periodos || []).forEach(function(pr){
+          var tot = jgeMin(pr.he_h, pr.he_m, 0);
+          var usos = (pr.usos || []).map(function(u){
+            return { data:jgeIso(u && u.data), min:jgeMin(u && u.h, u && u.m, 0),
+                     tipo:(u && u.tipo) || 'folga', obs:(u && u.obs) || '',
+                     automatico:!!(u && u.automatico) };
+          });
+          var usado = usos.reduce(function(x, u){ return x + u.min; }, 0);
+          out.he.push({ colab:b.colab, mesRef:pr.mes_ref || '',
+                        vencimento:jgeIso(pr.vencimento), totalMin:tot,
+                        usadoMin:usado, saldoMin:tot - usado,
+                        arquivado:!!pr.arquivado, motivo:pr.arquivado_motivo || '',
+                        obs:pr.obs || '', usos:usos });
         });
       });
       out.equipe = Object.keys(nomes);
@@ -15794,13 +15843,16 @@ async function jgeLerFonte(f){
       out.equipe = (j.equipe || []).slice();
       (j.ferias || []).forEach(function(r){
         if (!r || !r.colab || !r.saida) return;
+        var saida = jgeIso(r.saida);
+        if (!saida) { out.semData++; return; }
         var dias = Math.max(1, Math.round(+r.dias || 30));
-        out.ferias.push({ colab:r.colab, saida:r.saida, dias:dias,
-          retorno:r.retorno || jorRetorno(r.saida, dias), obs:r.obs || '' });
+        out.ferias.push({ colab:r.colab, saida:saida, dias:dias,
+          retorno:jgeIso(r.retorno) || jorRetorno(saida, dias), obs:r.obs || '' });
       });
       (j.folgas || []).forEach(function(r){
-        if (r && r.colab && r.data) out.folgas.push({ colab:r.colab, data:r.data,
-                                                      obs:r.obs || '' });
+        var dt = jgeIso(r && r.data);
+        if (r && r.colab && dt) out.folgas.push({ colab:r.colab, data:dt,
+                                                  obs:r.obs || '', horasMin:null });
       });
       (j.banco || []).forEach(function(r){
         if (!r || !r.colab) return;
@@ -15822,18 +15874,20 @@ async function jgeLerFonte(f){
 async function jgeCarregar(){
   var fontes = jgeFontes();
   var d = { em:new Date().toISOString(), fontes:[], ferias:[], folgas:[], banco:[],
-            equipe:[] };
+            he:[], equipe:[] };
   for (var i = 0; i < fontes.length; i++) {
     var f = fontes[i];
     var r = await jgeLerFonte(f);
     d.fontes.push({ chave:f.chave, nome:f.nome, ico:f.ico, tipo:f.tipo, nota:f.nota,
                     ok:r.ok, erro:r.erro, pessoas:r.equipe.length,
-                    nFerias:r.ferias.length, nFolgas:r.folgas.length });
+                    nFerias:r.ferias.length, nFolgas:r.folgas.length,
+                    nHe:r.he.length, semData:r.semData });
     var marca = function(x){ x.fonte = f.chave; x.fonteNome = f.nome; x.ico = f.ico;
                              return x; };
     r.ferias.forEach(function(x){ d.ferias.push(marca(x)); });
     r.folgas.forEach(function(x){ d.folgas.push(marca(x)); });
     r.banco.forEach(function(x){ d.banco.push(marca(x)); });
+    r.he.forEach(function(x){ d.he.push(marca(x)); });
     r.equipe.forEach(function(c){ d.equipe.push({ fonte:f.chave, fonteNome:f.nome,
                                                   colab:c }); });
   }
@@ -15852,7 +15906,7 @@ function jgeAusencias(){
   if (!_jgeDados) return [];
   var l = [];
   _jgeDados.ferias.forEach(function(f){
-    if (!f.saida) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f.saida || '')) return;
     // o retorno é o dia em que a pessoa VOLTA: o último dia fora é o
     // anterior, senão todo quadro de férias ficaria um dia maior
     var fim = jgeAdd(f.retorno || jorRetorno(f.saida, f.dias), -1);
@@ -15861,7 +15915,7 @@ function jgeAusencias(){
              dias:f.dias, obs:f.obs || '' });
   });
   _jgeDados.folgas.forEach(function(f){
-    if (!f.data) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f.data || '')) return;
     l.push({ tipo:'folga', colab:f.colab, fonte:f.fonte, fonteNome:f.fonteNome,
              ico:f.ico, ini:f.data, fim:f.data, dias:1, obs:f.obs || '' });
   });
@@ -16008,9 +16062,12 @@ function jgeHojeHTML(){
     return s + ((!_jgeFil.fonte || k === _jgeFil.fonte) ? eq[k] : 0); }, 0);
   var em30 = todas.filter(function(a){
     return a.ini > hoje && a.ini <= jgeAdd(hoje, 30); }).length;
-  var saldo = 0;
-  (_jgeDados.banco || []).forEach(function(b){
-    if (!_jgeFil.fonte || b.fonte === _jgeFil.fonte) saldo += (+b.min || 0); });
+  // o card do banco mostra a hora que ainda precisa virar folga, que é
+  // a pergunta do dia a dia — o detalhe mês a mês está na aba do banco
+  var ab = jgeAbertos();
+  var saldo = ab.lista.reduce(function(s, c){ return s + c.total; }, 0);
+  var venceJa = ab.lista.reduce(function(s, c){
+    return s + c.vencido + (c.meses[ab.janelas[0].ym] || 0); }, 0);
 
   var h = '<div class="kgrid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));'
     + 'margin-bottom:1rem">'
@@ -16024,9 +16081,11 @@ function jgeHojeHTML(){
     + '<div class="kc"><div class="kc-l">Começam em 30 dias</div>'
     +   '<div class="kc-v" style="color:var(--am)">' + cpNum(em30) + '</div>'
     +   '<div class="kc-s">férias + folgas</div></div>'
-    + '<div class="kc"><div class="kc-l">Banco do projeto</div>'
-    +   '<div class="kc-v" style="color:' + (saldo < 0 ? 'var(--vm)' : 'var(--vd)') + '">'
-    +   jgeHoras(saldo) + '</div><div class="kc-s">soma de todas as frentes</div></div>'
+    + '<div class="kc"><div class="kc-l">Horas em aberto</div>'
+    +   '<div class="kc-v" style="color:' + (saldo ? 'var(--am)' : 'var(--vd)') + '">'
+    +   jgeHoras(saldo).replace('+', '') + '</div>'
+    +   '<div class="kc-s">' + jgeHoras(venceJa).replace('+', '') + ' vence(m) em '
+    +   cpDataBR(ab.janelas[0].venc) + '</div></div>'
     + '</div>';
 
   // quem está fora hoje, por frente
@@ -16211,81 +16270,275 @@ function jgeFolgasHTML(){
 }
 
 // ── aba 5: banco de horas ───────────────────────────────────────
-function jgeBancoHTML(){
-  var l = (_jgeDados.banco || []).filter(function(b){
-    return (!_jgeFil.fonte || b.fonte === _jgeFil.fonte)
-        && (!_jgeFil.q || cpNormNome(b.colab).indexOf(cpNormNome(_jgeFil.q)) !== -1); });
-  var porFonte = {};
-  l.forEach(function(b){
-    porFonte[b.fonte] = porFonte[b.fonte] || { nome:b.fonteNome, ico:b.ico, min:0, n:0,
-                                               credor:0, devedor:0 };
-    var f = porFonte[b.fonte];
-    f.min += (+b.min || 0); f.n++;
-    if ((+b.min || 0) > 0) f.credor++; else if ((+b.min || 0) < 0) f.devedor++;
+// Pedido do André em 15/11: "quem tem banco de horas e não folgou até
+// dia 15 daquele mês, a empresa precisa pagar como hora extra". Então o
+// mês fecha no dia 15, e as colunas andam sozinhas: até 15/11 as
+// colunas são novembro, dezembro e janeiro; passado 15/11 viram
+// dezembro, janeiro e fevereiro.
+var JGE_DIA_CORTE = 15;
+var JGE_MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto',
+                 'setembro','outubro','novembro','dezembro'];
+function jgeMesNome(ym){
+  var m = +String(ym).slice(5, 7);
+  return (JGE_MESES[m - 1] || '?') + '/' + String(ym).slice(0, 4);
+}
+function jgeJanelas(n){
+  var hoje = cpHojeISO();
+  var a = +hoje.slice(0, 4), m = +hoje.slice(5, 7), d = +hoje.slice(8, 10);
+  if (d > JGE_DIA_CORTE) m++;          // o fechamento deste mês já passou
+  var l = [];
+  for (var i = 0; i < (n || 3); i++) {
+    var dt = new Date(a, m - 1 + i, 1);
+    var ym = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+    l.push({ ym:ym, venc:ym + '-' + String(JGE_DIA_CORTE).padStart(2, '0') });
+  }
+  return l;
+}
+function jgeFiltraPessoa(x){
+  return (!_jgeFil.fonte || x.fonte === _jgeFil.fonte)
+      && (!_jgeFil.q || cpNormNome(x.colab).indexOf(cpNormNome(_jgeFil.q)) !== -1);
+}
+
+// Horas que ainda não foram folgadas, separadas pelo mês em que vencem.
+function jgeAbertos(){
+  var hoje = cpHojeISO();
+  var jan = jgeJanelas(3);
+  var porColab = {}, extras = {}, semVenc = false, vencido = false;
+  (_jgeDados.he || []).filter(jgeFiltraPessoa).forEach(function(p){
+    if (p.arquivado || p.saldoMin <= 0) return;
+    var c = porColab[p.colab] || (porColab[p.colab] =
+      { colab:p.colab, fonte:p.fonte, fonteNome:p.fonteNome, ico:p.ico,
+        meses:{}, vencido:0, semVenc:0, total:0, nPer:0 });
+    var v = p.vencimento, chave;
+    if (!v) { chave = ''; semVenc = true; }
+    else if (v < hoje) { chave = 'vencido'; vencido = true; }
+    else chave = v.slice(0, 7);
+    if (chave === 'vencido') c.vencido += p.saldoMin;
+    else if (!chave) c.semVenc += p.saldoMin;
+    else {
+      c.meses[chave] = (c.meses[chave] || 0) + p.saldoMin;
+      if (!jan.some(function(j){ return j.ym === chave; })) extras[chave] = 1;
+    }
+    c.total += p.saldoMin; c.nPer++;
   });
-  var tot = l.reduce(function(s, b){ return s + (+b.min || 0); }, 0);
+  var cols = jan.slice();
+  Object.keys(extras).sort().forEach(function(ym){
+    cols.push({ ym:ym, venc:ym + '-15', extra:true });
+  });
+  var lista = Object.keys(porColab).map(function(k){ return porColab[k]; })
+    .sort(function(a, b){ return b.total - a.total; });
+  return { lista:lista, cols:cols, temVencido:vencido, temSemVenc:semVenc, janelas:jan };
+}
+
+// Horas já compensadas: as folgas registradas contra um período.
+function jgeCompensadas(){
+  var hoje = cpHojeISO(), l = [], pago = 0;
+  (_jgeDados.he || []).filter(jgeFiltraPessoa).forEach(function(p){
+    (p.usos || []).forEach(function(u){
+      if (!u.data) return;
+      if (u.tipo !== 'folga') { if (u.data <= hoje) pago += u.min; return; }
+      if (u.data > hoje) return;                 // ainda não aconteceu
+      l.push({ colab:p.colab, data:u.data, min:u.min, obs:u.obs,
+               mesRef:p.mesRef, fonteNome:p.fonteNome });
+    });
+  });
+  l.sort(function(a, b){ return b.data.localeCompare(a.data); });
+  return { lista:l, pagoMin:pago };
+}
+
+// Folgas que ainda vão acontecer. Vêm de dois lugares: as folgas
+// marcadas contra um período do banco (essas já trazem a duração) e as
+// folgas lançadas como dia — no PATEC, dentro do banco de horas; nas
+// frentes, na aba Folgas do ADM. Dia sem duração entra como 8h, que é a
+// jornada que a própria tela do PATEC usa para descontar folga.
+function jgeProgramadas(){
+  var hoje = cpHojeISO(), l = [], vistas = {};
+  (_jgeDados.he || []).filter(jgeFiltraPessoa).forEach(function(p){
+    (p.usos || []).forEach(function(u){
+      if (!u.data || u.data <= hoje || u.tipo !== 'folga') return;
+      vistas[cpNormNome(p.colab) + '|' + u.data] = 1;
+      l.push({ colab:p.colab, data:u.data, min:u.min, obs:u.obs,
+               origem:'banco de horas', fonteNome:p.fonteNome });
+    });
+  });
+  (_jgeDados.folgas || []).filter(jgeFiltraPessoa).forEach(function(f){
+    if (!f.data || f.data <= hoje) return;
+    if (vistas[cpNormNome(f.colab) + '|' + f.data]) return;   // já contada acima
+    l.push({ colab:f.colab, data:f.data, min:(f.horasMin == null ? 480 : f.horasMin),
+             obs:f.obs, origem:'dia de folga', fonteNome:f.fonteNome,
+             assumido:(f.horasMin == null) });
+  });
+  l.sort(function(a, b){ return a.data.localeCompare(b.data); });
+  return l;
+}
+
+// Hora em aberto e hora folgada são sempre positivas: aqui o sinal
+// de + só atrapalha a leitura.
+function jgeHrs(min){ return jgeHoras(min).replace('+', ''); }
+function jgeBancoHTML(){
+  var ab = jgeAbertos();
+  var comp = jgeCompensadas();
+  var prog = jgeProgramadas();
+  var hoje = cpHojeISO();
+  var totAberto = ab.lista.reduce(function(s, c){ return s + c.total; }, 0);
+  var proxVenc = ab.janelas[0].venc;
+  var noProx = ab.lista.reduce(function(s, c){
+    return s + (c.meses[ab.janelas[0].ym] || 0) + c.vencido; }, 0);
+  var totComp = comp.lista.reduce(function(s, x){ return s + x.min; }, 0);
+  var totProg = prog.reduce(function(s, x){ return s + x.min; }, 0);
 
   var h = jgeFiltroHTML()
-    + '<div class="kgrid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));'
+    + '<div class="kgrid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));'
     + 'margin-bottom:1rem">'
-    + '<div class="kc"><div class="kc-l">Saldo do projeto</div>'
-    +   '<div class="kc-v" style="color:' + (tot < 0 ? 'var(--vm)' : 'var(--vd)') + '">'
-    +   jgeHoras(tot) + '</div><div class="kc-s">' + cpNum(l.length)
-    +   ' pessoa(s)</div></div>'
-    + '<div class="kc"><div class="kc-l">A favor</div>'
-    +   '<div class="kc-v" style="color:var(--vd)">'
-    +   cpNum(l.filter(function(b){ return (+b.min || 0) > 0; }).length)
-    +   '</div><div class="kc-s">têm horas para receber ou folgar</div></div>'
-    + '<div class="kc"><div class="kc-l">Devendo</div>'
-    +   '<div class="kc-v" style="color:var(--vm)">'
-    +   cpNum(l.filter(function(b){ return (+b.min || 0) < 0; }).length)
-    +   '</div><div class="kc-s">precisam repor</div></div>'
+    + '<div class="kc ' + (totAberto > 0 ? 'bad' : 'ok') + '">'
+    +   '<div class="kc-l">Horas em aberto</div>'
+    +   '<div class="kc-v">' + jgeHrs(totAberto) + '</div>'
+    +   '<div class="kc-s">' + cpNum(ab.lista.length) + ' pessoa(s) com saldo</div></div>'
+    + '<div class="kc"><div class="kc-l">Vencem no próximo fechamento</div>'
+    +   '<div class="kc-v" style="color:var(--am)">' + jgeHrs(noProx) + '</div>'
+    +   '<div class="kc-s">até ' + cpDataBR(proxVenc) + ' — depois disso vira pagamento'
+    +   '</div></div>'
+    + '<div class="kc"><div class="kc-l">Folgas já programadas</div>'
+    +   '<div class="kc-v" style="color:var(--az)">' + jgeHrs(totProg) + '</div>'
+    +   '<div class="kc-s">' + cpNum(prog.length) + ' folga(s) marcada(s)</div></div>'
+    + '<div class="kc"><div class="kc-l">Já compensado</div>'
+    +   '<div class="kc-v" style="color:var(--vd)">' + jgeHrs(totComp) + '</div>'
+    +   '<div class="kc-s">' + cpNum(comp.lista.length) + ' folga(s) no histórico</div></div>'
     + '</div>';
 
-  h += '<div class="cd"><div class="cd-t">⏰ Por frente</div>'
-    + '<div style="overflow:auto"><table><thead><tr><th>Frente</th>'
-    +   '<th style="text-align:right">Pessoas</th><th style="text-align:right">A favor</th>'
-    +   '<th style="text-align:right">Devendo</th><th style="text-align:right">Saldo</th>'
-    +   '</tr></thead><tbody>';
-  Object.keys(porFonte).forEach(function(k){
-    var f = porFonte[k];
-    h += '<tr><td style="font-weight:600">' + f.ico + ' ' + cpEsc(f.nome) + '</td>'
-      + '<td style="text-align:right">' + cpNum(f.n) + '</td>'
-      + '<td style="text-align:right;color:var(--vd)">' + cpNum(f.credor) + '</td>'
-      + '<td style="text-align:right;color:var(--vm)">' + cpNum(f.devedor) + '</td>'
-      + '<td style="text-align:right;font-weight:700;color:'
-      +   (f.min < 0 ? 'var(--vm)' : 'var(--vd)') + '">' + jgeHoras(f.min) + '</td></tr>';
+  // ── 1. horas em aberto, mês a mês ──────────────────────────
+  h += '<div class="cd"><div class="cd-t">⏳ Horas em aberto</div>'
+    + '<div class="al al-b" style="font-size:11.5px">ℹ O mês fecha no dia '
+    + JGE_DIA_CORTE + '. O que não foi folgado até lá a empresa paga como hora extra — '
+    + 'por isso as colunas andam sozinhas: hoje a primeira é '
+    + jgeMesNome(ab.janelas[0].ym) + ' (até ' + cpDataBR(ab.janelas[0].venc)
+    + '), e depois dessa data ela sai e entra a seguinte.</div>'
+    + '<div style="overflow:auto"><table><thead><tr><th>Colaborador</th>';
+  if (ab.temVencido) h += '<th style="text-align:right;color:var(--vm)">Vencido</th>';
+  ab.cols.forEach(function(c){
+    h += '<th style="text-align:right' + (c.extra ? ';color:var(--tx2)' : '') + '">'
+      + jgeMesNome(c.ym) + '<div style="font-size:9px;font-weight:400;color:var(--tx2)">'
+      + 'até ' + cpDataBR(c.venc).slice(0, 5) + '</div></th>';
   });
-  if (!Object.keys(porFonte).length) h += '<tr><td colspan="5" style="font-size:12px;'
-    + 'color:var(--tx2)">Nada preenchido no filtro.</td></tr>';
-  h += '</tbody></table></div></div>';
-
-  h += '<div class="cd"><div class="cd-t">👤 Pessoa por pessoa</div>'
-    + '<div style="overflow:auto"><table><thead><tr><th>Colaborador</th><th>Frente</th>'
-    +   '<th style="text-align:right">Saldo</th><th style="text-align:right">Extras</th>'
-    +   '<th style="text-align:right">Folgas usadas</th><th>Observação</th>'
-    +   '</tr></thead><tbody>';
-  l.slice().sort(function(a, b){ return (+a.min || 0) - (+b.min || 0); })
-   .forEach(function(b){
-    h += '<tr><td style="font-weight:600">' + cpEsc(b.colab) + '</td>'
-      + '<td style="font-size:10.5px">' + b.ico + ' ' + cpEsc(b.fonteNome) + '</td>'
-      + '<td style="text-align:right;font-weight:700;color:'
-      +   ((+b.min || 0) < 0 ? 'var(--vm)' : ((+b.min || 0) > 0 ? 'var(--vd)'
-          : 'var(--tx2)')) + '">' + jgeHoras(+b.min || 0) + '</td>'
-      + '<td style="text-align:right;font-size:10.5px">'
-      +   (b.extrasMin == null ? '—' : jgeHoras(b.extrasMin)) + '</td>'
-      + '<td style="text-align:right;font-size:10.5px">'
-      +   (b.folgasUsadas == null ? '—' : cpNum(b.folgasUsadas)) + '</td>'
-      + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(b.obs || '—')
+  if (ab.temSemVenc) h += '<th style="text-align:right">Sem vencimento</th>';
+  h += '<th style="text-align:right">Total</th></tr></thead><tbody>';
+  ab.lista.forEach(function(c){
+    h += '<tr><td style="font-weight:600">' + cpEsc(c.colab) + '</td>';
+    if (ab.temVencido) h += '<td style="text-align:right;font-weight:700;color:'
+      + (c.vencido ? 'var(--vm)' : 'var(--tx2)') + '">'
+      + (c.vencido ? jgeHrs(c.vencido) : '—') + '</td>';
+    ab.cols.forEach(function(col){
+      var v = c.meses[col.ym] || 0;
+      h += '<td style="text-align:right;' + (v ? 'font-weight:700;color:var(--am)'
+        : 'color:var(--tx2)') + '">' + (v ? jgeHrs(v) : '—') + '</td>';
+    });
+    if (ab.temSemVenc) h += '<td style="text-align:right;color:'
+      + (c.semVenc ? 'var(--tx)' : 'var(--tx2)') + '">'
+      + (c.semVenc ? jgeHrs(c.semVenc) : '—') + '</td>';
+    h += '<td style="text-align:right;font-weight:700">' + jgeHrs(c.total)
       + '</td></tr>';
   });
-  if (!l.length) h += '<tr><td colspan="6" style="font-size:12px;color:var(--tx2)">'
-    + 'Nada preenchido no filtro.</td></tr>';
+  if (!ab.lista.length) h += '<tr><td colspan="9" style="font-size:12px;color:var(--tx2)">'
+    + 'Ninguém com hora em aberto no filtro.</td></tr>';
+  else {
+    h += '<tr style="border-top:2px solid var(--brd);font-weight:700">'
+      + '<td>Total da equipe</td>';
+    if (ab.temVencido) h += '<td style="text-align:right;color:var(--vm)">'
+      + jgeHrs(ab.lista.reduce(function(s, c){ return s + c.vencido; }, 0)) + '</td>';
+    ab.cols.forEach(function(col){
+      h += '<td style="text-align:right">' + jgeHrs(ab.lista.reduce(function(s, c){
+        return s + (c.meses[col.ym] || 0); }, 0)) + '</td>';
+    });
+    if (ab.temSemVenc) h += '<td style="text-align:right">'
+      + jgeHrs(ab.lista.reduce(function(s, c){ return s + c.semVenc; }, 0)) + '</td>';
+    h += '<td style="text-align:right">' + jgeHrs(totAberto) + '</td></tr>';
+  }
+  h += '</tbody></table></div>';
+  if (ab.temVencido) h += '<div style="font-size:10.5px;color:var(--vm);margin-top:.5rem">'
+    + '⚠ A coluna <strong>Vencido</strong> é hora cujo prazo já passou e que continua sem '
+    + 'folga lançada — é o que entra como pagamento.</div>';
+  h += '</div>';
+
+  // ── 2. horas compensadas ───────────────────────────────────
+  h += '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
+    + '<span>✅ Horas compensadas</span>'
+    + '<span style="font-size:11px;color:var(--tx2)">' + jgeHrs(totComp) + ' em '
+    + cpNum(comp.lista.length) + ' folga(s)</span></div>'
+    + '<div style="overflow:auto"><table><thead><tr><th>Colaborador</th><th>Data</th>'
+    +   '<th style="text-align:right">Horas folgadas</th><th>Mês de referência</th>'
+    +   '<th>Observação</th></tr></thead><tbody>';
+  comp.lista.slice(0, 300).forEach(function(x){
+    h += '<tr><td style="font-weight:600">' + cpEsc(x.colab) + '</td>'
+      + '<td>' + cpDataBR(x.data) + ' <span style="font-size:10px;color:var(--tx2)">'
+      +   jgeDiaSem(x.data) + '</span></td>'
+      + '<td style="text-align:right;font-weight:700;color:var(--vd)">'
+      +   jgeHrs(x.min) + '</td>'
+      + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(x.mesRef || '—') + '</td>'
+      + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(x.obs || '—')
+      + '</td></tr>';
+  });
+  if (!comp.lista.length) h += '<tr><td colspan="5" style="font-size:12px;color:var(--tx2)">'
+    + 'Nenhuma folga compensada no histórico.</td></tr>';
+  h += '</tbody></table></div>';
+  if (comp.pagoMin) h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:.5rem">'
+    + 'Fora dessas, ' + jgeHrs(comp.pagoMin) + ' saíram como '
+    + '<strong>pagamento</strong>, não como folga — inclusive o que o PATEC baixa sozinho '
+    + 'quando o prazo vence.</div>';
+  h += '</div>';
+
+  // ── 3. folgas programadas ──────────────────────────────────
+  h += '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
+    + '<span>📌 Folgas programadas</span>'
+    + '<span style="font-size:11px;color:var(--tx2)">' + jgeHrs(totProg) + ' em '
+    + cpNum(prog.length) + ' folga(s)</span></div>'
+    + '<div style="overflow:auto"><table><thead><tr><th>Colaborador</th><th>Data</th>'
+    +   '<th style="text-align:right">Horas folgadas</th><th>De onde vem</th>'
+    +   '<th>Observação</th></tr></thead><tbody>';
+  prog.forEach(function(x){
+    h += '<tr><td style="font-weight:600">' + cpEsc(x.colab) + '</td>'
+      + '<td>' + cpDataBR(x.data) + ' <span style="font-size:10px;color:var(--tx2)">'
+      +   jgeDiaSem(x.data) + '</span></td>'
+      + '<td style="text-align:right;font-weight:700;color:var(--az)">'
+      +   jgeHrs(x.min)
+      +   (x.assumido ? ' <span style="font-size:9px;font-weight:400;color:var(--tx2)">'
+          + 'assumido</span>' : '') + '</td>'
+      + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(x.origem) + '</td>'
+      + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(x.obs || '—')
+      + '</td></tr>';
+  });
+  if (!prog.length) h += '<tr><td colspan="5" style="font-size:12px;color:var(--tx2)">'
+    + 'Nenhuma folga marcada para frente.</td></tr>';
   h += '</tbody></table></div>'
     + '<div style="font-size:10.5px;color:var(--tx2);margin-top:.5rem">'
-    + 'No PATEC o saldo é a hora extra menos as folgas já tiradas (8h cada), a mesma '
-    + 'conta da tela de lá; nas outras frentes é o saldo lançado no ADM. As colunas '
-    + 'Extras e Folgas usadas só existem no PATEC.</div></div>';
+    + 'Folga marcada contra um período do banco já traz a duração. Folga lançada só como '
+    + 'dia entra como 8h00 e aparece marcada como <em>assumido</em> — é a mesma jornada '
+    + 'que a tela do PATEC usa para descontar folga do saldo.</div></div>';
+
+  // ── 4. o saldo simples das frentes ─────────────────────────
+  // As frentes ainda não têm período com vencimento, só um saldo. Fica
+  // num quadro à parte para não se misturar com a conta de cima.
+  var simples = (_jgeDados.banco || []).filter(function(b){
+    return jgeFiltraPessoa(b) && b.fonte !== 'adlv' && (+b.min || 0) !== 0; });
+  if (simples.length) {
+    h += '<div class="cd"><div class="cd-t">🧾 Saldo lançado nas frentes</div>'
+      + '<div class="al al-b" style="font-size:11.5px">ℹ Estas frentes lançam um saldo '
+      + 'único no ADM, sem mês de vencimento, então não entram nas colunas de meses '
+      + 'acima.</div>'
+      + '<div style="overflow:auto"><table><thead><tr><th>Colaborador</th><th>Frente</th>'
+      +   '<th style="text-align:right">Saldo</th><th>Observação</th>'
+      +   '</tr></thead><tbody>';
+    simples.sort(function(a, b){ return (+a.min || 0) - (+b.min || 0); })
+      .forEach(function(b){
+        h += '<tr><td style="font-weight:600">' + cpEsc(b.colab) + '</td>'
+          + '<td style="font-size:10.5px">' + b.ico + ' ' + cpEsc(b.fonteNome) + '</td>'
+          + '<td style="text-align:right;font-weight:700;color:'
+          +   ((+b.min || 0) < 0 ? 'var(--vm)' : 'var(--vd)') + '">'
+          +   jgeHoras(+b.min || 0) + '</td>'
+          + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(b.obs || '—')
+          + '</td></tr>';
+      });
+    h += '</tbody></table></div></div>';
+  }
   return h;
 }
 
