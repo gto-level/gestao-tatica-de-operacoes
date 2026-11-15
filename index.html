@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/11 14:00';
+var GTO_BUILD = '15/11 15:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -21708,6 +21708,13 @@ function rjItens(){
   return itens;
 }
 
+// Quantos itens tem um pedido rejeitado. A planilha traz isso na
+// coluna N_ITENS; quando ela vem vazia, vale o número de RCs que o
+// cruzamento com a medição achou para aquele pedido.
+function rjQtdItens(l){
+  return (+l.nItens || 0) || (+l.nRcs || 1);
+}
+
 function rjResumoHTML(itens){
   if (!itens.length) return '';
   var porGrupo = {}, porMotivo = {}, itensSoma = 0;
@@ -21720,9 +21727,32 @@ function rjResumoHTML(itens){
     return Object.keys(o).sort(function(a, b){ return o[b] - o[a]; })
       .map(function(k){ return cpEsc(k) + ' <strong>' + o[k] + '</strong>'; }).join(' · ');
   };
+  // Por comprador (15/11): a mesma leitura que o Rejeite Supervisor já
+  // tinha. A conta sai das LINHAS, que são uma por pedido e já trazem o
+  // dono do cruzamento com a medição — contar os itens crus daria o
+  // mesmo pedido várias vezes. Entre parênteses, quantas RCs aquele
+  // comprador tem dentro desses pedidos.
+  var porQuem = {};
+  rjLinhasItens(itens).forEach(function(l){
+    var k = l.comprador || '(sem comprador)';
+    var q = porQuem[k] || (porQuem[k] = { ped:0, rcs:0 });
+    q.ped++; q.rcs += rjQtdItens(l);
+  });
+  var quem = Object.keys(porQuem).sort(function(a, b){
+    if ((a === '(sem comprador)') !== (b === '(sem comprador)'))
+      return a === '(sem comprador)' ? 1 : -1;
+    if (porQuem[b].ped !== porQuem[a].ped) return porQuem[b].ped - porQuem[a].ped;
+    return a.localeCompare(b, 'pt-BR');
+  }).map(function(k){
+    var q = porQuem[k];
+    return cpEsc(k) + ' <strong>' + q.ped + '</strong>'
+      + ' <span style="font-size:10px">(' + q.rcs + (q.rcs === 1 ? ' item' : ' itens')
+      + ')</span>';
+  }).join(' · ');
   return '<div style="font-size:11px;color:var(--tx2);margin-top:.9rem;line-height:1.8">'
     + '<div><strong style="color:var(--tx)">' + cpNum(itensSoma) + '</strong> itens em '
     +   cpNum(itens.length) + ' pedidos.</div>'
+    + '<div>Por comprador: ' + quem + '</div>'
     + '<div>Por grupo: ' + topo(porGrupo) + '</div>'
     + '<div>Por motivo: ' + topo(porMotivo) + '</div></div>';
 }
@@ -21876,10 +21906,18 @@ function rjLinhasItens(itens){
   (itens || []).forEach(function(i){
     var ped = _rjsN(i.pedido);
     if (porPedido[ped]) {
-      // o mesmo pedido veio de novo: soma os itens e fica o maior SLA
+      // o mesmo pedido veio de novo: fica o maior SLA e a maior
+      // quantidade de itens. nItens é a coluna N_ITENS da planilha —
+      // ela já vem por PEDIDO, então somar as repetições contaria o
+      // mesmo pedido duas vezes.
       var j = porPedido[ped];
-      j.nRcs++;
+      // nRcs era incrementado aqui, e isso contava duas vezes: o valor
+      // de partida já é quantas RCs a MEDIÇÃO conhece para o pedido.
+      // Vale o maior entre as duas contagens.
+      j.linhasPl = (j.linhasPl || 1) + 1;
+      if (j.linhasPl > j.nRcs) j.nRcs = j.linhasPl;
       if ((+i.dias || 0) > (j.sla || 0)) j.sla = +i.dias || 0;
+      if ((+i.nItens || 0) > (j.nItens || 0)) j.nItens = +i.nItens || 0;
       return;
     }
     var med = ix[ped] || [];
@@ -21893,7 +21931,7 @@ function rjLinhasItens(itens){
       oport: o ? (o.oport || rjItemOpPar(o.rc, o.itemRc)[1]) : '',
       itemOp: o ? (o.itemOp || rjItemOpPar(o.rc, o.itemRc)[0]) : '',
       pedido: i.pedido, comprador: o ? (o.comprador || '') : '',
-      sla: +i.dias || 0, nRcs: med.length || 1,
+      sla: +i.dias || 0, nRcs: med.length || 1, nItens: +i.nItens || 0, linhasPl: 1,
       // o que a tela antiga mostrava, guardado para o resumo e o Excel
       grupo: i.grupo || '', resp: i.resp || '', forn: i.forn || '',
       tipo: i.tipo || '', dataRej: i.dataRej || '', envios: +i.envios || 0,
@@ -22248,7 +22286,7 @@ function gpHtmlRejeitados(){
   var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
     + '<span>Rejeitados — ' + cpNum(itens.length) + ' pedido(s) no prazo de recusa</span>'
     + '<span style="display:flex;gap:8px">'
-    +   (itens.length ? '<button class="btn btn-s" onclick="gpCopiar()">📋 Copiar</button>'
+    +   (itens.length ? '<button class="btn btn-s" onclick="gpCopiar()">📋 Copiar p/ equipe</button>'
                       + '<button class="btn btn-s" onclick="gpBaixarExcel()">⬇ Baixar Excel</button>' : '')
     +   '<button class="btn btn-s" onclick="gpAbrirCard(\'rejeitados\')">✕ Fechar</button>'
     + '</span></div>'
@@ -22349,7 +22387,7 @@ function rjFornecedorHTML(){
     +   '<span>🏭 Rejeite Fornecedor — ' + cpNum(itens.length)
     +     ' pedido(s) no prazo de recusa</span>'
     +   '<span style="display:flex;gap:8px">'
-    +     (itens.length ? '<button class="btn btn-s" onclick="gpCopiar()">📋 Copiar</button>'
+    +     (itens.length ? '<button class="btn btn-s" onclick="gpCopiar(\'rejeitados\')">📋 Copiar p/ equipe</button>'
                         + '<button class="btn btn-s" onclick="gpBaixarExcel()">⬇ Baixar Excel</button>' : '')
     +     '<button class="btn btn-s" onclick="rjAbrir()">↻ Atualizar</button>'
     +   '</span></div>'
@@ -24249,7 +24287,8 @@ function rjSupervisorHTML(){
     + '<div class="cd-t" style="justify-content:space-between">'
     +   '<span>👤 Rejeite Supervisor — ' + cpNum(n) + ' item(ns) rejeitado(s)</span>'
     +   '<span style="display:flex;gap:8px">'
-    +     (n ? '<button class="btn btn-s" onclick="rjsExportar()">⬇ Exportar planilha</button>' : '')
+    +     (n ? '<button class="btn btn-s" onclick="gpCopiar(\'rejsup\')">📋 Copiar p/ equipe</button>'
+              + '<button class="btn btn-s" onclick="rjsExportar()">⬇ Baixar Excel</button>' : '')
     +     '<button class="btn btn-s" onclick="rjAbrir()">↻ Atualizar</button>'
     +   '</span></div>';
 
@@ -24484,6 +24523,18 @@ function rjSupervisorHTML(){
   return h;
 }
 
+// A lista do Rejeite Supervisor como a tela mostra: já com o lado
+// escolhido nos botões. A tela e o botão de copiar leem daqui, para
+// não copiar uma coisa e mostrar outra.
+function rjsListaAtual(){
+  var r;
+  try { r = rjsMontar(); } catch (e) { return []; }
+  return (r.linhas || []).filter(function(l){
+    if (!_rjsLado) return true;
+    return (!l.padrao ? 'sem' : rjsCulpa(l.padrao)) === _rjsLado;
+  });
+}
+
 function gpHtmlRejeiteSup(){
   var q = rjsPorCulpa();
   var r;
@@ -24494,7 +24545,8 @@ function gpHtmlRejeiteSup(){
   var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
     + '<span>Rejeite Supervisor — ' + cpNum(q.total) + ' item(ns) rejeitado(s)</span>'
     + '<span style="display:flex;gap:8px">'
-    +   (q.total ? '<button class="btn btn-s" onclick="rjsExportar()">⬇ Exportar planilha</button>' : '')
+    +   (q.total ? '<button class="btn btn-s" onclick="gpCopiar()">📋 Copiar p/ equipe</button>'
+                  + '<button class="btn btn-s" onclick="rjsExportar()">⬇ Baixar Excel</button>' : '')
     +   '<button class="btn btn-s" onclick="gpAbrirCard(\'rejsup\')">✕ Fechar</button>'
     + '</span></div>';
 
@@ -25267,21 +25319,48 @@ function gpLinhasDoCard(){
   return out;
 }
 
-function gpCopiar(){
-  if (_gpCard === 'rejeitados') {
-    var _lista = rjItens();
-    var t = ['PEDIDOS REJEITADOS — ' + cpNum(_lista.length)
-             + ' pedido(s) no prazo de recusa', ''];
-    _lista.forEach(function(i){
-      t.push('Pedido ' + i.pedido + ' · ' + i.grupo + ' · ' + (i.forn || '')
-        + (i.dias ? ' · ' + i.dias + ' dia(s) rejeitado' : '')
-        + (i.motivo ? ' · ' + i.motivo : '')
-        + (i.prazo ? ' · ' + i.prazo : ''));
+// O mesmo botão serve o card da Governança e a aba do Controle de
+// Pedidos. Quando vem de lá, a aba diz qual lista copiar — na
+// Governança quem diz é o card aberto.
+function gpCopiar(qual){
+  var _c = qual || _gpCard;
+  if (_c === 'rejeitados') {
+    // Agrupado por comprador, igual à lista dos memorizados e à do
+    // Status B: é assim que ela é repassada, uma parte para cada um.
+    var lrej = rjLinhasItens(rjItens());
+    var trej = ['PEDIDOS REJEITADOS — ' + cpNum(lrej.length)
+                + ' pedido(s) no prazo de recusa'];
+    var porRej = {};
+    lrej.forEach(function(l){
+      (porRej[l.comprador || '(sem comprador)'] = porRej[l.comprador || '(sem comprador)'] || [])
+        .push(l);
     });
-    cpCopiaTexto(t.join('\n'), 'Lista de rejeitados copiada.');
+    Object.keys(porRej).sort(function(a, b){
+      if ((a === '(sem comprador)') !== (b === '(sem comprador)'))
+        return a === '(sem comprador)' ? 1 : -1;
+      return a.localeCompare(b, 'pt-BR');
+    }).forEach(function(nome){
+      var qt = porRej[nome].reduce(function(x, l){ return x + rjQtdItens(l); }, 0);
+      trej.push('');
+      trej.push(nome + ' (' + porRej[nome].length + ' pedido(s), ' + qt + ' item(ns)):');
+      porRej[nome].forEach(function(l){
+        var t = rjTrat(l);
+        var nIt = rjQtdItens(l);
+        trej.push('  Pedido ' + l.pedido
+          + (nIt > 1 ? ' · ' + nIt + ' itens' : '')
+          + (l.sla ? ' · SLA ' + l.sla + ' dia(s)' : '')
+          + (l.forn ? ' · ' + l.forn : '')
+          + (l.motivoRej ? ' · ' + l.motivoRej : '')
+          + (l.prazo ? ' · prazo ' + l.prazo : '')
+          + (t.motivo ? ' · motivo: ' + t.motivo : '')
+          + (t.conclusao ? ' · ' + t.conclusao : ''));
+      });
+    });
+    cpCopiaTexto(trej.join('\n'),
+      'Lista de rejeitados copiada — é só mandar para a equipe.');
     return;
   }
-  if (_gpCard === 'memorizados') {
+  if (_c === 'memorizados') {
     var itensM = gpMemItens();
     var per = gpMemPeriodo();
     var tm = ['PEDIDOS MEMORIZADOS — ' + cpNum(itensM.length)
@@ -25309,7 +25388,7 @@ function gpCopiar(){
     cpCopiaTexto(tm.join('\n'), 'Lista de memorizados copiada — é só mandar para a equipe.');
     return;
   }
-  if (_gpCard === 'statusb') {
+  if (_c === 'statusb') {
     var pendSB = gpSBPendentes();
     var ts = ['STATUS B — ' + cpNum(pendSB.length) + ' item(ns) a duplicar'
               + (_gpSB.data ? ' (BU de ' + cpDataBR(_gpSB.data) + ')' : '')];
@@ -25345,7 +25424,36 @@ function gpCopiar(){
     cpCopiaTexto(ts.join('\n'), 'Lista do Status B copiada — é só mandar para a equipe.');
     return;
   }
-  if (_gpCard === 'cockpit') {
+  if (_c === 'rejsup') {
+    var lsup = rjsLinhasGrade(rjsListaAtual());
+    var tsup = ['REJEITE SUPERVISOR — ' + cpNum(lsup.length) + ' pedido(s)'
+                + (_rjsLado ? ' · ' + RJS_CULPA_NOME[_rjsLado] : '')];
+    var porSup = {};
+    lsup.forEach(function(l){
+      (porSup[l.comprador || '(sem comprador)'] = porSup[l.comprador || '(sem comprador)'] || [])
+        .push(l);
+    });
+    Object.keys(porSup).sort(function(a, b){
+      if ((a === '(sem comprador)') !== (b === '(sem comprador)'))
+        return a === '(sem comprador)' ? 1 : -1;
+      return a.localeCompare(b, 'pt-BR');
+    }).forEach(function(nome){
+      var qs = porSup[nome].reduce(function(x, l){ return x + (+l.nRcs || 1); }, 0);
+      tsup.push('');
+      tsup.push(nome + ' (' + porSup[nome].length + ' pedido(s), ' + qs + ' item(ns)):');
+      porSup[nome].forEach(function(l){
+        tsup.push('  Pedido ' + l.pedido
+          + (l.nRcs > 1 ? ' · ' + l.nRcs + ' itens' : '')
+          + (l.sla ? ' · SLA ' + l.sla + ' dia(s)' : '')
+          + (l.padrao ? ' · ' + l.padrao : '')
+          + (l.justificativa ? ' · ' + l.justificativa : ''));
+      });
+    });
+    cpCopiaTexto(tsup.join('\n'),
+      'Lista do Rejeite Supervisor copiada — é só mandar para a equipe.');
+    return;
+  }
+  if (_c === 'cockpit') {
     var tc = ['COCKPIT — ' + cpNum(_gpCock.emLib || 0) + ' item(ns) em liberação ('
               + CP_COCKPIT.gerente + ')', ''];
     _gpCock.itens.forEach(function(i){
@@ -25359,7 +25467,7 @@ function gpCopiar(){
     return;
   }
   var l = gpLinhasDoCard();
-  var t = [govNomeCard(_gpCard).toUpperCase() + ' — ' + cpDataBR(gpDataSel()) + ' (' + l.length + ' RCs)', ''];
+  var t = [govNomeCard(_c).toUpperCase() + ' — ' + cpDataBR(gpDataSel()) + ' (' + l.length + ' RCs)', ''];
   l.forEach(function(x){
     t.push('RC ' + x.it.rc + '/' + x.it.seq
       + (x.it.op ? ' · Oport. ' + x.it.op : '')
