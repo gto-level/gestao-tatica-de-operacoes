@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/11 02:30';
+var GTO_BUILD = '15/11 12:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1286,9 +1286,26 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
       <div class="stabs">
         <button class="stab active" id="jadm-tab-equipe" onclick="jadmTab('equipe',this)">👥 Equipe</button>
         <button class="stab" id="jadm-tab-ferias" onclick="jadmTab('ferias',this)">🌴 Férias</button>
+        <button class="stab" id="jadm-tab-folgas" onclick="jadmTab('folgas',this)">🏖 Folgas</button>
         <button class="stab" id="jadm-tab-banco" onclick="jadmTab('banco',this)">⏰ Banco de Horas</button>
       </div>
       <div id="jadm-corpo"></div>
+    </div>
+
+    <!-- ══ GESTÃO DE JORNADA UNIFICADA — tópico do PCP do ADLV ══
+         Só leitura: lê a jornada do PATEC (base única ADLV+FAST) e a de
+         cada frente com base própria, e não grava em nenhuma delas.
+    -->
+    <div class="page" id="p-jornada-geral">
+      <div class="stabs">
+        <button class="stab active" id="jge-tab-hoje" onclick="jgeTab('hoje',this)">📆 Hoje e a semana</button>
+        <button class="stab" id="jge-tab-cal" onclick="jgeTab('cal',this)">📅 Calendário</button>
+        <button class="stab" id="jge-tab-ferias" onclick="jgeTab('ferias',this)">🌴 Férias</button>
+        <button class="stab" id="jge-tab-folgas" onclick="jgeTab('folgas',this)">🏖 Folgas</button>
+        <button class="stab" id="jge-tab-banco" onclick="jgeTab('banco',this)">⏰ Banco de Horas</button>
+        <button class="stab" id="jge-tab-risco" onclick="jgeTab('risco',this)">⚠️ Risco de ausência</button>
+      </div>
+      <div id="jge-corpo"></div>
     </div>
 
     <!-- ══ FECHAMENTO DO DIA — tópico próprio, módulo Pedidos ══ -->
@@ -9852,6 +9869,10 @@ function go(id, el) {
     setTimeout(function(){ try { jorAbrir(); } catch (e) {} }, 60);
   if (id === 'adm-mod' && typeof jadmAbrir === 'function')
     setTimeout(function(){ try { jadmAbrir(); } catch (e) {} }, 60);
+  // A visão unificada do PCP: lê as bases de todas as frentes uma vez e
+  // guarda — reler é no botão, para não abrir cinco projetos a cada clique.
+  if (id === 'jornada-geral' && typeof jgeAbrir === 'function')
+    setTimeout(function(){ try { jgeAbrir(); } catch (e) {} }, 60);
   // Sai da página do ADM → desliga o tempo real do Controle das Equipes.
   if(id!=='adm' && typeof _cePararRT==='function') _cePararRT();
   // Plano de Ação: liberado para ADLV e FAST (cada módulo usa sua própria
@@ -15174,7 +15195,8 @@ function acpBlocoPessoa(p, r){
 // cadastro de colaboradores do PATEC, e inventar um só para isso seria
 // mais uma lista para manter.
 var JOR_DOC = 'jornada_frente';
-var _jorDados = { equipe:[], ferias:[], banco:[], atualizadoEm:'', atualizadoPor:'' };
+var _jorDados = { equipe:[], ferias:[], folgas:[], banco:[],
+                  atualizadoEm:'', atualizadoPor:'' };
 var _jorTab = 'ferias', _jadmTab = 'equipe';
 
 async function jorCarregar(){
@@ -15183,7 +15205,8 @@ async function jorCarregar(){
     var d = await db.collection('config').doc(JOR_DOC).get();
     if (d && d.exists) {
       var j = d.data() || {};
-      _jorDados = { equipe:j.equipe || [], ferias:j.ferias || [], banco:j.banco || [],
+      _jorDados = { equipe:j.equipe || [], ferias:j.ferias || [],
+                    folgas:j.folgas || [], banco:j.banco || [],
                     atualizadoEm:j.atualizadoEm || '', atualizadoPor:j.atualizadoPor || '' };
     }
   } catch (e) { console.warn('jorCarregar:', e); }
@@ -15224,6 +15247,17 @@ function jorPeriodos(){
     });
 }
 
+// As folgas programadas, em ordem de data. Folga é dia avulso: uma
+// data, uma pessoa — nada de período.
+function jorFolgas(){
+  return (_jorDados.folgas || []).filter(function(f){ return f && f.colab; })
+    .map(function(f){ return { colab:f.colab, data:f.data || '', obs:f.obs || '' }; })
+    .sort(function(a, b){
+      if (!a.data) return 1; if (!b.data) return -1;
+      return a.data.localeCompare(b.data);
+    });
+}
+
 function jorResumo(){
   var hoje = cpHojeISO();
   var d90 = (function(){ var d = new Date(hoje + 'T12:00:00'); d.setDate(d.getDate() + 90);
@@ -15242,7 +15276,16 @@ function jorResumo(){
     var min = (Math.round(+b.h || 0) * 60) + Math.round(+b.m || 0);
     saldo += (b.sinal === '-' ? -min : min);
   });
-  return { prox:prox, agora:agora, prog:prog, saldoMin:saldo };
+  var d30 = (function(){ var d = new Date(hoje + 'T12:00:00'); d.setDate(d.getDate() + 30);
+                         return d.toISOString().slice(0, 10); })();
+  var folgaHoje = [], folgaProx = 0;
+  jorFolgas().forEach(function(f){
+    if (!f.data) return;
+    if (f.data === hoje) folgaHoje.push(f.colab);
+    else if (f.data > hoje && f.data <= d30) folgaProx++;
+  });
+  return { prox:prox, agora:agora, prog:prog, saldoMin:saldo,
+           folgaHoje:folgaHoje, folgaProx:folgaProx };
 }
 
 function jorHoras(min){
@@ -15289,6 +15332,10 @@ function jorRender(){
       + '<div class="kc"><div class="kc-l">Programadas</div>'
       +   '<div class="kc-v" style="color:var(--az)">' + cpNum(r.prog) + '</div>'
       +   '<div class="kc-s">nos próximos 90 dias</div></div>'
+      + '<div class="kc"><div class="kc-l">Folga hoje</div>'
+      +   '<div class="kc-v" style="font-size:16px">'
+      +   cpEsc(r.folgaHoje.length ? r.folgaHoje.join(', ') : 'Ninguém') + '</div>'
+      +   '<div class="kc-s">' + cpNum(r.folgaProx) + ' nos próximos 30 dias</div></div>'
       + '</div>'
       + '<div class="cd"><div class="cd-t">📋 Quadro de férias — ordem de saída</div>'
       + '<div class="al al-b" style="font-size:11.5px">ℹ A primeira pessoa da lista é a '
@@ -15312,6 +15359,26 @@ function jorRender(){
     });
     if (!n) h += '<tr><td colspan="7" style="color:var(--tx2);font-size:12px">'
       + 'Nenhum período de férias lançado.</td></tr>';
+    h += '</tbody></table></div></div>';
+    // Folga é dia avulso, não período: fica num quadro próprio, logo
+    // abaixo, porque entra na mesma pergunta — quem não está hoje.
+    h += '<div class="cd"><div class="cd-t">🏖 Folgas programadas</div>'
+      + '<div style="overflow:auto"><table><thead><tr><th>Data</th><th>Colaborador</th>'
+      +   '<th>Situação</th><th>Observação</th></tr></thead><tbody>';
+    var nf = 0;
+    jorFolgas().forEach(function(f){
+      nf++;
+      var sit = !f.data ? '<span style="color:var(--tx2)">sem data</span>'
+        : (f.data < hoje ? '<span style="color:var(--tx2)">passou</span>'
+        : (f.data === hoje ? '<span class="pl pl-b">é hoje</span>'
+        : '<span class="pl pl-ok">programada</span>'));
+      h += '<tr><td>' + (f.data ? cpDataBR(f.data) : '—') + '</td>'
+        + '<td style="font-weight:600">' + cpEsc(f.colab) + '</td>'
+        + '<td style="font-size:10.5px">' + sit + '</td>'
+        + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(f.obs || '—') + '</td></tr>';
+    });
+    if (!nf) h += '<tr><td colspan="4" style="color:var(--tx2);font-size:12px">'
+      + 'Nenhuma folga lançada.</td></tr>';
     h += '</tbody></table></div></div>';
   } else {
     h += '<div class="kgrid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));'
@@ -15356,7 +15423,7 @@ function jorRender(){
 // ── O ADM da frente: onde a jornada é preenchida ────────────────
 function jadmTab(qual, btn){
   _jadmTab = qual;
-  ['equipe','ferias','banco'].forEach(function(k){
+  ['equipe','ferias','folgas','banco'].forEach(function(k){
     var b = document.getElementById('jadm-tab-' + k);
     if (b) b.className = 'stab' + (k === qual ? ' active' : '');
   });
@@ -15418,6 +15485,23 @@ async function jadmSetFerias(i, campo, valor){
 }
 async function jadmTirarFerias(i){
   _jorDados.ferias = (_jorDados.ferias || []).filter(function(_, k){ return k !== i; });
+  await jadmSalvar();
+}
+
+// folgas (dia avulso)
+async function jadmAddFolga(){
+  _jorDados.folgas = (_jorDados.folgas || []).concat([
+    { colab:(_jorDados.equipe || [])[0] || '', data:'', obs:'' }]);
+  await jadmSalvar();
+}
+async function jadmSetFolga(i, campo, valor){
+  var f = (_jorDados.folgas || [])[i];
+  if (!f) return;
+  f[campo] = valor;
+  await jadmSalvar();
+}
+async function jadmTirarFolga(i){
+  _jorDados.folgas = (_jorDados.folgas || []).filter(function(_, k){ return k !== i; });
   await jadmSalvar();
 }
 
@@ -15512,6 +15596,43 @@ function jadmRender(){
     }
   }
 
+  if (_jadmTab === 'folgas') {
+    h += '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
+      + '<span>🏖 Folgas</span>'
+      + '<button class="btn btn-p" onclick="jadmAddFolga()">+ Nova folga</button></div>'
+      + '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.7rem">'
+      + 'Uma data por linha — folga é dia avulso. É daqui que a Gestão de Jornada do '
+      + 'PCP sabe quem não vai estar em cada dia.</div>';
+    if (!eq.length) {
+      h += '<div class="al al-a" style="font-size:12px">Cadastre a equipe primeiro, na aba '
+        + '<strong>Equipe</strong>.</div>';
+    } else {
+      h += '<div style="overflow:auto"><table><thead><tr><th>Colaborador</th><th>Data</th>'
+        +   '<th>Observação</th><th style="width:70px"></th></tr></thead><tbody>';
+      (_jorDados.folgas || []).forEach(function(f, i){
+        h += '<tr><td><select onchange="jadmSetFolga(' + i + ', \'colab\', this.value)"'
+          +   ' style="font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid var(--brd)">'
+          +   '<option value="">—</option>'
+          +   eq.map(function(c){ return '<option value="' + cpEsc(c) + '"'
+                + (f.colab === c ? ' selected' : '') + '>' + cpEsc(c) + '</option>'; }).join('')
+          +   '</select></td>'
+          + '<td><input type="date" value="' + cpEsc(f.data || '') + '"'
+          +   ' onchange="jadmSetFolga(' + i + ', \'data\', this.value)"'
+          +   ' style="font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid var(--brd)"></td>'
+          + '<td><input type="text" value="' + cpEsc(f.obs || '') + '" placeholder="opcional"'
+          +   ' onchange="jadmSetFolga(' + i + ', \'obs\', this.value)"'
+          +   ' style="width:200px;font-size:11px;padding:3px 6px;border-radius:5px;border:1px solid var(--brd)"></td>'
+          + '<td><button class="btn btn-s" style="font-size:10.5px;padding:2px 8px"'
+          +   ' onclick="jadmTirarFolga(' + i + ')">remover</button></td></tr>';
+      });
+      if (!(_jorDados.folgas || []).length)
+        h += '<tr><td colspan="4" style="font-size:12px;color:var(--tx2)">'
+          + 'Nenhuma folga lançada.</td></tr>';
+      h += '</tbody></table></div>';
+    }
+    h += '</div>';
+  }
+
   if (_jadmTab === 'banco') {
     h += '<div class="cd"><div class="cd-t">⏰ Banco de Horas</div>'
       + '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.7rem">'
@@ -15548,6 +15669,770 @@ function jadmRender(){
     }
     h += '</div>';
   }
+  box.innerHTML = h;
+}
+
+// ══ GESTÃO DE JORNADA UNIFICADA — tópico do PCP do ADLV ═════════
+//
+// Pedido do André em 15/11: "no módulo PCP do ADLV seja criado um
+// tópico gestão de jornada unificando todos os dados de férias e banco
+// de horas... assim eu consigo saber dentro de todo o projeto quem
+// estará de folga ou de férias e consigo criar estratégia para não
+// sentir a ausência".
+//
+// Esta tela é SÓ LEITURA. Ela abre a base de cada frente, lê o
+// documento de jornada e fecha. Não grava em lugar nenhum — nem no
+// PATEC, nem nas frentes —, então "não pode afetar em nada o módulo
+// PATEC" continua valendo: o PATEC não sente que foi lido.
+//
+// São duas formas de guardar jornada no projeto, e as duas entram aqui:
+//  · PATEC (ADLV e FAST): base ÚNICA no projeto do ADLV, em
+//    config/ferias {lista:[{colab,saida,dias,retorno}]} e
+//    config/banco_horas {lista:[{colab,horas_h,horas_m,horas_s,
+//    folgas_usadas,datas_folgas:[{data,obs}],destino}]};
+//  · frentes com base própria (Pedidos, Publicação, Devolução): o
+//    documento config/jornada_frente que o ADM de cada uma preenche.
+var JGE_DOC_FRENTE = 'jornada_frente';
+// Quem entra na consolidação. As frentes saem da MESMA lista que faz os
+// tópicos de jornada aparecerem no menu, então frente nova entra aqui
+// sozinha, sem ninguém precisar lembrar desta tela.
+function jgeFrentes(){
+  try {
+    var c = PERMS_SIDEBAR['jornada-mod'];
+    return (c && c.jornadaFrentes) ? c.jornadaFrentes.slice() : [];
+  } catch (e) { return []; }
+}
+function jgeFontes(){
+  var l = [{ chave:'adlv', nome:'PATEC (ADLV + FAST)', ico:'🏛️', tipo:'patec',
+             nota:'base única dos dois blocos' }];
+  jgeFrentes().forEach(function(m){
+    if (typeof modConfigPronta === 'function' && !modConfigPronta(m)) return;
+    l.push({ chave:m, nome:(typeof modNome === 'function' ? modNome(m) : m),
+             ico:(typeof modIco === 'function' ? modIco(m) : '') || '📁',
+             tipo:'frente', nota:'' });
+  });
+  return l;
+}
+
+var _jgeDados = null;          // { em, fontes, ferias, folgas, banco, equipe }
+var _jgeTab = 'hoje';
+var _jgeMes = '';              // AAAA-MM do calendário
+var _jgeFil = { ini:'', fim:'', fonte:'', q:'' };
+var _jgeCarregando = false;
+
+function jgeAdd(iso, n){
+  var d = new Date(iso + 'T12:00:00');
+  if (isNaN(d.getTime())) return iso;
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function jgeHoras(min){
+  var neg = min < 0, a = Math.abs(Math.round(min));
+  return (neg ? '−' : '+') + Math.floor(a / 60) + 'h' + String(a % 60).padStart(2, '0');
+}
+function jgeDiaSem(iso){
+  var d = new Date(iso + 'T12:00:00');
+  return ['dom','seg','ter','qua','qui','sex','sáb'][d.getDay()];
+}
+function jgeFimDeSemana(iso){
+  var w = new Date(iso + 'T12:00:00').getDay();
+  return w === 0 || w === 6;
+}
+
+// ── a leitura, uma frente por vez ───────────────────────────────
+async function jgeLerFonte(f){
+  var out = { ok:false, erro:'', ferias:[], folgas:[], banco:[], equipe:[] };
+  var db = null;
+  try {
+    // Frente com projeto próprio precisa de sessão naquele projeto. Se o
+    // André já entrou nela alguma vez nesta máquina, a sessão volta
+    // sozinha; se não, dizemos isso na tela em vez de ficar em branco.
+    if (f.chave !== 'adlv' && typeof _autenticarModulo === 'function') {
+      var a = await _autenticarModulo(f.chave);
+      if (!a || !a.ok) {
+        out.erro = 'essa frente ainda não tem sessão neste navegador — '
+                 + 'entre nela uma vez e volte aqui';
+        return out;
+      }
+    }
+    db = (f.chave === 'adlv' && typeof getDBJornada === 'function')
+       ? getDBJornada() : getDBModulo(f.chave);
+    if (!db) { out.erro = 'não consegui abrir a base dessa frente'; return out; }
+  } catch (e) { out.erro = (e && e.message) || 'erro ao abrir a base'; return out; }
+
+  try {
+    if (f.tipo === 'patec') {
+      var dF = await db.collection('config').doc('ferias').get();
+      var dB = await db.collection('config').doc('banco_horas').get();
+      var lf = (dF && dF.exists ? (dF.data() || {}).lista : null) || [];
+      var lb = (dB && dB.exists ? (dB.data() || {}).lista : null) || [];
+      var nomes = {};
+      lf.forEach(function(r){
+        if (!r || !r.colab) return;
+        nomes[r.colab] = 1;
+        if (!r.saida) return;      // linha vazia da equipe, sem período
+        var dias = Math.max(1, Math.round(+r.dias || 30));
+        out.ferias.push({ colab:r.colab, saida:r.saida, dias:dias,
+          retorno:r.retorno || jorRetorno(r.saida, dias), obs:r.status || '' });
+      });
+      lb.forEach(function(r){
+        if (!r || !r.colab) return;
+        nomes[r.colab] = 1;
+        var extras = (Math.round(+r.horas_h || 0) * 60) + Math.round(+r.horas_m || 0)
+                   + Math.round((+r.horas_s || 0) / 60);
+        var usadas = Math.round(+r.folgas_usadas || 0);
+        out.banco.push({ colab:r.colab, min:extras - (usadas * 8 * 60), extrasMin:extras,
+                         folgasUsadas:usadas, obs:r.destino || '' });
+        (r.datas_folgas || []).forEach(function(d){
+          if (d && d.data) out.folgas.push({ colab:r.colab, data:d.data, obs:d.obs || '' });
+        });
+      });
+      out.equipe = Object.keys(nomes);
+    } else {
+      var d = await db.collection('config').doc(JGE_DOC_FRENTE).get();
+      var j = (d && d.exists ? d.data() : null) || {};
+      out.equipe = (j.equipe || []).slice();
+      (j.ferias || []).forEach(function(r){
+        if (!r || !r.colab || !r.saida) return;
+        var dias = Math.max(1, Math.round(+r.dias || 30));
+        out.ferias.push({ colab:r.colab, saida:r.saida, dias:dias,
+          retorno:r.retorno || jorRetorno(r.saida, dias), obs:r.obs || '' });
+      });
+      (j.folgas || []).forEach(function(r){
+        if (r && r.colab && r.data) out.folgas.push({ colab:r.colab, data:r.data,
+                                                      obs:r.obs || '' });
+      });
+      (j.banco || []).forEach(function(r){
+        if (!r || !r.colab) return;
+        var min = (Math.round(+r.h || 0) * 60) + Math.round(+r.m || 0);
+        out.banco.push({ colab:r.colab, min:(r.sinal === '-' ? -min : min),
+                         extrasMin:null, folgasUsadas:null, obs:r.obs || '' });
+      });
+    }
+    out.ok = true;
+  } catch (e) {
+    out.erro = (e && e.message) || 'erro ao ler';
+    // "permission-denied" é o caso mais comum e tem recado próprio
+    if (/permission|insufficient/i.test(out.erro))
+      out.erro = 'a base dessa frente recusou a leitura (permissão)';
+  }
+  return out;
+}
+
+async function jgeCarregar(){
+  var fontes = jgeFontes();
+  var d = { em:new Date().toISOString(), fontes:[], ferias:[], folgas:[], banco:[],
+            equipe:[] };
+  for (var i = 0; i < fontes.length; i++) {
+    var f = fontes[i];
+    var r = await jgeLerFonte(f);
+    d.fontes.push({ chave:f.chave, nome:f.nome, ico:f.ico, tipo:f.tipo, nota:f.nota,
+                    ok:r.ok, erro:r.erro, pessoas:r.equipe.length,
+                    nFerias:r.ferias.length, nFolgas:r.folgas.length });
+    var marca = function(x){ x.fonte = f.chave; x.fonteNome = f.nome; x.ico = f.ico;
+                             return x; };
+    r.ferias.forEach(function(x){ d.ferias.push(marca(x)); });
+    r.folgas.forEach(function(x){ d.folgas.push(marca(x)); });
+    r.banco.forEach(function(x){ d.banco.push(marca(x)); });
+    r.equipe.forEach(function(c){ d.equipe.push({ fonte:f.chave, fonteNome:f.nome,
+                                                  colab:c }); });
+  }
+  d.ferias.sort(function(a, b){ return String(a.saida).localeCompare(String(b.saida)); });
+  d.folgas.sort(function(a, b){ return String(a.data).localeCompare(String(b.data)); });
+  _jgeDados = d;
+  return d;
+}
+
+// ── o modelo de ausência: férias e folga na mesma régua ─────────
+// Uma ausência é um intervalo [ini, fim] com dono e frente. Férias é um
+// intervalo de verdade; folga é um intervalo de um dia. Com as duas na
+// mesma forma, o calendário, a sobreposição e os cards saem da mesma
+// conta — foi para isso que valeu normalizar.
+function jgeAusencias(){
+  if (!_jgeDados) return [];
+  var l = [];
+  _jgeDados.ferias.forEach(function(f){
+    if (!f.saida) return;
+    // o retorno é o dia em que a pessoa VOLTA: o último dia fora é o
+    // anterior, senão todo quadro de férias ficaria um dia maior
+    var fim = jgeAdd(f.retorno || jorRetorno(f.saida, f.dias), -1);
+    l.push({ tipo:'ferias', colab:f.colab, fonte:f.fonte, fonteNome:f.fonteNome,
+             ico:f.ico, ini:f.saida, fim:(fim < f.saida ? f.saida : fim),
+             dias:f.dias, obs:f.obs || '' });
+  });
+  _jgeDados.folgas.forEach(function(f){
+    if (!f.data) return;
+    l.push({ tipo:'folga', colab:f.colab, fonte:f.fonte, fonteNome:f.fonteNome,
+             ico:f.ico, ini:f.data, fim:f.data, dias:1, obs:f.obs || '' });
+  });
+  return l.sort(function(a, b){ return a.ini.localeCompare(b.ini); });
+}
+
+function jgePassaFiltro(a){
+  if (_jgeFil.fonte && a.fonte !== _jgeFil.fonte) return false;
+  if (_jgeFil.q && cpNormNome(a.colab).indexOf(cpNormNome(_jgeFil.q)) === -1) return false;
+  if (_jgeFil.ini && a.fim < _jgeFil.ini) return false;
+  if (_jgeFil.fim && a.ini > _jgeFil.fim) return false;
+  return true;
+}
+function jgeAusenciasFil(){ return jgeAusencias().filter(jgePassaFiltro); }
+
+function jgeAusentesNo(data, lista){
+  return (lista || jgeAusenciasFil()).filter(function(a){
+    return a.ini <= data && data <= a.fim; });
+}
+
+// tamanho de cada frente, para dizer quanto da equipe está fora
+function jgeEquipePorFonte(){
+  var m = {};
+  if (!_jgeDados) return m;
+  _jgeDados.equipe.forEach(function(e){
+    m[e.fonte] = m[e.fonte] || {};
+    m[e.fonte][e.colab] = 1;
+  });
+  var r = {};
+  Object.keys(m).forEach(function(k){ r[k] = Object.keys(m[k]).length; });
+  return r;
+}
+
+// ── a tela ──────────────────────────────────────────────────────
+function jgeTab(qual, btn){
+  _jgeTab = qual;
+  ['hoje','cal','ferias','folgas','banco','risco'].forEach(function(k){
+    var b = document.getElementById('jge-tab-' + k);
+    if (b) b.className = 'stab' + (k === qual ? ' active' : '');
+  });
+  jgeRender();
+}
+
+async function jgeAbrir(forcar){
+  var box = document.getElementById('jge-corpo');
+  if (_jgeCarregando) return;
+  if (_jgeDados && !forcar) { jgeRender(); return; }
+  _jgeCarregando = true;
+  if (box) box.innerHTML = '<div class="cd"><div style="font-size:12px;color:var(--tx2)">'
+    + '⏳ Lendo a jornada de cada frente...</div></div>';
+  try { await jgeCarregar(); } catch (e) { console.warn('jgeAbrir:', e); }
+  _jgeCarregando = false;
+  if (!_jgeFil.ini) { _jgeFil.ini = cpHojeISO(); _jgeFil.fim = jgeAdd(cpHojeISO(), 90); }
+  if (!_jgeMes) _jgeMes = cpHojeISO().slice(0, 7);
+  jgeRender();
+}
+function jgeSetFil(campo, valor){ _jgeFil[campo] = valor; jgeRender(); }
+function jgePeriodoRapido(n){
+  _jgeFil.ini = cpHojeISO();
+  _jgeFil.fim = n ? jgeAdd(cpHojeISO(), n) : '';
+  jgeRender();
+}
+function jgeMesPasso(n){
+  var p = (_jgeMes || cpHojeISO().slice(0, 7)).split('-');
+  var d = new Date(+p[0], +p[1] - 1 + n, 1);
+  _jgeMes = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  jgeRender();
+}
+
+function jgeCabecalho(){
+  var d = _jgeDados;
+  var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
+    + '<span>🗓 Gestão de Jornada — todo o projeto</span>'
+    + '<button class="btn btn-s" onclick="jgeAbrir(true)">↻ Reler as bases</button></div>'
+    + '<div style="font-size:11px;color:var(--tx2);line-height:1.7">'
+    + 'Férias, folgas e banco de horas de todas as frentes numa tela só. Esta tela '
+    + '<strong>só lê</strong>: o preenchimento continua em cada frente (no PATEC, '
+    + 'ADM › Jornada; nas outras, ADM › Férias/Folgas/Banco), e nada é gravado '
+    + 'daqui.</div>';
+  // de onde cada número veio — e o que não deu para ler
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:.7rem">';
+  (d.fontes || []).forEach(function(f){
+    var cor = f.ok ? (f.pessoas ? 'var(--vd)' : 'var(--tx2)') : 'var(--vm)';
+    h += '<span style="font-size:10.5px;border:1px solid var(--brd);border-left:3px solid '
+      + cor + ';border-radius:5px;padding:3px 8px;background:var(--bg2)">'
+      + f.ico + ' <strong>' + cpEsc(f.nome) + '</strong> · '
+      + (f.ok ? (f.pessoas ? (cpNum(f.pessoas) + ' pessoa(s), ' + cpNum(f.nFerias)
+                 + ' período(s), ' + cpNum(f.nFolgas) + ' folga(s)')
+                 : 'sem preenchimento')
+              : cpEsc(f.erro)) + '</span>';
+  });
+  h += '</div>';
+  var ruins = (d.fontes || []).filter(function(f){ return !f.ok; });
+  if (ruins.length) h += '<div class="al al-a" style="font-size:11px;margin-top:.6rem">'
+    + '⚠ ' + cpNum(ruins.length) + ' frente(s) não entraram na conta acima. Os números '
+    + 'desta tela são só das frentes que abriram.</div>';
+  h += '</div>';
+  return h;
+}
+
+function jgeFiltroHTML(){
+  var fon = (_jgeDados.fontes || []);
+  return '<div class="cd"><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'
+    + '<span style="font-size:11px;font-weight:700;color:var(--tx2)">PERÍODO</span>'
+    + '<input type="date" value="' + cpEsc(_jgeFil.ini) + '"'
+    +   ' onchange="jgeSetFil(\'ini\', this.value)"'
+    +   ' style="font-size:11.5px;padding:4px 7px;border-radius:6px;border:1px solid var(--brd)">'
+    + '<span style="font-size:11px;color:var(--tx2)">até</span>'
+    + '<input type="date" value="' + cpEsc(_jgeFil.fim) + '"'
+    +   ' onchange="jgeSetFil(\'fim\', this.value)"'
+    +   ' style="font-size:11.5px;padding:4px 7px;border-radius:6px;border:1px solid var(--brd)">'
+    + '<button class="btn btn-s" onclick="jgePeriodoRapido(30)">30 dias</button>'
+    + '<button class="btn btn-s" onclick="jgePeriodoRapido(90)">90 dias</button>'
+    + '<button class="btn btn-s" onclick="jgePeriodoRapido(365)">1 ano</button>'
+    + '<button class="btn btn-s" onclick="jgePeriodoRapido(0)">tudo</button>'
+    + '<span style="font-size:11px;font-weight:700;color:var(--tx2);margin-left:6px">FRENTE</span>'
+    + '<select onchange="jgeSetFil(\'fonte\', this.value)"'
+    +   ' style="font-size:11.5px;padding:4px 7px;border-radius:6px;border:1px solid var(--brd)">'
+    +   '<option value="">todas</option>'
+    +   fon.map(function(f){ return '<option value="' + f.chave + '"'
+          + (_jgeFil.fonte === f.chave ? ' selected' : '') + '>' + f.ico + ' '
+          + cpEsc(f.nome) + '</option>'; }).join('')
+    +   '</select>'
+    + '<input type="text" value="' + cpEsc(_jgeFil.q) + '" placeholder="filtrar por nome"'
+    +   ' oninput="jgeSetFil(\'q\', this.value)"'
+    +   ' style="font-size:11.5px;padding:4px 7px;border-radius:6px;border:1px solid var(--brd);width:150px">'
+    + '</div></div>';
+}
+
+function jgeSelo(a){
+  return a.tipo === 'ferias' ? '<span class="pl pl-b">🌴 férias</span>'
+                             : '<span class="pl pl-w">🏖 folga</span>';
+}
+
+// ── aba 1: hoje, amanhã e as duas próximas semanas ──────────────
+function jgeHojeHTML(){
+  var hoje = cpHojeISO();
+  var todas = jgeAusencias().filter(function(a){
+    return (!_jgeFil.fonte || a.fonte === _jgeFil.fonte); });
+  var foraHoje = jgeAusentesNo(hoje, todas);
+  var foraAmanha = jgeAusentesNo(jgeAdd(hoje, 1), todas);
+  var eq = jgeEquipePorFonte();
+  var totalEq = Object.keys(eq).reduce(function(s, k){
+    return s + ((!_jgeFil.fonte || k === _jgeFil.fonte) ? eq[k] : 0); }, 0);
+  var em30 = todas.filter(function(a){
+    return a.ini > hoje && a.ini <= jgeAdd(hoje, 30); }).length;
+  var saldo = 0;
+  (_jgeDados.banco || []).forEach(function(b){
+    if (!_jgeFil.fonte || b.fonte === _jgeFil.fonte) saldo += (+b.min || 0); });
+
+  var h = '<div class="kgrid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));'
+    + 'margin-bottom:1rem">'
+    + '<div class="kc ' + (foraHoje.length ? 'bad' : 'ok') + '">'
+    +   '<div class="kc-l">Fora hoje</div>'
+    +   '<div class="kc-v">' + cpNum(foraHoje.length) + '</div>'
+    +   '<div class="kc-s">de ' + cpNum(totalEq) + ' no projeto</div></div>'
+    + '<div class="kc"><div class="kc-l">Fora amanhã</div>'
+    +   '<div class="kc-v" style="color:var(--az)">' + cpNum(foraAmanha.length) + '</div>'
+    +   '<div class="kc-s">' + cpDataBR(jgeAdd(hoje, 1)) + '</div></div>'
+    + '<div class="kc"><div class="kc-l">Começam em 30 dias</div>'
+    +   '<div class="kc-v" style="color:var(--am)">' + cpNum(em30) + '</div>'
+    +   '<div class="kc-s">férias + folgas</div></div>'
+    + '<div class="kc"><div class="kc-l">Banco do projeto</div>'
+    +   '<div class="kc-v" style="color:' + (saldo < 0 ? 'var(--vm)' : 'var(--vd)') + '">'
+    +   jgeHoras(saldo) + '</div><div class="kc-s">soma de todas as frentes</div></div>'
+    + '</div>';
+
+  // quem está fora hoje, por frente
+  h += '<div class="cd"><div class="cd-t">👤 Quem não está hoje — ' + cpDataBR(hoje)
+    + ' (' + jgeDiaSem(hoje) + ')</div>';
+  if (!foraHoje.length) {
+    h += '<div class="al al-v" style="font-size:12px">✔ Equipe completa hoje em todas as '
+      + 'frentes.</div>';
+  } else {
+    h += '<div style="overflow:auto"><table><thead><tr><th>Colaborador</th><th>Frente</th>'
+      +   '<th>O quê</th><th>Desde</th><th>Volta em</th><th>Observação</th>'
+      +   '</tr></thead><tbody>';
+    foraHoje.forEach(function(a){
+      h += '<tr><td style="font-weight:600">' + cpEsc(a.colab) + '</td>'
+        + '<td style="font-size:10.5px">' + a.ico + ' ' + cpEsc(a.fonteNome) + '</td>'
+        + '<td>' + jgeSelo(a) + '</td>'
+        + '<td>' + cpDataBR(a.ini) + '</td>'
+        + '<td>' + cpDataBR(jgeAdd(a.fim, 1)) + '</td>'
+        + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(a.obs || '—')
+        + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '</div>';
+
+  // as próximas duas semanas, dia por dia — é aqui que ele monta a
+  // estratégia: dá para ver a semana inteira de uma vez
+  h += '<div class="cd"><div class="cd-t">📆 Próximos 14 dias</div>'
+    + '<div style="overflow:auto"><table style="table-layout:fixed;width:100%">'
+    +   '<thead><tr><th style="width:150px">Dia</th>'
+    +   '<th style="width:60px;text-align:right">Fora</th><th>Quem</th>'
+    +   '</tr></thead><tbody>';
+  for (var i = 0; i < 14; i++) {
+    var dia = jgeAdd(hoje, i);
+    var fora = jgeAusentesNo(dia, todas);
+    var fds = jgeFimDeSemana(dia);
+    h += '<tr style="' + (fds ? 'opacity:.55' : '') + '">'
+      + '<td style="font-weight:600">' + cpDataBR(dia)
+      +   ' <span style="font-size:10px;color:var(--tx2)">' + jgeDiaSem(dia) + '</span>'
+      +   (i === 0 ? ' <span class="pl pl-b">hoje</span>' : '') + '</td>'
+      + '<td style="text-align:right;font-weight:700;color:'
+      +   (fora.length >= 2 ? 'var(--vm)' : (fora.length ? 'var(--am)' : 'var(--tx2)'))
+      +   '">' + cpNum(fora.length) + '</td>'
+      + '<td style="font-size:10.5px;white-space:normal;word-break:break-word">'
+      +   (fora.length ? fora.map(function(a){
+            return (a.tipo === 'ferias' ? '🌴 ' : '🏖 ') + cpEsc(a.colab)
+                 + ' <span style="color:var(--tx2)">(' + cpEsc(a.fonteNome) + ')</span>';
+          }).join(' · ') : '<span style="color:var(--tx2)">—</span>')
+      + '</td></tr>';
+  }
+  h += '</tbody></table></div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-top:.5rem">'
+    + 'Sábado e domingo aparecem apagados: a ausência cai no dia, mas não tira ninguém '
+    + 'de serviço.</div></div>';
+  return h;
+}
+
+// ── aba 2: o calendário do mês ──────────────────────────────────
+function jgeCalHTML(){
+  var mes = _jgeMes || cpHojeISO().slice(0, 7);
+  var p = mes.split('-'), ano = +p[0], m = +p[1];
+  var prim = new Date(ano, m - 1, 1), ult = new Date(ano, m, 0);
+  var nd = ult.getDate(), off = prim.getDay();
+  var todas = jgeAusencias().filter(function(a){
+    return (!_jgeFil.fonte || a.fonte === _jgeFil.fonte)
+        && (!_jgeFil.q || cpNormNome(a.colab).indexOf(cpNormNome(_jgeFil.q)) !== -1); });
+  var MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto',
+               'setembro','outubro','novembro','dezembro'];
+  var hoje = cpHojeISO();
+
+  var h = '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
+    + '<span>📅 ' + MESES[m - 1] + ' de ' + ano + '</span>'
+    + '<span><button class="btn btn-s" onclick="jgeMesPasso(-1)">‹ mês anterior</button> '
+    + '<button class="btn btn-s" onclick="jgeMesPasso(1)">mês seguinte ›</button></span>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">';
+  ['dom','seg','ter','qua','qui','sex','sáb'].forEach(function(d){
+    h += '<div style="font-size:9.5px;font-weight:700;color:var(--tx2);text-align:center;'
+      + 'text-transform:uppercase;letter-spacing:.5px;padding:2px 0">' + d + '</div>';
+  });
+  for (var i = 0; i < off; i++) h += '<div></div>';
+  for (var dia = 1; dia <= nd; dia++) {
+    var iso = ano + '-' + String(m).padStart(2, '0') + '-' + String(dia).padStart(2, '0');
+    var fora = jgeAusentesNo(iso, todas);
+    var fds = jgeFimDeSemana(iso);
+    var bg = fora.length >= 3 ? 'var(--vmc)' : (fora.length === 2 ? 'var(--amc)'
+           : (fora.length === 1 ? 'var(--azc)' : 'var(--bg2)'));
+    h += '<div style="border:1px solid var(--brd);border-radius:6px;padding:4px 5px;'
+      + 'min-height:62px;background:' + bg + ';'
+      + (iso === hoje ? 'box-shadow:0 0 0 2px var(--az) inset;' : '')
+      + (fds ? 'opacity:.6;' : '') + '">'
+      + '<div style="font-size:10.5px;font-weight:700;color:var(--tx2)">' + dia
+      +   (fora.length ? ' <span style="float:right;color:'
+          + (fora.length >= 3 ? 'var(--vm)' : 'var(--tx)') + '">' + fora.length + '</span>'
+          : '') + '</div>';
+    fora.slice(0, 4).forEach(function(a){
+      h += '<div style="font-size:9.5px;line-height:1.45;white-space:nowrap;overflow:hidden;'
+        + 'text-overflow:ellipsis" title="' + cpEsc(a.colab) + ' · ' + cpEsc(a.fonteNome)
+        + '">' + (a.tipo === 'ferias' ? '🌴' : '🏖') + ' ' + cpEsc(a.colab) + '</div>';
+    });
+    if (fora.length > 4) h += '<div style="font-size:9px;color:var(--tx2)">+ '
+      + (fora.length - 4) + '</div>';
+    h += '</div>';
+  }
+  h += '</div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-top:.7rem">'
+    + '🌴 férias · 🏖 folga — o fundo escurece conforme o número de ausentes no dia '
+    + '(1 azul, 2 âmbar, 3 ou mais vermelho). O filtro de frente também vale aqui; o de '
+    + 'período, não — o calendário é sempre o mês inteiro.</div></div>';
+  return h;
+}
+
+// ── aba 3: férias ───────────────────────────────────────────────
+function jgeFeriasHTML(){
+  var l = jgeAusenciasFil().filter(function(a){ return a.tipo === 'ferias'; });
+  var hoje = cpHojeISO();
+  var h = jgeFiltroHTML()
+    + '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
+    + '<span>🌴 Férias de todo o projeto — ordem de saída</span>'
+    + '<span style="font-size:11px;color:var(--tx2)">' + cpNum(l.length)
+    + ' período(s)</span></div>'
+    + '<div style="overflow:auto"><table><thead><tr><th>#</th><th>Colaborador</th>'
+    +   '<th>Frente</th><th>Saída</th><th style="text-align:right">Dias</th>'
+    +   '<th>Retorno</th><th>Situação</th><th>Falta(m)</th></tr></thead><tbody>';
+  l.forEach(function(a, i){
+    var sit = a.fim < hoje ? '<span style="color:var(--tx2)">concluída</span>'
+      : (a.ini <= hoje ? '<span class="pl pl-b">em férias</span>'
+      : '<span class="pl pl-ok">programada</span>');
+    var faltam = a.ini > hoje
+      ? Math.round((new Date(a.ini + 'T12:00:00') - new Date(hoje + 'T12:00:00'))
+                   / 86400000) + ' dia(s)'
+      : (a.fim >= hoje ? 'em curso' : '—');
+    h += '<tr><td>' + (i + 1) + '</td>'
+      + '<td style="font-weight:600">' + cpEsc(a.colab) + '</td>'
+      + '<td style="font-size:10.5px">' + a.ico + ' ' + cpEsc(a.fonteNome) + '</td>'
+      + '<td>' + cpDataBR(a.ini) + '</td>'
+      + '<td style="text-align:right">' + cpNum(a.dias) + '</td>'
+      + '<td>' + cpDataBR(jgeAdd(a.fim, 1)) + '</td>'
+      + '<td style="font-size:10.5px">' + sit + '</td>'
+      + '<td style="font-size:10.5px;color:var(--tx2)">' + faltam + '</td></tr>';
+  });
+  if (!l.length) h += '<tr><td colspan="8" style="font-size:12px;color:var(--tx2)">'
+    + 'Nenhum período de férias no filtro.</td></tr>';
+  h += '</tbody></table></div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-top:.5rem">'
+    + 'O retorno é o dia em que a pessoa volta — o último dia de férias é o anterior.'
+    + '</div></div>';
+  return h;
+}
+
+// ── aba 4: folgas ───────────────────────────────────────────────
+function jgeFolgasHTML(){
+  var l = jgeAusenciasFil().filter(function(a){ return a.tipo === 'folga'; });
+  var hoje = cpHojeISO();
+  var h = jgeFiltroHTML()
+    + '<div class="cd"><div class="cd-t" style="justify-content:space-between">'
+    + '<span>🏖 Folgas de todo o projeto</span>'
+    + '<span style="font-size:11px;color:var(--tx2)">' + cpNum(l.length)
+    + ' folga(s)</span></div>'
+    + '<div style="overflow:auto"><table><thead><tr><th>Data</th><th>Dia</th>'
+    +   '<th>Colaborador</th><th>Frente</th><th>Situação</th><th>Observação</th>'
+    +   '</tr></thead><tbody>';
+  l.forEach(function(a){
+    var sit = a.ini < hoje ? '<span style="color:var(--tx2)">passou</span>'
+      : (a.ini === hoje ? '<span class="pl pl-b">é hoje</span>'
+      : '<span class="pl pl-ok">programada</span>');
+    h += '<tr><td style="font-weight:600">' + cpDataBR(a.ini) + '</td>'
+      + '<td style="font-size:10.5px;color:var(--tx2)">' + jgeDiaSem(a.ini) + '</td>'
+      + '<td style="font-weight:600">' + cpEsc(a.colab) + '</td>'
+      + '<td style="font-size:10.5px">' + a.ico + ' ' + cpEsc(a.fonteNome) + '</td>'
+      + '<td style="font-size:10.5px">' + sit + '</td>'
+      + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(a.obs || '—')
+      + '</td></tr>';
+  });
+  if (!l.length) h += '<tr><td colspan="6" style="font-size:12px;color:var(--tx2)">'
+    + 'Nenhuma folga no filtro.</td></tr>';
+  h += '</tbody></table></div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-top:.5rem">'
+    + 'No PATEC as folgas vêm das datas lançadas no banco de horas; nas outras frentes, '
+    + 'da aba Folgas do ADM da frente.</div></div>';
+  return h;
+}
+
+// ── aba 5: banco de horas ───────────────────────────────────────
+function jgeBancoHTML(){
+  var l = (_jgeDados.banco || []).filter(function(b){
+    return (!_jgeFil.fonte || b.fonte === _jgeFil.fonte)
+        && (!_jgeFil.q || cpNormNome(b.colab).indexOf(cpNormNome(_jgeFil.q)) !== -1); });
+  var porFonte = {};
+  l.forEach(function(b){
+    porFonte[b.fonte] = porFonte[b.fonte] || { nome:b.fonteNome, ico:b.ico, min:0, n:0,
+                                               credor:0, devedor:0 };
+    var f = porFonte[b.fonte];
+    f.min += (+b.min || 0); f.n++;
+    if ((+b.min || 0) > 0) f.credor++; else if ((+b.min || 0) < 0) f.devedor++;
+  });
+  var tot = l.reduce(function(s, b){ return s + (+b.min || 0); }, 0);
+
+  var h = jgeFiltroHTML()
+    + '<div class="kgrid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));'
+    + 'margin-bottom:1rem">'
+    + '<div class="kc"><div class="kc-l">Saldo do projeto</div>'
+    +   '<div class="kc-v" style="color:' + (tot < 0 ? 'var(--vm)' : 'var(--vd)') + '">'
+    +   jgeHoras(tot) + '</div><div class="kc-s">' + cpNum(l.length)
+    +   ' pessoa(s)</div></div>'
+    + '<div class="kc"><div class="kc-l">A favor</div>'
+    +   '<div class="kc-v" style="color:var(--vd)">'
+    +   cpNum(l.filter(function(b){ return (+b.min || 0) > 0; }).length)
+    +   '</div><div class="kc-s">têm horas para receber ou folgar</div></div>'
+    + '<div class="kc"><div class="kc-l">Devendo</div>'
+    +   '<div class="kc-v" style="color:var(--vm)">'
+    +   cpNum(l.filter(function(b){ return (+b.min || 0) < 0; }).length)
+    +   '</div><div class="kc-s">precisam repor</div></div>'
+    + '</div>';
+
+  h += '<div class="cd"><div class="cd-t">⏰ Por frente</div>'
+    + '<div style="overflow:auto"><table><thead><tr><th>Frente</th>'
+    +   '<th style="text-align:right">Pessoas</th><th style="text-align:right">A favor</th>'
+    +   '<th style="text-align:right">Devendo</th><th style="text-align:right">Saldo</th>'
+    +   '</tr></thead><tbody>';
+  Object.keys(porFonte).forEach(function(k){
+    var f = porFonte[k];
+    h += '<tr><td style="font-weight:600">' + f.ico + ' ' + cpEsc(f.nome) + '</td>'
+      + '<td style="text-align:right">' + cpNum(f.n) + '</td>'
+      + '<td style="text-align:right;color:var(--vd)">' + cpNum(f.credor) + '</td>'
+      + '<td style="text-align:right;color:var(--vm)">' + cpNum(f.devedor) + '</td>'
+      + '<td style="text-align:right;font-weight:700;color:'
+      +   (f.min < 0 ? 'var(--vm)' : 'var(--vd)') + '">' + jgeHoras(f.min) + '</td></tr>';
+  });
+  if (!Object.keys(porFonte).length) h += '<tr><td colspan="5" style="font-size:12px;'
+    + 'color:var(--tx2)">Nada preenchido no filtro.</td></tr>';
+  h += '</tbody></table></div></div>';
+
+  h += '<div class="cd"><div class="cd-t">👤 Pessoa por pessoa</div>'
+    + '<div style="overflow:auto"><table><thead><tr><th>Colaborador</th><th>Frente</th>'
+    +   '<th style="text-align:right">Saldo</th><th style="text-align:right">Extras</th>'
+    +   '<th style="text-align:right">Folgas usadas</th><th>Observação</th>'
+    +   '</tr></thead><tbody>';
+  l.slice().sort(function(a, b){ return (+a.min || 0) - (+b.min || 0); })
+   .forEach(function(b){
+    h += '<tr><td style="font-weight:600">' + cpEsc(b.colab) + '</td>'
+      + '<td style="font-size:10.5px">' + b.ico + ' ' + cpEsc(b.fonteNome) + '</td>'
+      + '<td style="text-align:right;font-weight:700;color:'
+      +   ((+b.min || 0) < 0 ? 'var(--vm)' : ((+b.min || 0) > 0 ? 'var(--vd)'
+          : 'var(--tx2)')) + '">' + jgeHoras(+b.min || 0) + '</td>'
+      + '<td style="text-align:right;font-size:10.5px">'
+      +   (b.extrasMin == null ? '—' : jgeHoras(b.extrasMin)) + '</td>'
+      + '<td style="text-align:right;font-size:10.5px">'
+      +   (b.folgasUsadas == null ? '—' : cpNum(b.folgasUsadas)) + '</td>'
+      + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(b.obs || '—')
+      + '</td></tr>';
+  });
+  if (!l.length) h += '<tr><td colspan="6" style="font-size:12px;color:var(--tx2)">'
+    + 'Nada preenchido no filtro.</td></tr>';
+  h += '</tbody></table></div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-top:.5rem">'
+    + 'No PATEC o saldo é a hora extra menos as folgas já tiradas (8h cada), a mesma '
+    + 'conta da tela de lá; nas outras frentes é o saldo lançado no ADM. As colunas '
+    + 'Extras e Folgas usadas só existem no PATEC.</div></div>';
+  return h;
+}
+
+// ── aba 6: risco de ausência ────────────────────────────────────
+// "criar estratégia para não sentir a ausência": o que atrapalha não é
+// uma pessoa de férias, é duas da MESMA frente fora no mesmo dia. Esta
+// aba procura exatamente isso, dia por dia, dentro do período do filtro.
+function jgeRiscoHTML(){
+  var ini = _jgeFil.ini || cpHojeISO();
+  var fim = _jgeFil.fim || jgeAdd(ini, 90);
+  if (fim < ini) fim = jgeAdd(ini, 90);
+  var todas = jgeAusencias().filter(function(a){
+    return (!_jgeFil.fonte || a.fonte === _jgeFil.fonte); });
+  var eq = jgeEquipePorFonte();
+  var fontes = {};
+  (_jgeDados.fontes || []).forEach(function(f){ fontes[f.chave] = f; });
+
+  // um laço só pelos dias úteis do período
+  var dias = [], d = ini, guarda = 0;
+  while (d <= fim && guarda++ < 1200) { dias.push(d); d = jgeAdd(d, 1); }
+  var picos = [], porFonte = {}, criticos = 0;
+  dias.forEach(function(dia){
+    if (jgeFimDeSemana(dia)) return;          // dia sem serviço não é risco
+    var fora = jgeAusentesNo(dia, todas);
+    if (!fora.length) return;
+    var cont = {};
+    fora.forEach(function(a){ (cont[a.fonte] = cont[a.fonte] || []).push(a); });
+    Object.keys(cont).forEach(function(k){
+      var n = cont[k].length, tam = eq[k] || 0;
+      porFonte[k] = porFonte[k] || { dias:0, pior:0, nome:(fontes[k] || {}).nome || k,
+                                     ico:(fontes[k] || {}).ico || '', tam:tam };
+      porFonte[k].dias++;
+      if (n > porFonte[k].pior) porFonte[k].pior = n;
+      if (n >= 2) {
+        criticos++;
+        picos.push({ dia:dia, fonte:k, nome:porFonte[k].nome, ico:porFonte[k].ico,
+                     n:n, tam:tam, quem:cont[k] });
+      }
+    });
+  });
+
+  var h = jgeFiltroHTML();
+  h += '<div class="kgrid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));'
+    + 'margin-bottom:1rem">'
+    + '<div class="kc ' + (criticos ? 'bad' : 'ok') + '">'
+    +   '<div class="kc-l">Dias de atenção</div>'
+    +   '<div class="kc-v">' + cpNum(criticos) + '</div>'
+    +   '<div class="kc-s">2+ da mesma frente fora</div></div>'
+    + '<div class="kc"><div class="kc-l">Dias úteis no período</div>'
+    +   '<div class="kc-v" style="color:var(--az)">'
+    +   cpNum(dias.filter(function(x){ return !jgeFimDeSemana(x); }).length)
+    +   '</div><div class="kc-s">' + cpDataBR(ini) + ' a ' + cpDataBR(fim) + '</div></div>'
+    + '<div class="kc"><div class="kc-l">Frentes afetadas</div>'
+    +   '<div class="kc-v" style="color:var(--am)">'
+    +   cpNum(Object.keys(porFonte).length) + '</div>'
+    +   '<div class="kc-s">têm alguém fora no período</div></div>'
+    + '</div>';
+
+  h += '<div class="cd"><div class="cd-t">⚠️ Dias em que duas ou mais pessoas da mesma '
+    + 'frente estão fora</div>';
+  if (!picos.length) {
+    h += '<div class="al al-v" style="font-size:12px">✔ Nenhum dia útil do período com '
+      + 'duas pessoas da mesma frente fora ao mesmo tempo. As ausências estão '
+      + 'espalhadas.</div>';
+  } else {
+    h += '<div style="overflow:auto"><table><thead><tr><th>Dia</th><th>Frente</th>'
+      +   '<th style="text-align:right">Fora</th><th style="text-align:right">Equipe</th>'
+      +   '<th>Quem</th></tr></thead><tbody>';
+    picos.slice(0, 120).forEach(function(p){
+      var pct = p.tam ? Math.round(p.n * 100 / p.tam) : null;
+      h += '<tr><td style="font-weight:600">' + cpDataBR(p.dia)
+        +   ' <span style="font-size:10px;color:var(--tx2)">' + jgeDiaSem(p.dia)
+        +   '</span></td>'
+        + '<td style="font-size:10.5px">' + p.ico + ' ' + cpEsc(p.nome) + '</td>'
+        + '<td style="text-align:right;font-weight:700;color:'
+        +   (pct != null && pct >= 50 ? 'var(--vm)' : 'var(--am)') + '">' + cpNum(p.n)
+        +   (pct != null ? ' <span style="font-size:9.5px;font-weight:400">(' + pct
+            + '%)</span>' : '') + '</td>'
+        + '<td style="text-align:right;font-size:10.5px">'
+        +   (p.tam ? cpNum(p.tam) : '—') + '</td>'
+        + '<td style="font-size:10.5px">' + p.quem.map(function(a){
+            return (a.tipo === 'ferias' ? '🌴 ' : '🏖 ') + cpEsc(a.colab); }).join(' · ')
+        + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    if (picos.length > 120) h += '<div style="font-size:10.5px;color:var(--tx2);'
+      + 'margin-top:.4rem">Mostrando os 120 primeiros de ' + cpNum(picos.length)
+      + ' — aperte o período para ver o resto.</div>';
+  }
+  h += '</div>';
+
+  h += '<div class="cd"><div class="cd-t">📉 Quanto cada frente sente, no período</div>'
+    + '<div style="overflow:auto"><table><thead><tr><th>Frente</th>'
+    +   '<th style="text-align:right">Equipe</th>'
+    +   '<th style="text-align:right">Dias úteis com alguém fora</th>'
+    +   '<th style="text-align:right">Pior dia</th><th>Leitura</th>'
+    +   '</tr></thead><tbody>';
+  var uteis = dias.filter(function(x){ return !jgeFimDeSemana(x); }).length || 1;
+  Object.keys(porFonte).sort(function(a, b){ return porFonte[b].pior - porFonte[a].pior; })
+    .forEach(function(k){
+      var f = porFonte[k];
+      var pct = f.tam ? Math.round(f.pior * 100 / f.tam) : null;
+      // uma pessoa fora nunca é "remanejar", mesmo numa frente de dois,
+      // em que ela dá 50% — o que atrapalha é duas fora no mesmo dia
+      var leitura = !f.tam ? 'equipe não cadastrada nessa frente'
+        : (f.pior >= 2 && pct >= 50
+             ? 'metade ou mais da frente fora no mesmo dia — vale remanejar'
+        : (f.pior >= 2 ? 'dá para cobrir dentro da frente, mas sem folga'
+        : (pct >= 50 ? 'frente pequena: um ausente já é metade dela'
+        : 'uma pessoa por vez, tranquilo')));
+      h += '<tr><td style="font-weight:600">' + f.ico + ' ' + cpEsc(f.nome) + '</td>'
+        + '<td style="text-align:right">' + (f.tam ? cpNum(f.tam) : '—') + '</td>'
+        + '<td style="text-align:right">' + cpNum(f.dias)
+        +   ' <span style="font-size:9.5px;color:var(--tx2)">de ' + cpNum(uteis)
+        +   '</span></td>'
+        + '<td style="text-align:right;font-weight:700">' + cpNum(f.pior)
+        +   (pct != null ? ' <span style="font-size:9.5px;font-weight:400">(' + pct
+            + '%)</span>' : '') + '</td>'
+        + '<td style="font-size:10.5px;color:var(--tx2)">' + leitura + '</td></tr>';
+    });
+  if (!Object.keys(porFonte).length) h += '<tr><td colspan="5" style="font-size:12px;'
+    + 'color:var(--tx2)">Ninguém fora no período — nada a remanejar.</td></tr>';
+  h += '</tbody></table></div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-top:.5rem">'
+    + 'O "pior dia" é o maior número de pessoas da mesma frente fora no mesmo dia útil. '
+    + 'A porcentagem é sobre a equipe cadastrada naquela frente — frente sem equipe '
+    + 'cadastrada aparece com "—" porque não há com o que comparar.</div></div>';
+  return h;
+}
+
+function jgeRender(){
+  var box = document.getElementById('jge-corpo');
+  if (!box) return;
+  if (!_jgeDados) { box.innerHTML = '<div class="cd"><div style="font-size:12px;'
+    + 'color:var(--tx2)">Nada lido ainda. <button class="btn btn-p" '
+    + 'onclick="jgeAbrir(true)">Ler as bases</button></div></div>'; return; }
+  var h = jgeCabecalho();
+  if (_jgeTab === 'hoje')        h += jgeHojeHTML();
+  else if (_jgeTab === 'cal')    h += jgeCalHTML();
+  else if (_jgeTab === 'ferias') h += jgeFeriasHTML();
+  else if (_jgeTab === 'folgas') h += jgeFolgasHTML();
+  else if (_jgeTab === 'banco')  h += jgeBancoHTML();
+  else if (_jgeTab === 'risco')  h += jgeRiscoHTML();
+  h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:.6rem">'
+    + 'Lido em ' + cpDataBR(String(_jgeDados.em).slice(0, 10)) + ' às '
+    + String(_jgeDados.em).slice(11, 16) + ' — aperte <strong>Reler as bases</strong> '
+    + 'depois de mexer na jornada de alguma frente.</div>';
   box.innerHTML = h;
 }
 
@@ -52561,6 +53446,9 @@ const PERMS_SIDEBAR = {
   'pcp':            { icon:'📋', label:'PCP',                     mod:'EXECUÇÃO', soPcp:true },
   'pcp-hist':       { icon:'📚', label:'Histórico de Medição',    mod:'EXECUÇÃO', soPcp:true },
   'pcp-fin-proj':   { icon:'📈', label:'Histórico Financeiro',    mod:'EXECUÇÃO', soPcp:true },
+  // 15/11: a visão do projeto inteiro — férias, folgas e banco de horas
+  // de todas as frentes, só leitura, dentro do PCP do ADLV.
+  'jornada-geral':  { icon:'🗓', label:'Gestão de Jornada',       mod:'EXECUÇÃO', soPcp:true },
 };
 
 // Variáveis globais de auth
