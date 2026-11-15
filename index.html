@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/11 13:30';
+var GTO_BUILD = '15/11 14:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -9139,6 +9139,10 @@ function modSoReuniao(m){ return FRENTES_SO_REUNIAO.indexOf(m) !== -1; }
 // Frentes que só têm a tela de PCP: o menu mostra só ela.
 var FRENTES_SO_PCP = ['adlv_pcp'];
 function modSoPcp(m){ return FRENTES_SO_PCP.indexOf(m) !== -1; }
+// O "PATEC" propriamente dito: os dois blocos originais. A Administração
+// é uma tela só dele — nas frentes com base própria ela leria e gravaria
+// na base errada, e cada frente já tem o ADM dela.
+function modEhPatec(m){ return m === 'adlv' || m === 'fast'; }
 function modTemTela(m){ return FRENTES_COM_TELA.indexOf(m) !== -1; }
 
 function modExiste(m){
@@ -54716,9 +54720,9 @@ function authMontarSidebar(emailParam){
     });
   });
 
-  // ADM aparece para ADM geral e para Admin do FAST — mas não no módulo
-  // Pedidos: as telas de lá são do ADLV/FAST e leriam a base errada.
-  if(podeVerTudo && _moduloAtivo !== 'pedidos' && !_soPcp){
+  // 15/11: a Administração só existe no PATEC (ADLV e FAST). Nas outras
+  // frentes ela não aparece — quem administra a frente usa o ADM dela.
+  if(podeVerTudo && modEhPatec(_moduloAtivo)){
     html += `<div class="sb-sec" style="padding:.7rem 1rem .2rem;font-size:9px;font-weight:600;color:rgba(255,255,255,.28);letter-spacing:1.2px;text-transform:uppercase;flex-shrink:0">ADM</div>`;
     html += `<div class="sb-it" onclick="go('adm',this)">🔐 Administração</div>`;
   }
@@ -54727,8 +54731,9 @@ function authMontarSidebar(emailParam){
   // Controlar ADM estático
   const _sa = document.getElementById('sb-adm-sec');
   const _ia = document.getElementById('sb-adm-it');
-  if(_sa) _sa.style.display = (podeVerTudo && !_soPcp) ? '' : 'none';
-  if(_ia) _ia.style.display = (podeVerTudo && !_soPcp) ? '' : 'none';
+  const _admOk = podeVerTudo && modEhPatec(_moduloAtivo);
+  if(_sa) _sa.style.display = _admOk ? '' : 'none';
+  if(_ia) _ia.style.display = _admOk ? '' : 'none';
   // Quem decide em que frente os cards de ciclo somem é um registro só:
   // CARDS_CICLO_OCULTOS. Antes esta função mandava os dois cards do topo
   // aparecerem SEMPRE, e desfazia o que o registro tinha acabado de
