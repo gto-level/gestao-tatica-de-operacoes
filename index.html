@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/11 20:30';
+var GTO_BUILD = '16/11 22:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -14766,7 +14766,46 @@ function acpDataSel(){
   var el = document.getElementById('acp-data');
   return (el && el.value) ? el.value : cpHojeISO();
 }
+// Quem enxerga o Acompanhamento da EQUIPE inteira, e não só a própria
+// linha. Além do perfil ADM, esta lista — pedido do André em 16/11:
+// "para o módulo de pedidos, o campo acompanhamento, coloque acesso
+// para Amanda Zanetti".
+//
+// É uma lista de nomes de propósito: dar perfil ADM à Amanda abriria
+// junto o resto do dash, e o que ele pediu foi acesso a ESTA tela.
+// Casa pelo nome do login, pelo nome do cadastro e pelo começo do
+// e-mail, porque o login de cada um vem escrito de um jeito.
+var ACP_VE_TUDO = ['Amanda Zanetti'];
+
+function acpNaLista(){
+  try {
+    var alvos = [];
+    try { if (typeof colabLogado !== 'undefined' && colabLogado) alvos.push(colabLogado); } catch (e0) {}
+    if (_authPerfil) {
+      if (_authPerfil.nome) alvos.push(_authPerfil.nome);
+      if (_authPerfil.colabNome) alvos.push(_authPerfil.colabNome);
+      if (_authPerfil.email) alvos.push(String(_authPerfil.email).split('@')[0]
+                                          .replace(/[._-]+/g, ' '));
+    }
+    try { if (_authUser && _authUser.email) alvos.push(String(_authUser.email).split('@')[0]
+                                                         .replace(/[._-]+/g, ' ')); } catch (e1) {}
+    return alvos.some(function(a){
+      var n = cpNormNome(a);
+      return !!n && ACP_VE_TUDO.some(function(x){ return cpNormNome(x) === n; });
+    });
+  } catch (e) { return false; }
+}
+
+// Ver a equipe inteira. Escrever na linha dos outros continua só do
+// ADM — justificativa é texto pessoal, e quem responde por ela é quem
+// assinou o dia.
 function acpEhAdm(){
+  try {
+    if (_authPerfil && _authPerfil.perfil === 'adm') return true;
+  } catch (e) {}
+  return acpNaLista();
+}
+function acpEhAdmPleno(){
   try { return !!(_authPerfil && _authPerfil.perfil === 'adm'); } catch (e) { return false; }
 }
 function acpEuSou(){ return cpQuem(); }
@@ -15085,7 +15124,7 @@ function acpSeloAbrir(p){
 }
 
 function acpBlocoPessoa(p, r){
-  var podeEditar = acpEhAdm() || cpNormNome(p.nome) === cpNormNome(acpEuSou());
+  var podeEditar = acpEhAdmPleno() || cpNormNome(p.nome) === cpNormNome(acpEuSou());
   var h = '<div class="cd" style="border-top:3px solid var(--azm)">'
     + '<div class="cd-t" style="justify-content:space-between">'
     +   '<span>👤 ' + cpEsc(p.nome) + '</span>'
@@ -55309,7 +55348,8 @@ const PERMS_SIDEBAR = {
   'planilha-critica':{ icon:'🔴', label:'Planilha Crítica',        mod:'EXECUÇÃO', redirect:'governanca', hidden:true },
   'analista-auto':  { icon:'🤖', label:'Analista Automático',      mod:'EXECUÇÃO', hiddenFast:true },
   'consulta-q18':   { icon:'🚫', label:'Consulta Q18',             mod:'EXECUÇÃO', hiddenFast:true },
-  'pr-bancoferias': { icon:'🗓', label:'Gestão de Jornada',        mod:'EXECUÇÃO' },
+  'pr-bancoferias': { icon:'🗓', label:'Gestão de Jornada',        mod:'EXECUÇÃO',
+                      labelPerm:'Gestão de Jornada (PATEC)' },
   // Só existem dentro do módulo Pedidos, que tem Firebase próprio
   'governanca-pedidos': { icon:'🏛️', label:'Governança',           mod:'EXECUÇÃO', soPedidos:true },
   'pedidos':        { icon:'📦', label:'Controle de Pedidos',      mod:'EXECUÇÃO', soPedidos:true },
@@ -55321,8 +55361,14 @@ const PERMS_SIDEBAR = {
   // jornadaFrentes é o que faz esses dois aparecerem apesar das regras
   // de soPedidos/soFrente — e só nessas três.
   'jornada-mod':    { icon:'🗓', label:'Gestão de Jornada',       mod:'EXECUÇÃO',
+                      labelPerm:'Gestão de Jornada (da frente)',
                       jornadaFrentes:['pedidos','adlv_republicacao','adlv_devolucao'] },
-  'adm-mod':        { icon:'⚙️', label:'ADM',                     mod:'EXECUÇÃO', soAdm:true,
+  // 16/11: era só "ADM" e o André perguntou se era a Administração.
+  // Não é: esta tela só tem equipe, férias, folgas e banco de horas da
+  // frente. O nome passou a dizer isso, aqui e na lista de permissões —
+  // duas entradas chamadas "ADM" na mesma tela é convite para o erro.
+  'adm-mod':        { icon:'⚙️', label:'ADM da frente',           mod:'EXECUÇÃO', soAdm:true,
+                      labelPerm:'ADM da frente (jornada)',
                       jornadaFrentes:['pedidos','adlv_republicacao','adlv_devolucao'] },
   'apres-rejeite':  { icon:'🖥️', label:'Apresentação',             mod:'EXECUÇÃO', soPedidos:true },
   // Frente ADLV · Reunião — três telas, abastecidas por upload
@@ -56351,8 +56397,17 @@ function authMontarSidebar(emailParam){
     // no FAST estas telas vivem em ADM › Dados de Consulta
     if(cfg.hiddenFast && _moduloAtivo === 'fast') return;
     }
-    // o ADM da frente é só para quem administra
-    if(_jor && cfg.soAdm && !podeVerTudo) return;
+    // O ADM da frente é só para quem administra. "Quem administra" são
+    // DUAS coisas: o ADM geral (pelo e-mail) e quem tem a permissão
+    // marcada em Admin › Usuários.
+    //
+    // BUG (16/11): esta linha olhava só o e-mail. Resultado: em Pedidos,
+    // Publicação e Devolução o tópico ADM não aparecia para mais
+    // ninguém — nem para quem tinha 'adm-mod' marcado no cadastro, que é
+    // justamente o jeito que o sistema tem de dizer "essa pessoa
+    // administra esta frente". O mesmo valia se a sessão estivesse sem
+    // e-mail carregado.
+    if(_jor && cfg.soAdm && !podeVerTudo && !perms.includes(key)) return;
     if(podeVerTudo || perms.includes(key) || _jor || (_soReu && cfg.soFrente === _moduloAtivo)
        || (key === 'direcionamento' && (perms.includes('pr-estrategico') || perms.includes('governanca')))){
       if(!mods[cfg.mod]) mods[cfg.mod] = [];
@@ -56954,7 +57009,7 @@ function usrEditarPerms(uid, nome, permsAtual, modulosAtual, perfilAtual, colabN
       <div id="usr-perms-paginas" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:1.25rem">
         ${Object.entries(PERMS_SIDEBAR).map(([key,cfg])=>`
           <label style="display:flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;background:var(--cin);padding:6px 12px;border-radius:6px;border:1px solid var(--brd)">
-            <input type="checkbox" value="${key}" ${permsAtual.includes(key)?'checked':''}> ${cfg.icon} ${cfg.label}
+            <input type="checkbox" value="${key}" ${permsAtual.includes(key)?'checked':''}> ${cfg.icon} ${cfg.labelPerm||cfg.label}
           </label>
         `).join('')}
       </div>
