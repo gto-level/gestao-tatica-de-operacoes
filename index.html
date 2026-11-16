@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/11 16:00';
+var GTO_BUILD = '16/11 18:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -17108,6 +17108,39 @@ var MB_FONTES = [
                quando:(p2 && p2.atualizadoEm) || '',
                resumo: p2 ? (cpNum(p2.itens || 0) + ' itens marcados') : '' };
     } },
+  // 16/11: a Q18 ao lado dos Prioritários, como ele pediu. É base
+  // SEMANAL — não entra na cobrança de "não é de hoje".
+  { k:'q18', nome:'Q18 — Fornecedor impedido', ico:'🚫',
+    aceita:'.xlsx,.xls,.xlsb,.csv',
+    alimenta:'Consulta de fornecedor impedido no módulo de Pedidos',
+    handler:'mdQ18Upload', obrigatorio:false, semanal:true,
+    estado:function(){
+      var q = _q18Ped;
+      return { tem: !!(q && q.impedidos), arquivo:(q && q.arquivo) || '',
+               quando:(q && q.atualizadoEm) || '',
+               resumo: q && q.impedidos
+                 ? (cpNum(q.impedidos) + ' impedidos de ' + cpNum(q.total) + ' lidos') : '' };
+    },
+    extra:function(){
+      var q = _q18Ped;
+      var h = '<div style="display:flex;gap:6px;align-items:center;margin-top:.5rem">'
+        + '<input type="text" id="mb-q18-busca" placeholder="código SAP (ex.: 10000126)"'
+        +   ' oninput="q18pConsultar(this.value)"'
+        +   ' style="flex:1;min-width:120px;font-size:11.5px;padding:4px 8px;'
+        +   'border:1.5px solid var(--brd);border-radius:7px">'
+        + '</div><div id="mb-q18-resp" style="font-size:11px;margin-top:4px;min-height:14px">'
+        + '</div>';
+      var js = Object.keys((q && q.porJust) || {}).filter(function(k){
+        return cpNormNome(k) !== 'IMPEDIDO'; });
+      if (js.length) h += '<div style="font-size:10px;color:var(--tx2);margin-top:3px">'
+        + 'Fora os impedidos, a planilha trouxe: '
+        + cpEsc(js.map(function(k){ return k + ' (' + q.porJust[k] + ')'; }).join(' · '))
+        + ' — essas linhas não entram na lista.</div>';
+      if (q && (q.posUsadas || []).length)
+        h += '<div style="font-size:10px;color:var(--am);margin-top:3px">⚠ Li '
+          + cpEsc(q.posUsadas.join(' · ')) + ' — o cabeçalho não tinha esse nome.</div>';
+      return h;
+    } },
   // 14/11: o reap fica PRONTO mas OCULTO. "Vamos criar o campo de
   // upload, porém por enquanto deixa ele oculto, pois a tabela ainda
   // não está pronta, estamos trabalhando nela para criar as regras
@@ -17179,6 +17212,7 @@ async function mbAbrir(){
   // que já existia para a distribuição
   try { await mdCarregarBasesGov(); } catch (e) {}
   try { await mdPrioCarregar(); } catch (e) {}
+  try { await q18pCarregar(); } catch (e) {}
   try { await rjAbrir(); } catch (e) {}
   try { await stbCarregar(stbDataSel()); } catch (e) {}
   try { await monCarregarLista(); monPintarEscolha(); } catch (e) {}
@@ -17226,7 +17260,10 @@ function mbRender(){
     var e = { tem:false, arquivo:'', quando:'', resumo:'' };
     try { e = f.estado() || e; } catch (x) {}
     if (!e.tem) faltam.push(f.nome);
-    else if (!mbEhDeHoje(e.quando) && e.quando) { velhos.push(f.nome); ok++; }
+    // base semanal (a Q18) não entra na cobrança do dia: ela não muda
+    // todo dia, e cobrá-la toda manhã treinaria a equipe a ignorar o
+    // aviso das que mudam mesmo
+    else if (!f.semanal && !mbEhDeHoje(e.quando) && e.quando) { velhos.push(f.nome); ok++; }
     else ok++;
     return { f:f, e:e };
   });
@@ -17296,6 +17333,9 @@ function mbRender(){
             + (e.arquivo ? '<strong>' + cpEsc(e.arquivo) + '</strong>' : 'arquivo sem nome')
             + (e.resumo ? ' — ' + e.resumo : '') + '</div>'
           : '')
+      // alguns cards trazem algo próprio embaixo (a Q18 tem a consulta)
+      + (typeof f.extra === 'function' ? (function(){
+            try { return f.extra(); } catch (x) { return ''; } })() : '')
       + '</div>';
   });
   box.innerHTML = h + '</div>';
@@ -27567,6 +27607,162 @@ function mdPrioDrop(e){
   if (f) mdPrioUpload(f);
 }
 
+// ══════════════════ Q18 — FORNECEDOR IMPEDIDO ════════════════════
+//
+// Pedido do André em 16/11: "preciso que você crie um upload da Q18 no
+// módulo de pedidos — esse upload pode ficar ao lado do upload
+// prioritários da abertura".
+//
+// A planilha tem três colunas: COD SAP AJUST, RAZÃO SOCIAL EMPRESA e
+// JUSTIFICATIVA. No modelo que ele mandou são 322 fornecedores, todos
+// com justificativa "Impedido".
+//
+// O PATEC já tinha essa base, mas presa ao projeto dele: o upload vive
+// na Administração (que agora só existe no PATEC) e grava em getDB(),
+// que lá é a base do ADLV. Aqui é a base de Pedidos, e os documentos
+// têm nome próprio (q18p_*) para não esbarrar em nada.
+//
+// O código vem como número na planilha ("10000126"), e em outras bases
+// pode vir com zeros à esquerda ou com ".0" do Excel. Por isso a chave
+// é normalizada dos dois lados.
+var _q18Ped = { ids:{}, total:0, impedidos:0, arquivo:'', atualizadoEm:'',
+                atualizadoPor:'', porJust:{}, posUsadas:[] };
+var Q18P_CHUNK = 4000;
+
+function q18pChave(v){
+  var t = String(v == null ? '' : v).trim().replace(/^["']+|["']+$/g, '').trim();
+  t = t.replace(/\.0+$/, '').replace(/[^0-9A-Za-z]/g, '');
+  t = t.replace(/^0+/, '');
+  return t.toUpperCase();
+}
+function q18pImpedido(cod){
+  var k = q18pChave(cod);
+  return !!(k && _q18Ped.ids[k]);
+}
+function q18pInfo(cod){
+  var k = q18pChave(cod);
+  return (k && _q18Ped.ids[k]) ? _q18Ped.ids[k] : null;
+}
+
+function q18pLer(linhas){
+  var r = { itens:[], lidas:0, impedidos:0, porJust:{}, aviso:'', posUsadas:[] };
+  if (!linhas || !linhas.length) { r.aviso = 'Arquivo vazio.'; return r; }
+  var iCab = -1, cabs = [];
+  for (var k = 0; k < Math.min(linhas.length, 15); k++) {
+    var c = (linhas[k] || []).map(cpNormCab);
+    if (c.indexOf('COD_SAP_AJUST') !== -1 || c.indexOf('JUSTIFICATIVA') !== -1) {
+      iCab = k; cabs = c; break;
+    }
+  }
+  if (iCab === -1) {
+    r.aviso = 'Não achei as colunas COD SAP AJUST e JUSTIFICATIVA — isto é a planilha Q18?';
+    return r;
+  }
+  var ix = function(n){ return _cpAchaCol(cabs, n); };
+  // nome primeiro; a letra só se o nome não estiver lá — e o que foi
+  // lido pela letra aparece na tela, para ninguém descobrir depois
+  var col = { cod:ix(['COD_SAP_AJUST','COD_SAP','CODIGO_SAP']),
+              nome:ix(['RAZAO_SOCIAL_EMPRESA','RAZAO_SOCIAL','FORNECEDOR']),
+              just:ix(['JUSTIFICATIVA','MOTIVO']) };
+  if (col.cod === -1)  { col.cod = 0;  r.posUsadas.push('COD SAP AJUST pela coluna A'); }
+  if (col.nome === -1) { col.nome = 1; r.posUsadas.push('Razão social pela coluna B'); }
+  if (col.just === -1) { col.just = 2; r.posUsadas.push('Justificativa pela coluna C'); }
+  var pega = function(l, j){ return String(l[j] == null ? '' : l[j]).trim(); };
+  for (var b = iCab + 1; b < linhas.length; b++) {
+    var l = linhas[b] || [];
+    var cod = pega(l, col.cod);
+    if (!cod) continue;
+    r.lidas++;
+    var just = pega(l, col.just);
+    var jk = just || '(sem justificativa)';
+    r.porJust[jk] = (r.porJust[jk] || 0) + 1;
+    // "impedido" é o que importa; qualquer outra justificativa é
+    // contada à parte em vez de virar impedimento calado
+    if (cpNormNome(just) !== 'IMPEDIDO') continue;
+    r.impedidos++;
+    r.itens.push({ k:q18pChave(cod), cod:cod, nome:pega(l, col.nome), just:just });
+  }
+  if (!r.lidas) r.aviso = 'Nenhuma linha com código — confira a planilha.';
+  return r;
+}
+
+async function mdQ18Upload(file){
+  if (!file) return;
+  var st = document.getElementById('mb-st-q18');
+  if (st) st.innerHTML = '⏳ Lendo a Q18...';
+  var buf = await file.arrayBuffer();
+  var wb = _lerWorkbookBR(buf, file.name);
+  var linhas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],
+                                        { header:1, defval:'', raw:true });
+  var r = q18pLer(linhas);
+  if (!r.lidas) throw new Error(r.aviso);
+  var ids = {};
+  r.itens.forEach(function(i){ ids[i.k] = { cod:i.cod, nome:i.nome }; });
+  _q18Ped = { ids:ids, total:r.lidas, impedidos:r.impedidos, arquivo:file.name,
+              atualizadoEm:new Date().toISOString(), atualizadoPor:cpQuem(),
+              porJust:r.porJust, posUsadas:r.posUsadas };
+  await q18pGravar(r.itens);
+}
+
+async function q18pGravar(itens){
+  try {
+    var db = getDB(); if (!db) return false;
+    var chunks = Math.ceil(itens.length / Q18P_CHUNK) || 1;
+    for (var c = 0; c < chunks; c++) {
+      await db.collection('config').doc('q18p_' + c)
+        .set({ itens:itens.slice(c * Q18P_CHUNK, (c + 1) * Q18P_CHUNK) });
+    }
+    await db.collection('config').doc('q18p_meta').set({
+      arquivo:_q18Ped.arquivo, total:_q18Ped.total, impedidos:_q18Ped.impedidos,
+      chunks:chunks, porJust:_q18Ped.porJust, posUsadas:_q18Ped.posUsadas,
+      atualizadoEm:_q18Ped.atualizadoEm, atualizadoPor:_q18Ped.atualizadoPor
+    });
+    return true;
+  } catch (e) { console.warn('q18pGravar:', e); return false; }
+}
+
+async function q18pCarregar(){
+  try {
+    var db = getDB(); if (!db) return;
+    var m = await db.collection('config').doc('q18p_meta').get();
+    if (!m || !m.exists) return;
+    var d = m.data() || {};
+    var docs = [];
+    for (var c = 0; c < (d.chunks || 1); c++) docs.push(db.collection('config')
+      .doc('q18p_' + c).get());
+    var res = await Promise.all(docs);
+    var ids = {};
+    res.forEach(function(doc){
+      if (!doc || !doc.exists) return;
+      ((doc.data() || {}).itens || []).forEach(function(i){
+        if (i && i.k) ids[i.k] = { cod:i.cod, nome:i.nome };
+      });
+    });
+    _q18Ped = { ids:ids, total:+d.total || 0, impedidos:+d.impedidos || 0,
+                arquivo:d.arquivo || '', atualizadoEm:d.atualizadoEm || '',
+                atualizadoPor:d.atualizadoPor || '', porJust:d.porJust || {},
+                posUsadas:d.posUsadas || [] };
+  } catch (e) { console.warn('q18pCarregar:', e); }
+}
+
+// A consulta do card: o código entra, a tela diz se está impedido.
+function q18pConsultar(v){
+  var el = document.getElementById('mb-q18-resp');
+  if (!el) return;
+  var cod = String(v || '').trim();
+  if (!cod) { el.innerHTML = ''; return; }
+  if (!Object.keys(_q18Ped.ids).length) {
+    el.innerHTML = '<span style="color:var(--am)">Base vazia — suba a planilha primeiro.</span>';
+    return;
+  }
+  var i = q18pInfo(cod);
+  el.innerHTML = i
+    ? '<span style="color:var(--vm);font-weight:700">🚫 IMPEDIDO</span> '
+      + '<span style="color:var(--tx2)">' + cpEsc(i.cod)
+      + (i.nome ? ' · ' + cpEsc(i.nome) : '') + '</span>'
+    : '<span style="color:var(--vd);font-weight:700">✓ Não está na lista de impedidos</span>';
+}
+
 async function mdPrioUpload(file){
   if (!file) return;
   var st = document.getElementById('md-prio-status');
@@ -28901,6 +29097,85 @@ function mdxOrpPmm(it, cab){
   return mdxEhPmm(v) ? String(v).trim() : '';
 }
 
+// ── a coluna Q18 ────────────────────────────────────────────────
+//
+// Pedido do André em 16/11: "sempre que for feita a distribuição
+// preciso que o dash confronte a planilha Q18 com os dados da
+// distribuição — Q18 coluna A (cod sap ajust) contra a aba MAPA coluna
+// V (ID SAP Fornecedor), a aba Emitir pedido PATEC coluna L (fornecedor
+// ganhador) e a Emitir pedido PATEC manual coluna L. Crie uma coluna no
+// começo, do lado da de ORP/PMM, chamada Q18; quando o dado da Q18
+// estiver na planilha deve aparecer impedido."
+//
+// A coluna é procurada pelo NOME primeiro; a letra que ele passou é a
+// reserva, e quando a reserva é usada a tela diz — arquivo com uma
+// coluna a mais no meio desloca tudo, e esse erro sai calado.
+var MDQ18_COLS = {
+  mapa:   { nomes:['ID_SAP_FORNECEDOR','ID_SAP_FORN','ID_SAP'], letra:21, qual:'V' },
+  pedido: { nomes:['FORNECEDOR_GANHADOR','FORN_GANHADOR'],      letra:11, qual:'L' }
+};
+var _mdQ18ColCache = null;
+function mdQ18ColLimpar(){ _mdQ18ColCache = null; }
+
+function mdQ18ColDaAba(aba){
+  if (_mdQ18ColCache && _mdQ18ColCache[aba] !== undefined) return _mdQ18ColCache[aba];
+  if (!_mdQ18ColCache) _mdQ18ColCache = {};
+  var abaMapa = (_mdBase && _mdBase.abaMapa) || 'MAPA';
+  var regra = (aba === abaMapa) ? MDQ18_COLS.mapa : MDQ18_COLS.pedido;
+  var cab = ((_mdBase && _mdBase.cabPorAba) || {})[aba] || [];
+  var idx = -1;
+  for (var j = 0; j < cab.length && idx === -1; j++) {
+    var n = cpNormCab(cab[j] == null ? '' : cab[j]);
+    if (n && regra.nomes.indexOf(n) !== -1) idx = j;
+  }
+  var porLetra = false;
+  if (idx === -1) { idx = regra.letra; porLetra = true; }
+  var o = { idx:idx, porLetra:porLetra, qual:regra.qual, aba:aba,
+            cabeca:String(cab[idx] == null ? '' : cab[idx]).trim() };
+  _mdQ18ColCache[aba] = o;
+  return o;
+}
+
+// O fornecedor daquele item está na Q18? Devolve o que achou, ou null.
+function mdQ18Do(it){
+  if (!it || !it.bruto || !it.bruto.length) return null;
+  if (!Object.keys((_q18Ped && _q18Ped.ids) || {}).length) return null;
+  var aba = it.deAba || ((_mdBase && _mdBase.abaMapa) || 'MAPA');
+  var c = mdQ18ColDaAba(aba);
+  if (!c || c.idx < 0) return null;
+  var cod = it.bruto[c.idx];
+  var i = q18pInfo(cod);
+  if (!i) return null;
+  return { cod:String(cod == null ? '' : cod).trim(), nome:i.nome || '',
+           col:c.qual, porLetra:c.porLetra };
+}
+function mdxQ18(it){
+  var q = mdQ18Do(it);
+  return q ? 'Impedido' : '';
+}
+
+// Quantos itens da distribuição caíram em fornecedor impedido.
+function mdQ18Conta(res){
+  var o = { n:0, pessoas:{}, fornecedores:{}, porLetra:[], semBase:false, abas:{} };
+  if (!Object.keys((_q18Ped && _q18Ped.ids) || {}).length) { o.semBase = true; return o; }
+  var olha = function(it, quem){
+    var q = mdQ18Do(it);
+    if (!q) return;
+    o.n++;
+    o.pessoas[quem || '(na fila)'] = (o.pessoas[quem || '(na fila)'] || 0) + 1;
+    var k = q.cod + (q.nome ? ' · ' + q.nome : '');
+    o.fornecedores[k] = (o.fornecedores[k] || 0) + 1;
+    var aba = it.deAba || '';
+    o.abas[aba] = (o.abas[aba] || 0) + 1;
+    if (q.porLetra && o.porLetra.indexOf(q.col) === -1) o.porLetra.push(q.col);
+  };
+  ((res && res.lista) || []).forEach(function(p){
+    (p.itens || []).forEach(function(it){ olha(it, p.nome); });
+  });
+  ((res && res.fila) || []).forEach(function(it){ olha(it, ''); });
+  return o;
+}
+
 // Quais índices de coluna entram na exportação daquela aba.
 function mdxColunas(grupo, cab, larg){
   var fora = MDX_TIRAR_SEMPRE.concat(grupo.tirar || []).map(cpNormCab);
@@ -28971,6 +29246,7 @@ function mdExportarDistribuicao(){
     }
     var dataBR = cpDataBR(mdxDataDist());
     _mdxAcompIdx = null;          // o índice é refeito a cada exportação
+    mdQ18ColLimpar();
     var wb = XLSX.utils.book_new();
     var resumo = [];
 
@@ -28984,9 +29260,10 @@ function mdExportarDistribuicao(){
       var fatia = function(arr){
         return cols.map(function(j){ return arr[j] == null ? '' : arr[j]; });
       };
-      var corpo = [['Analista', 'Data da distribuição', 'ORP/PMM'].concat(fatia(cab))];
+      var corpo = [['Analista', 'Data da distribuição', 'ORP/PMM', 'Q18']
+        .concat(fatia(cab))];
       linhas.forEach(function(x){
-        corpo.push([x.pessoa || '(na fila)', dataBR, mdxOrpPmm(x.it, cab)]
+        corpo.push([x.pessoa || '(na fila)', dataBR, mdxOrpPmm(x.it, cab), mdxQ18(x.it)]
           .concat(fatia(x.it.bruto)));
       });
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(corpo), g.nome);
@@ -29584,7 +29861,7 @@ function mdSimHTML(recado){
       + '. Essas oportunidades ficam com mais de um comprador — fora daqui o módulo '
       + 'trata a oportunidade como indivisível.</div>';
   }
-  h += mdAvisoPartidos(res) + mdAvisoHerdado(res) + '</div>';
+  h += mdAvisoPartidos(res) + mdAvisoQ18(res) + mdAvisoHerdado(res) + '</div>';
   return h;
 }
 
@@ -29693,6 +29970,38 @@ async function mdSimAplicar(){
     + (nMov ? ' · ' + nMov + ' remanejamento(s) seu(s)' : '')
     + ' · ' + cpNum(res.fila.length) + ' na fila.</span>';
   mdSimRender('✓ Gravado. O que está nesta tela é a distribuição do dia.');
+}
+
+// O confronto com a Q18, dito na hora da distribuição — não só dentro
+// do arquivo exportado. Um fornecedor impedido muda o que a pessoa vai
+// fazer com o item, e descobrir isso só ao abrir o Excel é tarde.
+function mdAvisoQ18(res){
+  var q = mdQ18Conta(res);
+  if (q.semBase) {
+    return '<div style="font-size:11px;color:var(--tx2);margin-top:4px">🚫 A <strong>Q18'
+      + '</strong> não está carregada nesta sessão — sem ela não dá para conferir '
+      + 'fornecedor impedido. Suba em <strong>Montar base</strong>.</div>';
+  }
+  if (!q.n) {
+    return '<div style="font-size:11px;color:var(--vd);margin-top:4px">🚫 Q18 conferida: '
+      + '<strong>nenhum</strong> item da distribuição é de fornecedor impedido.</div>';
+  }
+  var top = Object.keys(q.fornecedores)
+    .sort(function(a, b){ return q.fornecedores[b] - q.fornecedores[a]; });
+  var quem = Object.keys(q.pessoas)
+    .sort(function(a, b){ return q.pessoas[b] - q.pessoas[a]; })
+    .map(function(k){ return k + ' ' + q.pessoas[k]; });
+  return '<div style="font-size:11px;color:var(--vm);margin-top:4px">🚫 <strong>'
+    + cpNum(q.n) + '</strong> item(ns) da distribuição são de <strong>fornecedor '
+    + 'impedido (Q18)</strong> — ' + cpEsc(quem.join(' · ')) + '. '
+    + cpNum(top.length) + ' fornecedor(es): ' + cpEsc(top.slice(0, 4).join(' · '))
+    + (top.length > 4 ? ' e mais ' + (top.length - 4) : '')
+    + '. Eles saem marcados na coluna <strong>Q18</strong> do arquivo exportado.'
+    + (q.porLetra.length
+        ? '<br>⚠ O código do fornecedor foi lido pela coluna ' + q.porLetra.join(' e ')
+          + ', porque o cabeçalho não tinha o nome — confira se é essa mesma a coluna.'
+        : '')
+    + '</div>';
 }
 
 // Oportunidades que tiveram de ser partidas por atividade.
@@ -29887,6 +30196,7 @@ async function mdDistribuir(){
     + mdAvisoDiasCurtos(res)
     + mdAvisoMantidos(res)
     + mdAvisoPartidos(res)
+    + mdAvisoQ18(res)
     + mdAvisoHerdado(res)
     + mdAvisoMeta(res)
     + mdAvisoAcimaCota(res)
