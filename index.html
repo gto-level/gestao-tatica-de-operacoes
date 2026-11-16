@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '15/11 15:00';
+var GTO_BUILD = '16/11 11:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -3122,9 +3122,11 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 onchange="mdUpload(this.files[0]); this.value='';">
             </div></div>
             <div id="md-status" style="margin-top:.7rem;font-size:12px"></div>
+            <div id="md-simulacao"></div>
             <div id="md-resumo"></div>
             <div style="display:flex;gap:8px;margin-top:.9rem;flex-wrap:wrap">
               <button class="btn btn-p" onclick="mdDistribuir()">⚖ Distribuir entre a equipe</button>
+              <button class="btn btn-s" onclick="mdSimular()">🔍 Simulação da distribuição</button>
               <button class="btn btn-s" onclick="mdExportarDistribuicao()">⬇ Exportar MAPA distribuído</button>
               <button class="btn btn-s" onclick="mdApagarDia()"
                 style="border-color:var(--vm);color:var(--vm)">🗑 Apagar a distribuição deste dia</button>
@@ -28282,10 +28284,13 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   var metaDe = function(n){ return metaPes[n] || metaEmissao; };
   res.metaPessoa = metaPes;
   res.capReduzida = mdTemCapReduzida();
+  res.semNovos = [];
   (pessoas || []).forEach(function(n){
     res.pessoas[n] = { nome:n, itens:[], blocos:[], n:0, porDia:new Array(nDias).fill(0),
                        porStatus:{}, tipo:{ L:0, Q:0 }, tipoEmitir:{ L:0, Q:0 }, fora:0, reap:0,
-                       emissao:0 };
+                       emissao:0,
+                       // itens aptos a emissão que já eram dele de antes
+                       herdado:0, aReceber:0, novos:0 };
     MD_STATUS.forEach(function(x){ res.pessoas[n].porStatus[x.chave] = 0; });
   });
   res.reap = 0;
@@ -28355,7 +28360,7 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   //
   // A oportunidade não se divide, então o dono do bloco é o dono mais
   // frequente entre os itens dele.
-  var donoDoBloco = function(b, quemFaz){
+  var donoMaisFreq = function(b){
     var cont = {}, melhorN = '', melhorQ = 0;
     (b.itens || []).forEach(function(it){
       var d = gpDonoDe(String(it.rc || '') + '|' + String(it.seq || ''));
@@ -28363,6 +28368,10 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
       cont[d] = (cont[d] || 0) + 1;
       if (cont[d] > melhorQ) { melhorQ = cont[d]; melhorN = d; }
     });
+    return melhorN;
+  };
+  var donoDoBloco = function(b, quemFaz){
+    var melhorN = donoMaisFreq(b);
     if (!melhorN) return '';
     // o dono só vale se estiver na equipe de hoje e atuando na atividade
     if (quemFaz.indexOf(melhorN) !== -1) return melhorN;
@@ -28373,6 +28382,42 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   };
   res.mantidos = 0;
   res.donoPerdido = [];
+
+  // ── O QUE A PESSOA JÁ CARREGA ENTRA ANTES DO QUE É NOVO (16/11) ──
+  //
+  // Regra do André: "ontem distribuí 100 itens para o Marcelo e ele fez
+  // 50; hoje ele teria que fazer os 50 de ontem mais a demanda de hoje.
+  // Se a meta individual for 50, não adianta passar itens novos — ele
+  // já tem 50 aptos na mão". Então o saldo de ontem conta contra a meta
+  // dele desde o primeiro bloco do dia.
+  //
+  // Sem isto, a conta dependia da ORDEM: os blocos com dono podiam cair
+  // depois dos novos, e a pessoa saía do dia com 100 — exatamente o que
+  // ele mandou não acontecer.
+  //
+  // Só entram itens APTOS A EMISSÃO (Emitir Pedido, PATEC, PATEC Manual
+  // e reap). "Itens em negociação não entram nesta conta": negociar,
+  // DPV e as duas filas de Abrir PATEC não são pedido ainda, e o item
+  // ali não ocupa a meta de emissão de ninguém.
+  (function(){
+    ordenados.forEach(function(b){
+      var quemFaz = pessoas.filter(function(n){ return cobre(n, b) > 0; });
+      if (!quemFaz.length) return;
+      var d = donoMaisFreq(b);
+      if (!d || quemFaz.indexOf(d) === -1) return;   // muda de mão: não é carga dele
+      var q = 0;
+      (b.itens || []).forEach(function(it){
+        if (MD_EMISSAO.indexOf(it.statusChave) !== -1) q++;
+      });
+      if (q) res.pessoas[d].herdado += q;
+    });
+    (pessoas || []).forEach(function(n){
+      var p = res.pessoas[n];
+      p.aReceber = p.herdado;                        // ainda vai cair na mão dele
+      if (p.herdado >= metaDe(n)) res.semNovos.push({ nome:n, herdado:p.herdado,
+                                                      meta:metaDe(n) });
+    });
+  })();
 
   ordenados.forEach(function(b){
     var quemFaz = pessoas.filter(function(n){ return cobre(n, b) > 0; });
@@ -28387,8 +28432,9 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     // Unificado o que vale é a soma dos dois contra a cota da linha.
     var cand = quemFaz.filter(function(n){
       var at = mdAtvNorm(atividades[n]), p = res.pessoas[n], temEspaco = false;
-      // a meta de emissão é teto das quatro somadas
-      if (b.__etapa && p.emissao >= metaDe(n)) return false;
+      // A meta de emissão é teto das quatro somadas — e o que a pessoa
+      // já carrega de antes conta aqui dentro, pelo p.aReceber.
+      if (b.__etapa && (p.emissao + p.aReceber) >= metaDe(n)) return false;
       (b.statuses || []).forEach(function(ch){
         if (temEspaco) return;
         var a = mdAtvDe(ch);
@@ -28453,7 +28499,13 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
       it.foraAtividade = at.indexOf(mdAtvDe(it.statusChave)) === -1;
       pm.itens.push(it); pm.n++;
       pm.porStatus[it.statusChave] = (pm.porStatus[it.statusChave] || 0) + 1;
-      if (MD_EMISSAO.indexOf(it.statusChave) !== -1) pm.emissao++;
+      if (MD_EMISSAO.indexOf(it.statusChave) !== -1) {
+        pm.emissao++;
+        // saiu da conta de "ainda vai cair na mão dele" e entrou na de
+        // "já está com ele": o total contra a meta não muda
+        if (b.__mantido && pm.aReceber > 0) pm.aReceber--;
+        else if (!b.__mantido) pm.novos++;
+      }
       if (it.tipo === 'L' || it.tipo === 'Q') {
         pm.tipo[it.tipo]++;
         if (it.statusChave === 'emitir') pm.tipoEmitir[it.tipo]++;
@@ -28488,8 +28540,9 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     itensReap.forEach(function(it){
       var cand = equipeReap.filter(function(n){
         // o reap é a última etapa da emissão: respeita a cota da linha
-        // E a meta das quatro somadas, as duas já com o % da pessoa
-        if (res.pessoas[n].emissao >= metaDe(n)) return false;
+        // E a meta das quatro somadas, as duas já com o % da pessoa —
+        // e também o saldo que a pessoa trouxe de ontem
+        if ((res.pessoas[n].emissao + res.pessoas[n].aReceber) >= metaDe(n)) return false;
         return (res.pessoas[n].porStatus.reap || 0) < cotaDe(n, 'reap');
       });
       if (!cand.length) { it.pessoa = ''; it.dia = 0; it.foraAtividade = false; res.fila.push(it); return; }
@@ -28931,6 +28984,189 @@ function mdAvisoMantidos(res){
   return h;
 }
 
+// ══════════════════ SIMULAÇÃO DA DISTRIBUIÇÃO ════════════════════
+//
+// Pedido do André em 16/11: "ao lado de distribuir entre a equipe,
+// criar um botão chamado simulação da distribuição... precisamos ter
+// uma visão do que cada comprador deixou de fazer no dia anterior + o
+// que foi distribuído hoje. Total = dia anterior + distribuição atual".
+//
+// A simulação roda a MESMA conta do botão de distribuir e não grava
+// nada: nem o dia, nem o dono dos itens, nem os lotes de reap. É para
+// olhar antes de decidir.
+//
+// Cada célula traz o total e, embaixo, de onde ele veio: o que já era
+// da pessoa (ficou de ontem) mais o que entrou agora.
+var MD_SIM_COLS = [
+  { k:'emitir',   nome:'Emitir pedido',              st:['emitir'] },
+  { k:'patec',    nome:'Emitir pedido PATEC',        st:['patec'] },
+  { k:'patecman', nome:'Emitir pedido PATEC manual', st:['patecman'] },
+  { k:'reap',     nome:'Reaproveitamento',           st:['reap'] },
+  { k:'abrir',    nome:'Abrir PATEC',                st:['pateciden','patecgm'] },
+  { k:'negociar', nome:'Negociar preço excessivo',   st:['negociar'] },
+  { k:'dpv',      nome:'Negociar acima do limite DPV', st:['dpv'] }
+];
+
+// Conta, por pessoa e por coluna, o que veio de antes e o que é novo.
+// "De antes" é o item que já tinha dono quando o dia começou — é
+// exatamente o que a pessoa não terminou ontem e continua na base.
+function mdSimContar(res){
+  var out = {};
+  (res.lista || []).forEach(function(p){
+    var linha = { nome:p.nome, cols:{}, antes:0, novo:0, total:0 };
+    MD_SIM_COLS.forEach(function(c){ linha.cols[c.k] = { antes:0, novo:0, total:0 }; });
+    (p.itens || []).forEach(function(it){
+      var c = null;
+      MD_SIM_COLS.forEach(function(x){
+        if (x.st.indexOf(it.statusChave) !== -1) c = x;
+      });
+      if (!c) return;                       // status fora das sete colunas
+      var cel = linha.cols[c.k];
+      if (it.mantido) { cel.antes++; linha.antes++; } else { cel.novo++; linha.novo++; }
+      cel.total++; linha.total++;
+    });
+    out[p.nome] = linha;
+  });
+  return out;
+}
+
+function mdSimCelula(cel){
+  if (!cel.total) return '<td style="text-align:center;color:var(--tx2)">—</td>';
+  return '<td style="text-align:center">'
+    + '<div style="font-weight:700;font-size:13px">' + cpNum(cel.total) + '</div>'
+    + '<div style="font-size:9.5px;color:var(--tx2);white-space:nowrap">'
+    +   (cel.antes ? '<span style="color:var(--azm);font-weight:600">' + cel.antes
+                   + '</span> de ontem' : '0 de ontem')
+    +   ' + ' + cel.novo + ' hoje</div></td>';
+}
+
+function mdSimHTML(res){
+  var linhas = mdSimContar(res);
+  var nomes = (res.lista || []).map(function(p){ return p.nome; });
+  var metaDe = function(n){ return ((res.metaPessoa || {})[n]) || res.metaEmissao; };
+  var h = '<div class="cd" style="border-top:3px solid var(--az);margin-top:.9rem">'
+    + '<div class="cd-t" style="justify-content:space-between">'
+    +   '<span>🔍 Simulação da distribuição — ' + cpDataBR(_mdCfg.dataDist || mdDataSel())
+    +   '</span>'
+    +   '<button class="btn btn-s" onclick="mdSimFechar()">✕ Fechar</button></div>'
+    + '<div class="al al-b" style="font-size:11.5px">ℹ Esta tela <strong>não grava nada</strong>: '
+    + 'é a mesma conta do botão de distribuir, só que para olhar antes. Em cada célula, o '
+    + 'número grande é o total e, embaixo, de onde ele vem — <strong>de ontem</strong> é o '
+    + 'item que já era daquela pessoa e continua em aberto, <strong>hoje</strong> é o que '
+    + 'entrou agora.</div>'
+    + '<div style="overflow:auto"><table><thead><tr>'
+    +   '<th>Comprador</th>'
+    +   MD_SIM_COLS.map(function(c){
+          return '<th style="text-align:center">' + cpEsc(c.nome) + '</th>'; }).join('')
+    +   '<th style="text-align:center">Total</th>'
+    +   '</tr></thead><tbody>';
+  var tot = { antes:0, novo:0, total:0, cols:{} };
+  MD_SIM_COLS.forEach(function(c){ tot.cols[c.k] = { antes:0, novo:0, total:0 }; });
+  nomes.forEach(function(n){
+    var l = linhas[n];
+    h += '<tr><td style="font-weight:600">' + cpEsc(n)
+      + '<div style="font-size:9.5px;color:var(--tx2);font-weight:400">meta de emissão '
+      + metaDe(n) + '</div></td>';
+    MD_SIM_COLS.forEach(function(c){
+      h += mdSimCelula(l.cols[c.k]);
+      tot.cols[c.k].antes += l.cols[c.k].antes;
+      tot.cols[c.k].novo  += l.cols[c.k].novo;
+      tot.cols[c.k].total += l.cols[c.k].total;
+    });
+    h += '<td style="text-align:center;background:var(--cin)">'
+      + '<div style="font-weight:700;font-size:14px">' + cpNum(l.total) + '</div>'
+      + '<div style="font-size:9.5px;color:var(--tx2);white-space:nowrap">'
+      +   l.antes + ' + ' + l.novo + '</div></td></tr>';
+    tot.antes += l.antes; tot.novo += l.novo; tot.total += l.total;
+  });
+  h += '<tr style="border-top:2px solid var(--brd)"><td style="font-weight:700">Equipe</td>';
+  MD_SIM_COLS.forEach(function(c){ h += mdSimCelula(tot.cols[c.k]); });
+  h += '<td style="text-align:center;background:var(--cin)">'
+    + '<div style="font-weight:700;font-size:14px">' + cpNum(tot.total) + '</div>'
+    + '<div style="font-size:9.5px;color:var(--tx2)">' + tot.antes + ' + ' + tot.novo
+    + '</div></td></tr>';
+  h += '</tbody></table></div>';
+
+  // o que não coube em ninguém — sem isto a soma da tabela não fecha
+  // com o total do dia, e aí o número vira desconfiança
+  var fila = {};
+  (res.fila || []).forEach(function(it){
+    MD_SIM_COLS.forEach(function(c){
+      if (c.st.indexOf(it.statusChave) !== -1) fila[c.k] = (fila[c.k] || 0) + 1;
+    });
+  });
+  var naFila = Object.keys(fila).reduce(function(a, k){ return a + fila[k]; }, 0);
+  if (naFila) {
+    h += '<div style="font-size:11px;color:var(--am);margin-top:.6rem">📥 <strong>'
+      + cpNum(naFila) + '</strong> item(ns) ficaram na fila, sem comprador: '
+      + MD_SIM_COLS.filter(function(c){ return fila[c.k]; })
+          .map(function(c){ return cpEsc(c.nome) + ' <strong>' + fila[c.k] + '</strong>'; })
+          .join(' · ') + '.</div>';
+  }
+  if ((res.semAtividade || []).length) {
+    h += '<div style="font-size:11px;color:var(--vm);margin-top:4px">⚠ '
+      + cpNum(res.semAtividade.length) + ' item(ns) sem ninguém marcado na atividade.</div>';
+  }
+  h += mdAvisoHerdado(res) + mdAvisoMeta(res) + '</div>';
+  return h;
+}
+
+function mdSimFechar(){
+  var box = document.getElementById('md-simulacao');
+  if (box) box.innerHTML = '';
+}
+
+async function mdSimular(){
+  var st = document.getElementById('md-status');
+  var box = document.getElementById('md-simulacao');
+  var prep = await mdPrepararItens(st);
+  if (!prep.ok) {
+    if (st) st.innerHTML = '<span style="color:' + prep.cor + '">' + prep.erro + '</span>';
+    return;
+  }
+  // mdCalcular marca pessoa e dia nos itens que recebe. Como a
+  // simulação não pode mexer no que está na tela, ela roda sobre
+  // CÓPIAS — assim um "simular" antes de distribuir não deixa rastro.
+  var copia = function(l){ return (l || []).map(function(it){
+    return Object.assign({}, it); }); };
+  var res = mdCalcular(copia(prep.itensMapa), _mdCfg.pessoas, _mdCfg.atividades,
+                       _mdCfg.cotaDia, _mdCfg.cotaSemana, _mdCfg.dias,
+                       copia(prep.itensReap));
+  if (st) st.innerHTML = '<span style="color:var(--az)">🔍 Simulação: '
+    + cpNum(res.distribuidos) + ' itens entre '
+    + res.lista.filter(function(p){ return p.n; }).length + ' comprador(es) · '
+    + cpNum(res.fila.length) + ' ficariam na fila. Nada foi gravado.</span>';
+  if (box) box.innerHTML = mdSimHTML(res);
+  return res;
+}
+
+// O saldo que cada um trouxe de ontem, e quem por isso não recebeu
+// nada novo. Um comprador que aparece com zero item novo no dia tem de
+// saber por quê — senão vira "a distribuição esqueceu de mim".
+function mdAvisoHerdado(res){
+  if (!res) return '';
+  var metaDe = function(n){ return ((res.metaPessoa || {})[n]) || res.metaEmissao; };
+  var comCarga = (res.lista || []).filter(function(p){ return (p.herdado || 0) > 0; });
+  if (!comCarga.length) return '';
+  var h = '<div style="font-size:11px;color:var(--tx2);margin-top:4px">🎒 <strong>Saldo de '
+    + 'antes</strong> (itens aptos a pedido que já eram da pessoa): '
+    + comCarga.sort(function(a, b){ return (b.herdado || 0) - (a.herdado || 0); })
+        .map(function(p){
+          return cpEsc(p.nome) + ' <strong>' + p.herdado + '</strong> de ' + metaDe(p.nome);
+        }).join(' · ')
+    + '. Esse saldo conta na meta de emissão desde o primeiro item do dia.</div>';
+  var cheios = (res.semNovos || []);
+  if (cheios.length) {
+    h += '<div style="font-size:11px;color:var(--am);margin-top:4px">🚦 Sem itens novos de '
+      + 'emissão hoje: <strong>'
+      + cpEsc(cheios.map(function(x){ return x.nome + ' (' + x.herdado + '/' + x.meta + ')'; })
+          .join(' · '))
+      + '</strong> — já entraram no dia com a meta cheia do que ficou de antes. '
+      + 'Itens em negociação e Abrir PATEC não entram nessa conta.</div>';
+  }
+  return h;
+}
+
 function mdAvisoMeta(res){
   if (!res || !res.metaEmissao) return '';
   var metaDe = function(n){ return ((res.metaPessoa || {})[n]) || res.metaEmissao; };
@@ -28992,8 +29228,11 @@ function mdAvisoAcimaCota(res){
     + 'então o último bloco de cada um entra mesmo cruzando a linha — a cota é alvo, não teto.</div>';
 }
 
-async function mdDistribuir(){
-  var st = document.getElementById('md-status');
+// O que a distribuição recebe: as bases relidas, a equipe conferida e
+// os itens do dia já filtrados. A simulação usa exatamente isto, para
+// não existir a chance de ela mostrar uma conta e o botão de distribuir
+// fazer outra.
+async function mdPrepararItens(st){
   // rejeitados, datas de negociação e levelboard, recém-lidos: alguém
   // pode ter subido a planilha em outra aba desde que esta abriu
   if (st) st.innerHTML = '⏳ Conferindo as bases da Governança...';
@@ -29002,42 +29241,58 @@ async function mdDistribuir(){
   var temMapa = !!(_mdBase && _mdBase.itens.length);
   var temReap = !!(_mdrBase && _mdrBase.itens.length);
   if (!temMapa && !temReap && !(_gpRej && _gpRej.itens && _gpRej.itens.length)) {
-    if (st) st.innerHTML = '<span style="color:var(--am)">Suba o MAPA do dia ou o MAPA de reap antes de distribuir.</span>';
-    return;
+    return { ok:false, erro:'Suba o MAPA do dia ou o MAPA de reap antes de distribuir.',
+             cor:'var(--am)' };
   }
   if (!_mdCfg.pessoas.length) {
     var nomes = mdPessoasDaTela();
     if (!nomes.length) {
-      if (st) st.innerHTML = '<span style="color:var(--vm)">Informe os nomes dos compradores antes de distribuir.</span>';
-      return;
+      return { ok:false, erro:'Informe os nomes dos compradores antes de distribuir.',
+               cor:'var(--vm)' };
     }
     await mdSalvarEquipe();
   }
   var temAlguem = MD_ATIVIDADES.some(function(x){ return mdPessoasDaAtividade(x.chave).length > 0; });
   if (!temAlguem) {
-    if (st) st.innerHTML = '<span style="color:var(--vm)">Marque na tabela quem atua em cada atividade.</span>';
-    return;
+    return { ok:false, erro:'Marque na tabela quem atua em cada atividade.',
+             cor:'var(--vm)' };
   }
   // CUIDADO: filter passa (valor, índice, array). Chamar
   // mdEntraNaDistribuicao direto faria o índice virar o "dia" da regra
   // dos dois dias úteis — e a cada linha a data mudaria.
-  var _diaDist = (_mdCfg.dataDist || mdDataSel());
+  var diaDist = (_mdCfg.dataDist || mdDataSel());
   var itensMapa = temMapa
-    ? _mdBase.itens.filter(function(it){ return mdEntraNaDistribuicao(it, _diaDist); })
+    ? _mdBase.itens.filter(function(it){ return mdEntraNaDistribuicao(it, diaDist); })
     : [];
   // a negociação que já cumpriu os 2 dias úteis entra como Emitir
   // Pedido, exatamente como a Governança mostra
-  itensMapa = mdPromoverNegociados(itensMapa, _diaDist);
+  itensMapa = mdPromoverNegociados(itensMapa, diaDist);
   // e a conclusão do card Emitir pedido muda o item de fila
   itensMapa = mdMoverPorConclusao(itensMapa);
+  var itensReap = temReap ? _mdrBase.itens : [];
+  itensMapa.forEach(function(it){ if (!it.origem) it.origem = 'mapa'; });
+  return { ok:true, temMapa:temMapa, temReap:temReap, diaDist:diaDist,
+           itensMapa:itensMapa, itensReap:itensReap };
+}
+
+async function mdDistribuir(){
+  var st = document.getElementById('md-status');
+  var prep = await mdPrepararItens(st);
+  if (!prep.ok) {
+    if (st) st.innerHTML = '<span style="color:' + prep.cor + '">' + prep.erro + '</span>';
+    return;
+  }
+  var temMapa = prep.temMapa, temReap = prep.temReap;
+  var _diaDist = prep.diaDist;
+  var itensMapa = prep.itensMapa, itensReap = prep.itensReap;
   // Os rejeitados NÃO entram mais aqui: desde 11/11 cada rejeite já
   // nasce com dono — quem criou o pedido —, e isso é resolvido na tela
   // de rejeitados, pelo cruzamento com a medição.
   var temRej = false;
-  var itensReap = temReap ? _mdrBase.itens : [];
-  itensMapa.forEach(function(it){ if (!it.origem) it.origem = 'mapa'; });
   var res = mdCalcular(itensMapa, _mdCfg.pessoas, _mdCfg.atividades,
                        _mdCfg.cotaDia, _mdCfg.cotaSemana, _mdCfg.dias, itensReap);
+  var simBox = document.getElementById('md-simulacao');
+  if (simBox) simBox.innerHTML = '';   // a simulação velha sai de cena
   _mdDist = {
     data: (_mdCfg.dataDist || mdDataSel()), arquivo: (temMapa ? _mdBase.arquivo : ''),
     dataMapa: mdDataSel(), totalRejeitados: temRej ? _gpRej.itens.length : 0,
@@ -29064,6 +29319,7 @@ async function mdDistribuir(){
     + '.</span>'
     + mdAvisoDiasCurtos(res)
     + mdAvisoMantidos(res)
+    + mdAvisoHerdado(res)
     + mdAvisoMeta(res)
     + mdAvisoAcimaCota(res)
     + (res.reapSemMarcacao
