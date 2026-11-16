@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/11 18:30';
+var GTO_BUILD = '16/11 19:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -17158,6 +17158,281 @@ var MB_FONTES = [
     } }
 ];
 
+// ══════════ O MODELO DE COLUNAS DE CADA UPLOAD (16/11) ═══════════
+//
+// Pedido do André: "na base de upload preciso que você deixe um modelo
+// das colunas, caso eu algum dia mude a ordem e o upload dê errado eu
+// saber quais colunas o sistema está lendo".
+//
+// Aqui está o que cada leitor procura, na ordem em que ele procura:
+// primeiro o NOME do cabeçalho (qualquer um dos aceitos), e só depois,
+// quando existe, a LETRA de reserva. A letra é a única que erra calada
+// se o arquivo mudar de ordem — por isso, quando ela é usada, a tela
+// avisa.
+//
+// Esta tabela é documentação, não a leitura em si: ela repete o que
+// está nos leitores para o André conferir sem abrir código. Quando o
+// arquivo daquela fonte está carregado, o bloco mostra ao lado ONDE
+// cada coluna foi achada de verdade — aí não há como a documentação
+// mentir sem aparecer.
+function mbCol(campo, nomes, letra, obrig){
+  return { campo:campo, nomes:nomes, letra:letra || '', obrig:!!obrig };
+}
+var MB_COLUNAS = {
+  medicao: [
+    mbCol('Comprador', ['RESP_PEDIDO','COMPRADOR','RESPONSAVEL','RESP','NOME_COMPRADOR',
+                        'ANALISTA','USUARIO'], '', true),
+    mbCol('Status do processo', ['STATUS_PROCESSO','STATUS','SITUACAO'], '', true),
+    mbCol('Data de criação do pedido', ['CRIACAO_PEDIDO','DATA_CRIACAO','DT_CRIACAO',
+                                        'CRIACAO','DATA'], ''),
+    mbCol('Código de eliminação', ['CODIGO_ELIMINACAO_ITEM_PEDIDO','CODIGO_ELIMINACAO',
+                                   'COD_ELIMINACAO','ELIMINACAO','ELIMINADO'], ''),
+    mbCol('Pedido', ['PEDIDO','NUMERO_PEDIDO','NUM_PEDIDO','NUMERO_DO_PEDIDO'], 'D'),
+    mbCol('Oportunidade', ['OPORTUNIDADE','NUMERO_OPORTUNIDADE','NUM_OPORTUNIDADE',
+                           'OPORT'], 'F'),
+    mbCol('RC', ['REQUISICAO','RC','NUMERO_RC','NUM_RC','REQUISICAO_COMPRA','REQ'], 'G'),
+    mbCol('Item da RC', ['LINHAREQUISICAO','LINHA_REQUISICAO','ITEM_RC','ITEM_REQUISICAO',
+                         'ITEM_DA_RC'], 'H'),
+    mbCol('Data da 1ª liberação', ['DATA_PRIMEIRA_LIBERACAO','DATA_1_LIBERACAO',
+                                   'DATA_LIBERACAO'], 'K'),
+    mbCol('Gerente', ['GERENTE'], ''),
+    mbCol('Status PSMV', ['STATUS_PSMV'], ''),
+    mbCol('Fornecedor', ['NOME_FORNECEDOR'], ''),
+    mbCol('Grupo comprador', ['GRUPO_COMPRADOR','GRUPO_COMPRADORES'], ''),
+    mbCol('Valor do pedido', ['VALOR_TOTAL_BRUTO_PEDIDO_SAP','VALOR_TOTAL_BRUTO_PEDIDO'], '')
+  ],
+  mapa: [
+    mbCol('Analista automático (a fila do item)', ['ANALISTA_AUTOMATICO'], '', true),
+    mbCol('SLA em dias', ['SLA_DIAS'], ''),
+    mbCol('RC', ['RC'], '', true),
+    mbCol('Item da RC', ['SEQ'], '', true),
+    mbCol('Oportunidade', ['NUMERO_OPORTUNIDADE'], ''),
+    mbCol('Item da oportunidade', ['ITEM_OPORTUNIDADE'], ''),
+    mbCol('Data de encerramento da oportunidade', ['DATA_DE_ENCERRAMENTO'], ''),
+    mbCol('N. acompanhamento (ORP/PMM)', ['N_ACOMPANHAMENTO'], ''),
+    mbCol('Material', ['NM_MATERIAL'], ''),
+    mbCol('Centro', ['CENTRO'], ''),
+    mbCol('Valor do pedido', ['VALOR_PEDIDO'], ''),
+    mbCol('Segmento / família', ['SEGMENTO_FAMILIA'], ''),
+    mbCol('Fornecedor', ['NOME_FORNECEDOR'], ''),
+    mbCol('ID SAP do fornecedor (confronto Q18)',
+          ['ID_SAP_FORNECEDOR','ID_SAP_FORN','ID_SAP'], 'V'),
+    mbCol('Propostas válidas', ['NUMERO_PROPOSTAS_VALIDAS','PROPOSTAS_VALIDAS',
+                                'NUMERO_DE_PROPOSTAS_VALIDAS','PROPOSTAS'], 'Y'),
+    mbCol('Negociação (abas de pedido)', ['NEGOCIACAO'], ''),
+    mbCol('Fornecedor ganhador (abas de pedido, confronto Q18)',
+          ['FORNECEDOR_GANHADOR_PATEC','FORNECEDOR_GANHADOR','FORN_GANHADOR'], 'L')
+  ],
+  bu: [
+    mbCol('RC', ['RC','REQUISICAO','NUMERO_RC'], 'A', true),
+    mbCol('Item da RC', ['SEQ','ITEM','ITEM_RC'], 'B', true),
+    mbCol('Status da carteira', ['STATUS_CARTEIRA'], '', true),
+    mbCol('Status da RC', ['STATUS_RC'], '', true),
+    mbCol('Analista automático', ['ANALISTA_AUTOMATICO'], '', true),
+    mbCol('N. acompanhamento', ['N_ACOMPANHAMENTO','NUMERO_ACOMPANHAMENTO'], ''),
+    mbCol('Texto breve', ['TEXTO_BREVE'], ''),
+    mbCol('Pedido eliminado', ['NUMERO_PEDIDO','PEDIDO','NUM_PEDIDO','NUMERO_DO_PEDIDO',
+                               'PEDIDO_DE_COMPRAS','PEDIDO_COMPRAS'], 'BD'),
+    mbCol('Oportunidade', ['NUMERO_OPORTUNIDADE','OPORTUNIDADE','NUM_OPORTUNIDADE'], 'AO'),
+    mbCol('Item da oportunidade', ['ITEM_OPORTUNIDADE','ITEM_DA_OPORTUNIDADE','ITEM_OP'], 'AP')
+  ],
+  rejforn: [
+    mbCol('Grupo comprador', ['GRUPO_COMPRADOR','GRUPO_COMPRADORES'], '', true),
+    mbCol('Pedido', ['PEDIDO'], '', true),
+    mbCol('Data da rejeição', ['DATA_REJEICAO'], ''),
+    mbCol('Dias rejeitado', ['DIAS_REJEITADO'], ''),
+    mbCol('Prazo de recusa', ['PRAZO_RECUSA'], ''),
+    mbCol('Motivo da recusa', ['MOTIVO_RECUSA'], ''),
+    mbCol('Quantidade de itens', ['N_ITENS'], ''),
+    mbCol('Fornecedor', ['FORNECEDOR'], ''),
+    mbCol('Responsável pelo grupo', ['RESPONSAVEL_P_GRUPO_COMPRAD',
+                                     'RESPONSAVEL_P_GRUPO_COMPRADOR'], ''),
+    mbCol('Gerência', ['GERENCIA'], ''),
+    mbCol('Tipo de pedido', ['TIPO_PEDIDO'], ''),
+    mbCol('Envios ao Ariba', ['N_ENVIOS_ARIBA'], '')
+  ],
+  rodrigo: [
+    mbCol('Pedido', ['PEDIDO','PEDIDOS'], '', true),
+    mbCol('Item / linha do pedido', ['ITEM','LINHA','LINHAPEDIDO'], ''),
+    mbCol('Padrão de rejeição', ['PADRAO_REJEICAO'], '', true),
+    mbCol('Justificativa', ['JUSTIFICATIVA'], ''),
+    mbCol('Tempo desde o envio (dias)', ['TEMPO_DESDE_O_ENVIO_DIAS','TEMPO_DESDE_O_ENVIO',
+                                         'TEMPO_DESDE_ENVIO_DIAS'], ''),
+    mbCol('Oportunidade', ['OPORTUNIDADE'], ''),
+    mbCol('Data', ['DATA'], ''),
+    mbCol('Data do último cockpit', ['DATA_ULTIMO_COCKPIT'], ''),
+    mbCol('Criador', ['CRIADOR'], '')
+  ],
+  levelboard: [
+    mbCol('RC', ['RC'], '', true),
+    mbCol('Item da RC', ['SEQ','ITEM'], '', true),
+    mbCol('Data da negociação', ['NEGOCIACAO'], '', true),
+    mbCol('Fornecedor ganhador', ['FORNECEDOR_GANHADOR_PATEC'], ''),
+    mbCol('Item da oportunidade', ['ITEM','ITEM_OPORTUNIDADE','ITEM_DA_OPORTUNIDADE',
+                                   'ITEM_OP'], 'AF'),
+    mbCol('Material', ['NM_PEDIDO'], ''),
+    mbCol('SLA em dias', ['SLA_DIAS','SLA_DIA','SLA'], 'BO'),
+    mbCol('Idas ao Level', ['QTD_IDAS_LEVEL','QTD_IDAS','IDAS_LEVEL'], 'AM')
+  ],
+  prio: [
+    mbCol('RC', ['RC','REQUISICAO','NUMERO_RC','NUM_RC','REQUISICAO_COMPRA'], '', true),
+    mbCol('Item da RC (em branco = a RC inteira)',
+          ['SEQ','ITEM','LINHAREQUISICAO','LINHA_REQUISICAO','ITEM_RC','ITEM_DA_RC'], '')
+  ],
+  q18: [
+    mbCol('Código SAP do fornecedor', ['COD_SAP_AJUST','COD_SAP','CODIGO_SAP'], 'A', true),
+    mbCol('Razão social', ['RAZAO_SOCIAL_EMPRESA','RAZAO_SOCIAL','FORNECEDOR'], 'B'),
+    mbCol('Justificativa (só entra quem está "Impedido")',
+          ['JUSTIFICATIVA','MOTIVO'], 'C', true)
+  ],
+  reap: [
+    mbCol('RC', ['RC'], '', true),
+    mbCol('Item', ['ITEM'], ''),
+    mbCol('Lote do reap', ['LOTE_DO_REAP','LOTE_REAP'], ''),
+    mbCol('Status', ['STATUS'], ''),
+    mbCol('Pedido vinculado', ['PEDIDO_VINC','PEDIDO_VINCULADO'], ''),
+    mbCol('Grupo comprador', ['GRUPO_COMPRADOR'], ''),
+    mbCol('Fornecedor', ['FORNECEDOR'], ''),
+    mbCol('Material', ['CODIGO_SAP','MATERIAL'], ''),
+    mbCol('Centro', ['CENTRO'], ''),
+    mbCol('Preço total', ['PRECO_TOTAL'], '')
+  ]
+};
+
+// A letra de uma posição: 0 → A, 21 → V, 55 → BD.
+function mbLetraDe(j){
+  var n = Math.round(+j), s = '';
+  if (!(n >= 0)) return '';
+  n++;
+  while (n > 0) { var r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s;
+                  n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+// O cabeçalho do arquivo que está carregado agora, quando ele continua
+// em memória. Sem isto o bloco seria só documentação; com isto ele
+// confere a documentação contra o arquivo de verdade.
+function mbCabecalhoDe(k){
+  try {
+    if (k === 'mapa' && _mdBase && _mdBase.cabPorAba)
+      return _mdBase.cabPorAba[(_mdBase.abaMapa || 'MAPA')] || null;
+    if (k === 'medicao' && _rjsMed && (_rjsMed.cabecalho || []).length)
+      return _rjsMed.cabecalho;
+    if (k === 'q18' && _q18Ped && (_q18Ped.cabecalho || []).length)
+      return _q18Ped.cabecalho;
+  } catch (e) {}
+  return null;
+}
+
+function mbColunaStatus(c, cabs){
+  if (!cabs) return null;
+  var j = _cpAchaCol(cabs, c.nomes);
+  if (j !== -1) return { ok:true, letra:mbLetraDe(j), como:'pelo nome' };
+  if (c.letra) return { ok:false, reserva:true, letra:c.letra };
+  return { ok:false, reserva:false };
+}
+
+function mbColunasHTML(k){
+  var lista = MB_COLUNAS[k];
+  if (!lista || !lista.length) return '';
+  var cabs = (mbCabecalhoDe(k) || []).map(cpNormCab);
+  var temCab = !!(mbCabecalhoDe(k) || []).length;
+  var faltando = 0, naReserva = 0;
+  var linhas = lista.map(function(c){
+    var st = temCab ? mbColunaStatus(c, cabs) : null;
+    if (st && !st.ok) { if (st.reserva) naReserva++; else if (c.obrig) faltando++; }
+    var onde = !st ? '<span style="color:var(--tx2)">—</span>'
+      : (st.ok
+          ? '<span style="color:var(--vd);font-weight:600">coluna ' + st.letra + '</span>'
+            + ' <span style="color:var(--tx2)">pelo nome</span>'
+          : (st.reserva
+              ? '<span style="color:var(--am);font-weight:600">coluna ' + st.letra + '</span>'
+                + ' <span style="color:var(--tx2)">pela reserva</span>'
+              : '<span style="color:var(--vm);font-weight:600">não achei</span>'));
+    return '<tr><td style="font-weight:600;white-space:normal;word-break:break-word">'
+      + cpEsc(c.campo)
+      + (c.obrig ? ' <span style="color:var(--vm);font-size:9px">obrigatória</span>' : '')
+      + '</td>'
+      + '<td style="font-size:10px;color:var(--tx2);white-space:normal;'
+      +   'word-break:break-word">' + cpEsc(c.nomes.join(' · '))
+      +   (c.letra ? '<div style="color:var(--am)">reserva: coluna ' + c.letra + '</div>'
+                   : '') + '</td>'
+      + '<td style="font-size:10px;white-space:normal">' + onde + '</td></tr>';
+  }).join('');
+
+  var resumo = !temCab
+    ? '<span style="color:var(--tx2)">O arquivo desta base não está em memória agora, '
+      + 'então aqui vai só o modelo. Suba a planilha e abra de novo para ver onde cada '
+      + 'coluna foi achada.</span>'
+    : (faltando
+        ? '<span style="color:var(--vm);font-weight:600">⚠ ' + faltando
+          + ' coluna(s) obrigatória(s) não foram achadas no arquivo carregado.</span>'
+        : (naReserva
+            ? '<span style="color:var(--am);font-weight:600">⚠ ' + naReserva
+              + ' coluna(s) só foram achadas pela LETRA de reserva — se a ordem do arquivo '
+              + 'mudar, elas passam a ler a coluna errada sem erro nenhum.</span>'
+            : '<span style="color:var(--vd);font-weight:600">✓ Todas as colunas foram '
+              + 'achadas pelo nome no arquivo carregado.</span>'));
+
+  return '<details style="margin-top:.5rem">'
+    + '<summary style="font-size:10.5px;color:var(--az);cursor:pointer;font-weight:600">'
+    +   '📐 Colunas que eu leio (' + lista.length + ')</summary>'
+    + '<div style="font-size:10.5px;margin-top:.4rem;line-height:1.5">' + resumo + '</div>'
+    + '<div style="overflow:auto;margin-top:.4rem">'
+    +   '<table style="font-size:10.5px;table-layout:fixed;width:100%;min-width:430px">'
+    +   '<thead><tr><th style="width:36%">Para quê</th>'
+    +   '<th style="width:38%">Nome aceito no cabeçalho</th>'
+    +   '<th style="width:26%">No arquivo de agora</th></tr></thead><tbody>' + linhas
+    +   '</tbody></table></div>'
+    + '<div style="font-size:10px;color:var(--tx2);margin-top:.4rem;line-height:1.5">'
+    + 'A ordem de busca é sempre: <strong>nome do cabeçalho</strong> primeiro (qualquer um '
+    + 'dos aceitos, sem acento e sem diferença de maiúscula), e só depois a '
+    + '<strong>letra de reserva</strong>. Mudar a ORDEM das colunas não quebra nada enquanto '
+    + 'o nome continuar igual; o que quebra é renomear a coluna — aí vale a letra, e ela '
+    + 'passa a ler o que estiver naquela posição.</div></details>';
+}
+
+// O modelo inteiro em Excel, uma aba por base. É o papel que ele queria
+// ter em mãos quando um upload der errado.
+function mbBaixarModelo(){
+  try {
+    var wb = XLSX.utils.book_new();
+    var indice = [['Base','Colunas documentadas','Obrigatórias','Com letra de reserva']];
+    MB_FONTES.forEach(function(f){
+      var lista = MB_COLUNAS[f.k] || [];
+      if (!lista.length) return;
+      var cabs = (mbCabecalhoDe(f.k) || []).map(cpNormCab);
+      var temCab = !!cabs.length;
+      var aoa = [['Para quê','Nomes aceitos no cabeçalho','Letra de reserva',
+                  'Obrigatória','Onde está no arquivo carregado']];
+      lista.forEach(function(c){
+        var st = temCab ? mbColunaStatus(c, cabs) : null;
+        aoa.push([c.campo, c.nomes.join(' | '), c.letra || '', c.obrig ? 'sim' : 'não',
+                  !st ? 'arquivo não está em memória'
+                      : (st.ok ? 'coluna ' + st.letra + ' (pelo nome)'
+                         : (st.reserva ? 'coluna ' + st.letra + ' (pela reserva)'
+                            : 'não achei'))]);
+      });
+      var ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [{ wch:42 }, { wch:60 }, { wch:14 }, { wch:12 }, { wch:30 }];
+      // o nome da aba do Excel não aceita mais de 31 caracteres
+      XLSX.utils.book_append_sheet(wb, ws, String(f.nome).slice(0, 28));
+      indice.push([f.nome, lista.length,
+                   lista.filter(function(c){ return c.obrig; }).length,
+                   lista.filter(function(c){ return c.letra; }).length]);
+    });
+    var wsI = XLSX.utils.aoa_to_sheet(indice);
+    wsI['!cols'] = [{ wch:34 }, { wch:22 }, { wch:14 }, { wch:22 }];
+    XLSX.utils.book_append_sheet(wb, wsI, 'Índice');
+    XLSX.writeFile(wb, 'Modelo_de_colunas_' + String(cpHojeISO()).replace(/-/g, '')
+                       + '.xlsx');
+    return true;
+  } catch (e) {
+    alert('Não consegui gerar o modelo: ' + e.message);
+    return false;
+  }
+}
+
 function mbFonte(k){
   for (var i = 0; i < MB_FONTES.length; i++) if (MB_FONTES[i].k === k) return MB_FONTES[i];
   return null;
@@ -17297,7 +17572,15 @@ function mbRender(){
       + (velhos.length
           ? '<div style="font-size:11px;color:var(--am);margin-top:.5rem">⏱ Não são de hoje: '
             + cpEsc(velhos.join(' · ')) + '. Elas continuam valendo — só não são do dia.</div>'
-          : '');
+          : '')
+      + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:.7rem">'
+      +   '<button class="btn btn-s" onclick="mbBaixarModelo()">📐 Baixar o modelo de '
+      +     'colunas</button>'
+      +   '<span style="font-size:10.5px;color:var(--tx2);max-width:560px;line-height:1.5">'
+      +     'Uma aba por base, com as colunas que eu procuro, os nomes que aceito e a letra '
+      +     'de reserva de cada uma. Cada card também mostra isso aberto, no '
+      +     '<strong>📐 Colunas que eu leio</strong>.</span>'
+      + '</div>';
   }
 
   var h = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));'
@@ -17336,6 +17619,7 @@ function mbRender(){
       // alguns cards trazem algo próprio embaixo (a Q18 tem a consulta)
       + (typeof f.extra === 'function' ? (function(){
             try { return f.extra(); } catch (x) { return ''; } })() : '')
+      + mbColunasHTML(f.k)
       + '</div>';
   });
   box.innerHTML = h + '</div>';
@@ -27626,7 +27910,7 @@ function mdPrioDrop(e){
 // pode vir com zeros à esquerda ou com ".0" do Excel. Por isso a chave
 // é normalizada dos dois lados.
 var _q18Ped = { ids:{}, total:0, impedidos:0, arquivo:'', atualizadoEm:'',
-                atualizadoPor:'', porJust:{}, posUsadas:[] };
+                atualizadoPor:'', porJust:{}, posUsadas:[], cabecalho:[] };
 var Q18P_CHUNK = 4000;
 
 function q18pChave(v){
@@ -27696,11 +27980,21 @@ async function mdQ18Upload(file){
                                         { header:1, defval:'', raw:true });
   var r = q18pLer(linhas);
   if (!r.lidas) throw new Error(r.aviso);
+  // guardo o cabeçalho para a tela poder dizer ONDE cada coluna foi
+  // achada neste arquivo — e não só o que eu procuro
+  var cabArq = [];
+  for (var ic = 0; ic < Math.min(linhas.length, 15); ic++) {
+    var cc = (linhas[ic] || []).map(cpNormCab);
+    if (cc.indexOf('COD_SAP_AJUST') !== -1 || cc.indexOf('JUSTIFICATIVA') !== -1) {
+      cabArq = (linhas[ic] || []).map(function(x){ return String(x == null ? '' : x).trim(); });
+      break;
+    }
+  }
   var ids = {};
   r.itens.forEach(function(i){ ids[i.k] = { cod:i.cod, nome:i.nome }; });
   _q18Ped = { ids:ids, total:r.lidas, impedidos:r.impedidos, arquivo:file.name,
               atualizadoEm:new Date().toISOString(), atualizadoPor:cpQuem(),
-              porJust:r.porJust, posUsadas:r.posUsadas };
+              porJust:r.porJust, posUsadas:r.posUsadas, cabecalho:cabArq };
   await q18pGravar(r.itens);
 }
 
@@ -27715,6 +28009,7 @@ async function q18pGravar(itens){
     await db.collection('config').doc('q18p_meta').set({
       arquivo:_q18Ped.arquivo, total:_q18Ped.total, impedidos:_q18Ped.impedidos,
       chunks:chunks, porJust:_q18Ped.porJust, posUsadas:_q18Ped.posUsadas,
+      cabecalho:_q18Ped.cabecalho || [],
       atualizadoEm:_q18Ped.atualizadoEm, atualizadoPor:_q18Ped.atualizadoPor
     });
     return true;
@@ -27741,7 +28036,7 @@ async function q18pCarregar(){
     _q18Ped = { ids:ids, total:+d.total || 0, impedidos:+d.impedidos || 0,
                 arquivo:d.arquivo || '', atualizadoEm:d.atualizadoEm || '',
                 atualizadoPor:d.atualizadoPor || '', porJust:d.porJust || {},
-                posUsadas:d.posUsadas || [] };
+                posUsadas:d.posUsadas || [], cabecalho:d.cabecalho || [] };
   } catch (e) { console.warn('q18pCarregar:', e); }
 }
 
