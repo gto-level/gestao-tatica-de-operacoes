@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/11 14:00';
+var GTO_BUILD = '16/11 15:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -29126,6 +29126,50 @@ function mdSimPacoteCols(b){
   });
   return c;
 }
+// Refaz os números do pacote depois de tirar ou pôr itens dentro dele.
+function mdSimRecalc(b){
+  b.porStatus = {};
+  MD_STATUS.forEach(function(x){ b.porStatus[x.chave] = 0; });
+  b.slaMax = 0;
+  (b.itens || []).forEach(function(it){
+    b.porStatus[it.statusChave] = (b.porStatus[it.statusChave] || 0) + 1;
+    if (it.sla > b.slaMax) b.slaMax = it.sla;
+    if (it.statusChave === 'emitir' && !b.tipoEmitir
+        && (it.tipo === 'L' || it.tipo === 'Q')) b.tipoEmitir = it.tipo;
+  });
+  b.n = (b.itens || []).length;
+  b.statuses = MD_STATUS.map(function(x){ return x.chave; })
+    .filter(function(ch){ return b.porStatus[ch] > 0; });
+  return b;
+}
+
+// PARTIR A OPORTUNIDADE NA MÃO (16/11).
+//
+// "Clico em 1 e ele move dois itens, por que não consigo mover apenas
+// 1?" Porque a oportunidade não se divide — a regra vale no rateio
+// inteiro, e a menor oportunidade daquela fila tinha 2 itens.
+//
+// Aqui ele está decidindo na mão, então a trava vira opção: com
+// "dividir oportunidade" ligado, saem exatamente os itens pedidos e a
+// oportunidade fica repartida entre duas pessoas. Desligado (o padrão),
+// o pacote vai inteiro e a tela diz por que o número passou.
+var _mdSimSeq = 0;
+function mdSimPartir(b, col, qtd){
+  var sts = [];
+  MD_SIM_COLS.forEach(function(c){ if (c.k === col) sts = c.st; });
+  var daCol = (b.itens || []).filter(function(it){
+    return sts.indexOf(it.statusChave) !== -1; })
+    .sort(function(x, y){ return (x.sla || 0) - (y.sla || 0); });
+  var levar = daCol.slice(0, Math.max(1, qtd));
+  b.itens = (b.itens || []).filter(function(it){ return levar.indexOf(it) === -1; });
+  mdSimRecalc(b);
+  var novo = { id:b.id + '/p' + (++_mdSimSeq), itens:levar, porStatus:{}, statuses:[],
+               tipoEmitir:'', prio:b.prio, prioOp:b.prioOp, prazoOpMax:b.prazoOpMax,
+               partidoMao:true, opOrig:(levar[0] || {}).op || '' };
+  mdSimRecalc(novo);
+  return novo;
+}
+
 function mdSimAtvs(b){
   var l = [];
   (b.itens || []).forEach(function(it){
@@ -29145,10 +29189,20 @@ function mdSimMontar(res, prep){
   var atribuido = {}, pool = [];
   (res.lista || []).forEach(function(p){
     atribuido[p.nome] = (p.blocos || []).slice();
-    // a marca de "movido à mão" é do pacote, e o pacote é o mesmo
-    // objeto entre uma montagem e outra: sem limpar aqui, o Desfazer
-    // voltava os totais certos mas continuava dizendo "movidos"
-    atribuido[p.nome].forEach(function(b){ b.__mov = false; b.__deQuem = ''; });
+    atribuido[p.nome].forEach(function(b){
+      // a marca de "movido à mão" é do pacote, e o pacote é o mesmo
+      // objeto entre uma montagem e outra: sem limpar aqui, o Desfazer
+      // voltava os totais certos mas continuava dizendo "movidos"
+      b.__mov = false; b.__deQuem = '';
+      // e se a oportunidade foi repartida na mão, os itens que saíram
+      // dela voltam — senão o Desfazer devolvia a pessoa com um item a
+      // menos e o número não fechava com o que o dash tinha calculado
+      if (!b.__itensOrig) b.__itensOrig = (b.itens || []).slice();
+      else if (b.itens.length !== b.__itensOrig.length) {
+        b.itens = b.__itensOrig.slice();
+        mdSimRecalc(b);
+      }
+    });
   });
   // o que ficou na fila já nasce no bolo: é item sem dono esperando
   var porOp = {};
@@ -29173,7 +29227,8 @@ function mdSimMontar(res, prep){
       .filter(function(ch){ return b.porStatus[ch] > 0; });
   });
   _mdSim = { res:res, prep:prep, atribuido:atribuido, pool:pool, passo:10,
-             movimentos:[], aplicado:false };
+             dividir:(_mdSim && _mdSim.dividir) || false,
+             movimentos:[], partidasMao:[], aplicado:false };
   return _mdSim;
 }
 
@@ -29219,6 +29274,13 @@ function mdSimPasso(v){
   _mdSim.passo = Math.max(1, Math.round(+v || 1));
   mdSimRender();
 }
+function mdSimDividir(v){
+  _mdSim.dividir = !!v;
+  mdSimRender(v
+    ? '✂ Agora o movimento é por ITEM: sai exatamente a quantidade pedida, e a '
+      + 'oportunidade pode ficar repartida entre duas pessoas.'
+    : '🔒 Voltei a mover a oportunidade inteira — é como o resto do módulo trabalha.');
+}
 
 function mdSimTirar(nome, col){
   var lista = _mdSim.atribuido[nome] || [];
@@ -29234,19 +29296,47 @@ function mdSimTirar(nome, col){
       if (a.slaMax !== b.slaMax) return a.slaMax - b.slaMax;
       return a.n - b.n;
     });
-  var alvo = _mdSim.passo, movidos = 0, i;
-  for (i = 0; i < cand.length && movidos < alvo; i++) {
-    var b = cand[i];
-    movidos += (mdSimPacoteCols(b)[col] || 0);
+  var alvo = _mdSim.passo, movidos = 0, i, estourou = 0, partiu = 0;
+  var sai = function(b){
     _mdSim.atribuido[nome] = _mdSim.atribuido[nome].filter(function(x){ return x !== b; });
+  };
+  var vai = function(b){
     b.__mov = false;                 // no bolo ele é só um pacote sem dono
     b.__deQuem = nome;
     _mdSim.pool.push(b);
+  };
+  for (i = 0; i < cand.length && movidos < alvo; i++) {
+    var b = cand[i];
+    var qtd = mdSimPacoteCols(b)[col] || 0;
+    var falta = alvo - movidos;
+    if (qtd > falta) {
+      if (_mdSim.dividir) {
+        var parte = mdSimPartir(b, col, falta);
+        if (!b.n) sai(b);                       // o pacote ficou vazio
+        vai(parte); movidos += falta; partiu++;
+        _mdSim.partidasMao.push({ op:parte.opOrig, n:falta, de:nome });
+        continue;
+      }
+      continue;                                 // pode haver um menor adiante
+    }
+    sai(b); vai(b); movidos += qtd;
+  }
+  // nada coube: leva o menor pacote inteiro, senão o clique não faz nada
+  if (!movidos && cand.length) {
+    var menor = cand.slice().sort(function(a, b2){
+      return (mdSimPacoteCols(a)[col] || 0) - (mdSimPacoteCols(b2)[col] || 0); })[0];
+    var q2 = mdSimPacoteCols(menor)[col] || 0;
+    sai(menor); vai(menor); movidos = q2; estourou = q2 - alvo;
   }
   if (movidos) _mdSim.movimentos.push({ tipo:'tirou', nome:nome, col:col, n:movidos });
   mdSimRender(movidos
     ? '↙ Tirei ' + movidos + ' item(ns) de ' + nome + ' em ' + mdSimNomeCol(col)
-      + ' — estão no bolo, prontos para ir para outra pessoa.'
+      + ' — estão no bolo.'
+      + (estourou > 0
+          ? ' Pedi ' + alvo + ', mas a menor oportunidade desta fila tem ' + movidos
+            + ' itens e ela não se divide. Para tirar exatamente ' + alvo
+            + ', ligue "dividir oportunidade".' : '')
+      + (partiu ? ' ' + partiu + ' oportunidade(s) ficaram repartidas.' : '')
     : 'Não há o que tirar de ' + nome + ' em ' + mdSimNomeCol(col) + '.');
 }
 
@@ -29260,13 +29350,35 @@ function mdSimPor(nome, col){
     if (a.slaMax !== b.slaMax) return b.slaMax - a.slaMax;
     return b.n - a.n;
   });
-  var alvo = _mdSim.passo, movidos = 0, i;
-  for (i = 0; i < cand.length && movidos < alvo; i++) {
-    var b = cand[i];
-    movidos += (mdSimPacoteCols(b)[col] || 0);
+  var alvo = _mdSim.passo, movidos = 0, i, estourou = 0, partiu = 0;
+  var tira = function(b){
     _mdSim.pool = _mdSim.pool.filter(function(x){ return x !== b; });
+  };
+  var entra = function(b){
     b.__mov = true;
     (_mdSim.atribuido[nome] = _mdSim.atribuido[nome] || []).push(b);
+  };
+  for (i = 0; i < cand.length && movidos < alvo; i++) {
+    var b = cand[i];
+    var qtd = mdSimPacoteCols(b)[col] || 0;
+    var falta = alvo - movidos;
+    if (qtd > falta) {
+      if (_mdSim.dividir) {
+        var parte = mdSimPartir(b, col, falta);
+        if (!b.n) tira(b);
+        entra(parte); movidos += falta; partiu++;
+        _mdSim.partidasMao.push({ op:parte.opOrig, n:falta, para:nome });
+        continue;
+      }
+      continue;
+    }
+    tira(b); entra(b); movidos += qtd;
+  }
+  if (!movidos && cand.length) {
+    var menor = cand.slice().sort(function(a, b2){
+      return (mdSimPacoteCols(a)[col] || 0) - (mdSimPacoteCols(b2)[col] || 0); })[0];
+    var q2 = mdSimPacoteCols(menor)[col] || 0;
+    tira(menor); entra(menor); movidos = q2; estourou = q2 - alvo;
   }
   if (movidos) _mdSim.movimentos.push({ tipo:'pos', nome:nome, col:col, n:movidos });
   var podia = (_mdSim.pool || []).some(function(b){
@@ -29274,6 +29386,11 @@ function mdSimPor(nome, col){
   mdSimRender(movidos
     ? '↗ Coloquei ' + movidos + ' item(ns) em ' + nome + ' na fila '
       + mdSimNomeCol(col) + '.'
+      + (estourou > 0
+          ? ' Pedi ' + alvo + ', mas a menor oportunidade no bolo tem ' + movidos
+            + ' itens e ela não se divide. Para mover exatamente ' + alvo
+            + ', ligue "dividir oportunidade".' : '')
+      + (partiu ? ' ' + partiu + ' oportunidade(s) ficaram repartidas.' : '')
     : (podia
         ? '⚠ ' + nome + ' não está marcado(a) em todas as atividades dessas '
           + 'oportunidades — marque na tabela de atividades para poder receber.'
@@ -29372,8 +29489,20 @@ function mdSimHTML(recado){
     + '<input type="number" min="1" value="' + _mdSim.passo + '" onchange="mdSimPasso(this.value)"'
     +   ' style="width:70px;font-size:12px;padding:3px 7px;border:1.5px solid var(--brd);'
     +   'border-radius:7px">'
-    + '<span style="font-size:10.5px;color:var(--tx2)">A oportunidade não se divide, então '
-    + 'o número real pode passar um pouco do pedido.</span></div>';
+    + '<label style="display:flex;align-items:center;gap:5px;font-size:11px;'
+    +   'cursor:pointer;padding:2px 8px;border:1.5px solid '
+    +   (_mdSim.dividir ? 'var(--am);background:var(--amc)' : 'var(--brd)')
+    +   ';border-radius:7px">'
+    +   '<input type="checkbox"' + (_mdSim.dividir ? ' checked' : '')
+    +     ' onchange="mdSimDividir(this.checked)">'
+    +   '<span>✂ dividir oportunidade</span></label>'
+    + '<span style="font-size:10.5px;color:var(--tx2);max-width:420px;line-height:1.5">'
+    + (_mdSim.dividir
+        ? 'Ligado: sai exatamente a quantidade pedida, e a oportunidade pode ficar '
+          + 'repartida entre duas pessoas.'
+        : 'A oportunidade vai inteira, então o número real pode passar um pouco do '
+          + 'pedido. Ligue o ✂ para mover item a item.')
+    + '</span></div>';
 
   if (recado) h += '<div style="font-size:11.5px;color:var(--az);margin:.3rem 0 .2rem">'
     + cpEsc(recado) + '</div>';
@@ -29429,6 +29558,17 @@ function mdSimHTML(recado){
     h += '<div style="font-size:11px;color:var(--vm);margin-top:6px">⚠ '
       + cpNum(res.semAtividade.length) + ' item(ns) sem ninguém marcado na atividade — '
       + 'esses não entram nem no bolo, porque ninguém da equipe faz aquilo hoje.</div>';
+  }
+  var pm = _mdSim.partidasMao || [];
+  if (pm.length) {
+    var ops = {};
+    pm.forEach(function(x){ if (x.op) ops[x.op] = (ops[x.op] || 0) + x.n; });
+    h += '<div style="font-size:11px;color:var(--am);margin-top:6px">✂ Você repartiu '
+      + cpNum(pm.length) + ' vez(es) na mão: '
+      + cpEsc(Object.keys(ops).map(function(k){ return k + ' (' + ops[k] + ')'; })
+          .join(' · '))
+      + '. Essas oportunidades ficam com mais de um comprador — fora daqui o módulo '
+      + 'trata a oportunidade como indivisível.</div>';
   }
   h += mdAvisoPartidos(res) + mdAvisoHerdado(res) + '</div>';
   return h;
