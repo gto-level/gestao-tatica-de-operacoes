@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/11 11:30';
+var GTO_BUILD = '16/11 14:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -28236,6 +28236,133 @@ function mdBlocos(itens){
   return out;
 }
 
+// Os blocos de cada um caem nos dias. Era um trecho dentro do
+// mdCalcular; virou função em 16/11 porque a simulação remaneja item
+// entre pessoas e precisa refazer os dias com a MESMA conta — duas
+// implementações dessa divisão seria pedir para os números divergirem.
+function mdColocarNosDias(res, pessoas, nDias, cota){
+  var diasCh = function(ch){ var c = mdCotaAtv(ch); return c.dias || nDias; };
+  res.diasAcima = [];
+  (pessoas || []).forEach(function(n){
+    var p = res.pessoas[n];
+    p.porDia = new Array(nDias).fill(0);
+    if (!p.blocos.length) return;
+    // O ALVO DO DIA SE RECALCULA A CADA BLOCO.
+    //
+    // Até 10/11 o alvo era fixo — o total da pessoa dividido pelos
+    // dias — e cada bloco caía no PRIMEIRO dia com espaço. Dois
+    // efeitos ruins:
+    //   · uma oportunidade grande (12 itens com alvo de 11) não
+    //     cabia em dia nenhum, ia para o menos carregado e estourava
+    //     aquele dia;
+    //   · o que sobrava depois dela era empacotado nos dias do
+    //     começo, porque "primeiro dia com espaço" sempre volta ao
+    //     dia 1. O fim da semana ficava vazio.
+    // O André viu isso em 10/11: marcelo tinha 55 RCs de Abrir PATEC
+    // e o relatório saiu 18/16/14/7 — sem insumo a partir de quinta,
+    // em vez dos 11 por dia.
+    //
+    // Agora, antes de cada bloco, o alvo é "o que ainda falta
+    // colocar ÷ dias que ainda estão abaixo da média". Quando um dia
+    // estoura por causa de uma oportunidade indivisível, o alvo dos
+    // outros cai sozinho e o resto se espalha até o último dia, em
+    // vez de empilhar no começo.
+    // A fila é UMA só: a carga do dia do comprador. Separar a fila
+    // por atividade foi testado em 10/11 contra o MAPA 09.11 e saiu
+    // pior — duas atividades com fila própria caem no mesmo dia sem
+    // saber uma da outra, e o relatório de Abrir PATEC do marcelo
+    // ficava 13/15/19/7/0. Com fila única ele fica 12/11/10/11/10.
+    var alvoBase = Math.max(1, Math.ceil(p.n / nDias));
+    var falta = p.n;
+    p.blocos.forEach(function(b){
+      // o bloco só pode cair dentro dos dias úteis da atividade dele
+      var limite = nDias, i;
+      (b.statuses || []).forEach(function(ch){ var dd = diasCh(ch); if (dd < limite) limite = dd; });
+      if (!limite) limite = nDias;
+      var livres = 0;
+      for (i = 0; i < nDias; i++) if (p.porDia[i] < alvoBase) livres++;
+      var alvo = Math.max(1, Math.ceil(falta / Math.max(1, livres)));
+      var d = -1;
+      for (i = 0; i < limite; i++) if (p.porDia[i] + b.n <= alvo) { d = i; break; }
+      // bloco maior que o alvo: vai para o dia mais vazio da janela
+      if (d === -1) { d = 0; for (i = 1; i < limite; i++) if (p.porDia[i] < p.porDia[d]) d = i; }
+      b.itens.forEach(function(it){ it.dia = d + 1; });
+      p.porDia[d] += b.n;
+      falta -= b.n;
+    });
+    p.porDia.forEach(function(v, k){ if (v > cota) res.diasAcima.push({ nome:n, dia:k + 1, n:v }); });
+    p.itens.sort(function(a, c){
+      if (a.dia !== c.dia) return (a.dia || 99) - (c.dia || 99);
+      // dentro do dia, o MAPA do dia vem antes do reap
+      var oa = a.origem === 'reap' ? 1 : 0, oc = c.origem === 'reap' ? 1 : 0;
+      if (oa !== oc) return oa - oc;
+      if (c.sla !== a.sla) return c.sla - a.sla;
+      return String(a.rc).localeCompare(String(c.rc));
+    });
+  });
+
+}
+
+// ── A OPORTUNIDADE QUE NINGUÉM COBRE INTEIRA (16/11) ─────────────
+//
+// BUG que o André achou: "o dash está distribuindo itens para pessoas
+// que não estão selecionadas — não selecionei Abrir PATEC para a
+// Wanessa e foram itens de abertura para ela".
+//
+// A causa: a oportunidade é indivisível e vai inteira para quem cobre o
+// MAIOR número de itens dela. Se a oportunidade tinha 8 de Emitir e 2
+// de Abrir PATEC, ela ia para quem emite — e os 2 de abertura iam
+// junto, só marcados como "fora da atividade". Marcar não resolve: o
+// item estava na mão de quem não faz aquilo.
+//
+// Agora, antes de repartir: se EXISTE alguém marcado em todas as
+// atividades da oportunidade, ela continua inteira (a regra de não
+// dividir vale). Se não existe ninguém assim, ela é partida por
+// atividade, e cada parte vai para quem é marcado naquela. É a única
+// saída sem entregar serviço para quem não faz — e a tela diz quantas
+// foram partidas e por quê.
+function mdPartirBlocos(blocos, pessoas, atividades, partidos){
+  var out = [];
+  (blocos || []).forEach(function(b){
+    var atvs = [];
+    (b.itens || []).forEach(function(it){
+      var a = mdAtvDe(it.statusChave);
+      if (atvs.indexOf(a) === -1) atvs.push(a);
+    });
+    if (atvs.length < 2) { out.push(b); return; }
+    var alguemCobreTudo = (pessoas || []).some(function(n){
+      var at = mdAtvNorm(atividades[n]);
+      return atvs.every(function(a){ return at.indexOf(a) !== -1; });
+    });
+    if (alguemCobreTudo) { out.push(b); return; }
+    // ninguém faz tudo: cada atividade vira um bloco próprio
+    var porAtv = {};
+    (b.itens || []).forEach(function(it){
+      var a = mdAtvDe(it.statusChave);
+      (porAtv[a] = porAtv[a] || []).push(it);
+    });
+    if (partidos) partidos.push({ op:(b.itens[0] || {}).op || b.id, n:b.n,
+                                  atividades:atvs.slice() });
+    Object.keys(porAtv).forEach(function(a){
+      var parte = { id:b.id + '#' + a, itens:porAtv[a], slaMax:0, porStatus:{},
+                    statuses:[], tipoEmitir:'', prio:b.prio, prioOp:b.prioOp,
+                    prazoOpMax:b.prazoOpMax, partido:true };
+      MD_STATUS.forEach(function(x){ parte.porStatus[x.chave] = 0; });
+      porAtv[a].forEach(function(it){
+        parte.porStatus[it.statusChave] = (parte.porStatus[it.statusChave] || 0) + 1;
+        if (it.sla > parte.slaMax) parte.slaMax = it.sla;
+        if (it.statusChave === 'emitir' && !parte.tipoEmitir
+            && (it.tipo === 'L' || it.tipo === 'Q')) parte.tipoEmitir = it.tipo;
+      });
+      parte.n = porAtv[a].length;
+      parte.statuses = MD_STATUS.map(function(x){ return x.chave; })
+        .filter(function(ch){ return parte.porStatus[ch] > 0; });
+      out.push(parte);
+    });
+  });
+  return out;
+}
+
 function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itensReap){
   var nDias  = Math.max(1, Math.min(7, Math.round(+dias || 5)));
   var cota   = Math.max(1, Math.round(+cotaDia || 1));
@@ -28308,6 +28435,27 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     });
     return c;
   };
+  // as atividades que um bloco exige
+  var atvsDoBloco = function(b){
+    var l = [];
+    (b.itens || []).forEach(function(it){
+      var a = mdAtvDe(it.statusChave);
+      if (l.indexOf(a) === -1) l.push(a);
+    });
+    return l;
+  };
+  // QUEM PODE RECEBER: marcado em TODAS as atividades do bloco. Uma só
+  // definição, usada tanto na contagem do saldo quanto no rateio — se
+  // as duas divergirem, a conta do saldo deixa de bater com o que a
+  // pessoa recebe.
+  var quemCobre = function(b){
+    var atvs = atvsDoBloco(b);
+    return (pessoas || []).filter(function(n){
+      if (cobre(n, b) <= 0) return false;
+      var at = mdAtvNorm(atividades[n]);
+      return atvs.every(function(a){ return at.indexOf(a) !== -1; });
+    });
+  };
 
   // A ORDEM DOS BLOCOS.
   //
@@ -28317,6 +28465,8 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   // andem em partes iguais e uma não acabe antes da outra. Por último
   // a etapa 2, Emitir Pedido, que completa a meta de cada um.
   var ordenados = mdBlocos(itens);
+  res.partidos = [];
+  ordenados = mdPartirBlocos(ordenados, pessoas, atividades, res.partidos);
   (function(){
     var pos = {};   // posição do bloco dentro da fila dele, para alternar
     ordenados.forEach(function(b){
@@ -28401,7 +28551,7 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   // ali não ocupa a meta de emissão de ninguém.
   (function(){
     ordenados.forEach(function(b){
-      var quemFaz = pessoas.filter(function(n){ return cobre(n, b) > 0; });
+      var quemFaz = quemCobre(b);
       if (!quemFaz.length) return;
       var d = donoMaisFreq(b);
       if (!d || quemFaz.indexOf(d) === -1) return;   // muda de mão: não é carga dele
@@ -28420,9 +28570,10 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   })();
 
   ordenados.forEach(function(b){
-    var quemFaz = pessoas.filter(function(n){ return cobre(n, b) > 0; });
+    // ninguém marcado em todas as atividades desta oportunidade: ela
+    // fica sem dono em vez de cair na mão de quem não faz
+    var quemFaz = quemCobre(b);
     if (!quemFaz.length) {
-      // ninguém na equipe atua em nenhum status desta oportunidade
       b.itens.forEach(function(it){ it.pessoa = ''; it.dia = 0; it.foraAtividade = false;
                                     res.semAtividade.push(it); });
       return;
@@ -28568,65 +28719,7 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     });
   }
 
-  // os blocos de cada um caem nos dias: o mais urgente no começo da
-  // semana, sem partir bloco e sem deixar dia vazio
-  (pessoas || []).forEach(function(n){
-    var p = res.pessoas[n];
-    p.porDia = new Array(nDias).fill(0);
-    if (!p.blocos.length) return;
-    // O ALVO DO DIA SE RECALCULA A CADA BLOCO.
-    //
-    // Até 10/11 o alvo era fixo — o total da pessoa dividido pelos
-    // dias — e cada bloco caía no PRIMEIRO dia com espaço. Dois
-    // efeitos ruins:
-    //   · uma oportunidade grande (12 itens com alvo de 11) não
-    //     cabia em dia nenhum, ia para o menos carregado e estourava
-    //     aquele dia;
-    //   · o que sobrava depois dela era empacotado nos dias do
-    //     começo, porque "primeiro dia com espaço" sempre volta ao
-    //     dia 1. O fim da semana ficava vazio.
-    // O André viu isso em 10/11: marcelo tinha 55 RCs de Abrir PATEC
-    // e o relatório saiu 18/16/14/7 — sem insumo a partir de quinta,
-    // em vez dos 11 por dia.
-    //
-    // Agora, antes de cada bloco, o alvo é "o que ainda falta
-    // colocar ÷ dias que ainda estão abaixo da média". Quando um dia
-    // estoura por causa de uma oportunidade indivisível, o alvo dos
-    // outros cai sozinho e o resto se espalha até o último dia, em
-    // vez de empilhar no começo.
-    // A fila é UMA só: a carga do dia do comprador. Separar a fila
-    // por atividade foi testado em 10/11 contra o MAPA 09.11 e saiu
-    // pior — duas atividades com fila própria caem no mesmo dia sem
-    // saber uma da outra, e o relatório de Abrir PATEC do marcelo
-    // ficava 13/15/19/7/0. Com fila única ele fica 12/11/10/11/10.
-    var alvoBase = Math.max(1, Math.ceil(p.n / nDias));
-    var falta = p.n;
-    p.blocos.forEach(function(b){
-      // o bloco só pode cair dentro dos dias úteis da atividade dele
-      var limite = nDias, i;
-      (b.statuses || []).forEach(function(ch){ var dd = diasCh(ch); if (dd < limite) limite = dd; });
-      if (!limite) limite = nDias;
-      var livres = 0;
-      for (i = 0; i < nDias; i++) if (p.porDia[i] < alvoBase) livres++;
-      var alvo = Math.max(1, Math.ceil(falta / Math.max(1, livres)));
-      var d = -1;
-      for (i = 0; i < limite; i++) if (p.porDia[i] + b.n <= alvo) { d = i; break; }
-      // bloco maior que o alvo: vai para o dia mais vazio da janela
-      if (d === -1) { d = 0; for (i = 1; i < limite; i++) if (p.porDia[i] < p.porDia[d]) d = i; }
-      b.itens.forEach(function(it){ it.dia = d + 1; });
-      p.porDia[d] += b.n;
-      falta -= b.n;
-    });
-    p.porDia.forEach(function(v, k){ if (v > cota) res.diasAcima.push({ nome:n, dia:k + 1, n:v }); });
-    p.itens.sort(function(a, c){
-      if (a.dia !== c.dia) return (a.dia || 99) - (c.dia || 99);
-      // dentro do dia, o MAPA do dia vem antes do reap
-      var oa = a.origem === 'reap' ? 1 : 0, oc = c.origem === 'reap' ? 1 : 0;
-      if (oa !== oc) return oa - oc;
-      if (c.sla !== a.sla) return c.sla - a.sla;
-      return String(a.rc).localeCompare(String(c.rc));
-    });
-  });
+  mdColocarNosDias(res, pessoas, nDias, cota);
 
   // ── quem passou da cota da atividade, e por quanto ──────────────
   // A cota (itens/dia × dias úteis) é ALVO, não teto. A oportunidade
@@ -28991,12 +29084,19 @@ function mdAvisoMantidos(res){
 // uma visão do que cada comprador deixou de fazer no dia anterior + o
 // que foi distribuído hoje. Total = dia anterior + distribuição atual".
 //
-// A simulação roda a MESMA conta do botão de distribuir e não grava
-// nada: nem o dia, nem o dono dos itens, nem os lotes de reap. É para
-// olhar antes de decidir.
+// E no mesmo dia, depois de ver a tela: "ela ficou tão boa que quero
+// utilizar inclusive para melhorar minha distribuição. Dentro da
+// simulação eu quero conseguir tirar itens de uma pessoa e passar para
+// outra... criar em cima cards com os itens que precisam ser
+// distribuídos por fila; sempre que eu tirar um item ele vai somando
+// nos cards, e esses itens eu coloco em outra pessoa. O dash escolhe
+// qual item será distribuído (dos aptos). Isto se faz necessário pois
+// se uma pessoa da equipe falta eu consiga redistribuir para não ficar
+// parado, ou se uma pessoa está sobrecarregada eu coloco outra pessoa
+// para ajudar".
 //
-// Cada célula traz o total e, embaixo, de onde ele veio: o que já era
-// da pessoa (ficou de ontem) mais o que entrou agora.
+// A simulação não grava nada enquanto ele mexe. Só o botão "Aplicar"
+// grava — e grava exatamente o que está na tela.
 var MD_SIM_COLS = [
   { k:'emitir',   nome:'Emitir pedido',              st:['emitir'] },
   { k:'patec',    nome:'Emitir pedido PATEC',        st:['patec'] },
@@ -29006,119 +29106,347 @@ var MD_SIM_COLS = [
   { k:'negociar', nome:'Negociar preço excessivo',   st:['negociar'] },
   { k:'dpv',      nome:'Negociar acima do limite DPV', st:['dpv'] }
 ];
+function mdSimColDe(status){
+  for (var i = 0; i < MD_SIM_COLS.length; i++)
+    if (MD_SIM_COLS[i].st.indexOf(status) !== -1) return MD_SIM_COLS[i].k;
+  return '';
+}
+var _mdSim = null;
 
-// Conta, por pessoa e por coluna, o que veio de antes e o que é novo.
-// "De antes" é o item que já tinha dono quando o dia começou — é
-// exatamente o que a pessoa não terminou ontem e continua na base.
-function mdSimContar(res){
-  var out = {};
+// A unidade do remanejamento é a OPORTUNIDADE, não o item solto: ela
+// não se divide em lugar nenhum do módulo, e dividir só aqui faria a
+// simulação prometer uma distribuição que o resto não sabe executar.
+// Por isso, ao tirar "10 itens", o que sai são oportunidades até
+// completar 10 — e a tela diz quantos saíram de verdade.
+function mdSimPacoteCols(b){
+  var c = {};
+  (b.itens || []).forEach(function(it){
+    var k = mdSimColDe(it.statusChave);
+    if (k) c[k] = (c[k] || 0) + 1;
+  });
+  return c;
+}
+function mdSimAtvs(b){
+  var l = [];
+  (b.itens || []).forEach(function(it){
+    var a = mdAtvDe(it.statusChave);
+    if (l.indexOf(a) === -1) l.push(a);
+  });
+  return l;
+}
+// a pessoa é marcada em TODAS as atividades da oportunidade? é a mesma
+// pergunta que a distribuição faz — aqui ela vira o trava do botão +
+function mdSimPodeReceber(nome, b){
+  var at = mdAtvNorm((_mdCfg.atividades || {})[nome]);
+  return mdSimAtvs(b).every(function(a){ return at.indexOf(a) !== -1; });
+}
+
+function mdSimMontar(res, prep){
+  var atribuido = {}, pool = [];
   (res.lista || []).forEach(function(p){
-    var linha = { nome:p.nome, cols:{}, antes:0, novo:0, total:0 };
-    MD_SIM_COLS.forEach(function(c){ linha.cols[c.k] = { antes:0, novo:0, total:0 }; });
-    (p.itens || []).forEach(function(it){
-      var c = null;
-      MD_SIM_COLS.forEach(function(x){
-        if (x.st.indexOf(it.statusChave) !== -1) c = x;
-      });
-      if (!c) return;                       // status fora das sete colunas
-      var cel = linha.cols[c.k];
-      if (it.mantido) { cel.antes++; linha.antes++; } else { cel.novo++; linha.novo++; }
-      cel.total++; linha.total++;
+    atribuido[p.nome] = (p.blocos || []).slice();
+    // a marca de "movido à mão" é do pacote, e o pacote é o mesmo
+    // objeto entre uma montagem e outra: sem limpar aqui, o Desfazer
+    // voltava os totais certos mas continuava dizendo "movidos"
+    atribuido[p.nome].forEach(function(b){ b.__mov = false; b.__deQuem = ''; });
+  });
+  // o que ficou na fila já nasce no bolo: é item sem dono esperando
+  var porOp = {};
+  (res.fila || []).forEach(function(it){
+    var k = it.op ? ('OP:' + it.op) : ('RC:' + it.rc + '|' + it.seq);
+    var b = porOp[k];
+    if (!b) {
+      b = porOp[k] = { id:k, itens:[], slaMax:0, porStatus:{}, statuses:[],
+                       prioOp:false, prazoOpMax:0, daFila:true };
+      MD_STATUS.forEach(function(x){ b.porStatus[x.chave] = 0; });
+      pool.push(b);
+    }
+    b.itens.push(it);
+    b.porStatus[it.statusChave] = (b.porStatus[it.statusChave] || 0) + 1;
+    if (it.sla > b.slaMax) b.slaMax = it.sla;
+    if (it.prioPrazoOp) { b.prioOp = true;
+                          if (+it.prazoDias > b.prazoOpMax) b.prazoOpMax = +it.prazoDias; }
+  });
+  pool.forEach(function(b){
+    b.n = b.itens.length;
+    b.statuses = MD_STATUS.map(function(x){ return x.chave; })
+      .filter(function(ch){ return b.porStatus[ch] > 0; });
+  });
+  _mdSim = { res:res, prep:prep, atribuido:atribuido, pool:pool, passo:10,
+             movimentos:[], aplicado:false };
+  return _mdSim;
+}
+
+function mdSimPoolPorCol(){
+  var c = {};
+  MD_SIM_COLS.forEach(function(x){ c[x.k] = 0; });
+  (_mdSim.pool || []).forEach(function(b){
+    var pc = mdSimPacoteCols(b);
+    Object.keys(pc).forEach(function(k){ c[k] += pc[k]; });
+  });
+  return c;
+}
+
+// Conta, por pessoa e por coluna, o que veio de antes, o que é novo e o
+// que foi movido à mão. "De antes" é o item que já tinha dono quando o
+// dia começou — é o que a pessoa não terminou e continua na base.
+function mdSimContar(){
+  var out = {};
+  Object.keys(_mdSim.atribuido).forEach(function(nome){
+    var linha = { nome:nome, cols:{}, antes:0, novo:0, mov:0, total:0, emissao:0 };
+    MD_SIM_COLS.forEach(function(c){
+      linha.cols[c.k] = { antes:0, novo:0, mov:0, total:0 };
     });
-    out[p.nome] = linha;
+    (_mdSim.atribuido[nome] || []).forEach(function(b){
+      (b.itens || []).forEach(function(it){
+        var k = mdSimColDe(it.statusChave);
+        if (!k) return;
+        var cel = linha.cols[k];
+        if (b.__mov) { cel.mov++; linha.mov++; }
+        else if (it.mantido) { cel.antes++; linha.antes++; }
+        else { cel.novo++; linha.novo++; }
+        cel.total++; linha.total++;
+        if (MD_EMISSAO.indexOf(it.statusChave) !== -1) linha.emissao++;
+      });
+    });
+    out[nome] = linha;
   });
   return out;
 }
 
-function mdSimCelula(cel){
-  if (!cel.total) return '<td style="text-align:center;color:var(--tx2)">—</td>';
-  return '<td style="text-align:center">'
-    + '<div style="font-weight:700;font-size:13px">' + cpNum(cel.total) + '</div>'
-    + '<div style="font-size:9.5px;color:var(--tx2);white-space:nowrap">'
-    +   (cel.antes ? '<span style="color:var(--azm);font-weight:600">' + cel.antes
-                   + '</span> de ontem' : '0 de ontem')
-    +   ' + ' + cel.novo + ' hoje</div></td>';
+// ── mover ───────────────────────────────────────────────────────
+function mdSimPasso(v){
+  _mdSim.passo = Math.max(1, Math.round(+v || 1));
+  mdSimRender();
 }
 
-function mdSimHTML(res){
-  var linhas = mdSimContar(res);
+function mdSimTirar(nome, col){
+  var lista = _mdSim.atribuido[nome] || [];
+  // o que sai primeiro: o que eu mesmo movi para cá (desfaz), depois o
+  // que entrou hoje, e só por último o que já era da pessoa — tirar da
+  // mão de alguém um item que já era dele é o último recurso
+  var cand = lista.filter(function(b){ return (mdSimPacoteCols(b)[col] || 0) > 0; })
+    .sort(function(a, b){
+      var pa = a.__mov ? 0 : ((a.itens || []).some(function(i){ return i.mantido; }) ? 2 : 1);
+      var pb = b.__mov ? 0 : ((b.itens || []).some(function(i){ return i.mantido; }) ? 2 : 1);
+      if (pa !== pb) return pa - pb;
+      if (!!a.prioOp !== !!b.prioOp) return a.prioOp ? 1 : -1;   // o urgente fica
+      if (a.slaMax !== b.slaMax) return a.slaMax - b.slaMax;
+      return a.n - b.n;
+    });
+  var alvo = _mdSim.passo, movidos = 0, i;
+  for (i = 0; i < cand.length && movidos < alvo; i++) {
+    var b = cand[i];
+    movidos += (mdSimPacoteCols(b)[col] || 0);
+    _mdSim.atribuido[nome] = _mdSim.atribuido[nome].filter(function(x){ return x !== b; });
+    b.__mov = false;                 // no bolo ele é só um pacote sem dono
+    b.__deQuem = nome;
+    _mdSim.pool.push(b);
+  }
+  if (movidos) _mdSim.movimentos.push({ tipo:'tirou', nome:nome, col:col, n:movidos });
+  mdSimRender(movidos
+    ? '↙ Tirei ' + movidos + ' item(ns) de ' + nome + ' em ' + mdSimNomeCol(col)
+      + ' — estão no bolo, prontos para ir para outra pessoa.'
+    : 'Não há o que tirar de ' + nome + ' em ' + mdSimNomeCol(col) + '.');
+}
+
+function mdSimPor(nome, col){
+  // o dash escolhe o item: do bolo, o mais urgente primeiro
+  var cand = (_mdSim.pool || []).filter(function(b){
+    return (mdSimPacoteCols(b)[col] || 0) > 0 && mdSimPodeReceber(nome, b);
+  }).sort(function(a, b){
+    if (!!a.prioOp !== !!b.prioOp) return a.prioOp ? -1 : 1;
+    if (a.prazoOpMax !== b.prazoOpMax) return b.prazoOpMax - a.prazoOpMax;
+    if (a.slaMax !== b.slaMax) return b.slaMax - a.slaMax;
+    return b.n - a.n;
+  });
+  var alvo = _mdSim.passo, movidos = 0, i;
+  for (i = 0; i < cand.length && movidos < alvo; i++) {
+    var b = cand[i];
+    movidos += (mdSimPacoteCols(b)[col] || 0);
+    _mdSim.pool = _mdSim.pool.filter(function(x){ return x !== b; });
+    b.__mov = true;
+    (_mdSim.atribuido[nome] = _mdSim.atribuido[nome] || []).push(b);
+  }
+  if (movidos) _mdSim.movimentos.push({ tipo:'pos', nome:nome, col:col, n:movidos });
+  var podia = (_mdSim.pool || []).some(function(b){
+    return (mdSimPacoteCols(b)[col] || 0) > 0; });
+  mdSimRender(movidos
+    ? '↗ Coloquei ' + movidos + ' item(ns) em ' + nome + ' na fila '
+      + mdSimNomeCol(col) + '.'
+    : (podia
+        ? '⚠ ' + nome + ' não está marcado(a) em todas as atividades dessas '
+          + 'oportunidades — marque na tabela de atividades para poder receber.'
+        : 'O bolo não tem item de ' + mdSimNomeCol(col) + '. Tire de alguém primeiro.'));
+}
+
+function mdSimNomeCol(k){
+  var n = '';
+  MD_SIM_COLS.forEach(function(c){ if (c.k === k) n = c.nome; });
+  return n;
+}
+
+function mdSimDesfazer(){
+  if (!_mdSim) return;
+  mdSimMontar(_mdSim.res, _mdSim.prep);
+  mdSimRender('↺ Voltei para a distribuição que o dash calculou.');
+}
+
+// ── a tela ──────────────────────────────────────────────────────
+function mdSimCelula(nome, col, cel, podeTirar, podePor){
+  var vazia = !cel.total;
+  return '<td style="text-align:center;white-space:nowrap">'
+    + '<div style="font-weight:700;font-size:13px;color:' + (vazia ? 'var(--tx2)' : 'var(--tx)')
+    +   '">' + (vazia ? '—' : cpNum(cel.total)) + '</div>'
+    + (vazia ? '' : '<div style="font-size:9.5px;color:var(--tx2)">'
+        + (cel.antes ? '<span style="color:var(--azm);font-weight:600">' + cel.antes
+                     + '</span> de ontem' : '0 de ontem')
+        + ' + ' + cel.novo + ' hoje'
+        + (cel.mov ? ' <span style="color:var(--vd);font-weight:600">+' + cel.mov
+                   + ' movidos</span>' : '') + '</div>')
+    + '<div style="margin-top:3px;display:flex;gap:3px;justify-content:center">'
+    +   '<button class="btn btn-s" style="padding:0 7px;font-size:12px;line-height:18px'
+    +     (podeTirar ? '' : ';opacity:.35') + '"' + (podeTirar ? '' : ' disabled')
+    +     ' title="tirar ' + _mdSim.passo + ' e mandar para o bolo"'
+    +     ' onclick="mdSimTirar(\'' + cpEsc(nome).replace(/'/g, "\\'") + '\',\'' + col + '\')">−</button>'
+    +   '<button class="btn btn-s" style="padding:0 7px;font-size:12px;line-height:18px'
+    +     (podePor ? ';border-color:var(--vd);color:var(--vd)' : '') + '"'
+    +     ' title="trazer ' + _mdSim.passo + ' do bolo para esta pessoa"'
+    +     ' onclick="mdSimPor(\'' + cpEsc(nome).replace(/'/g, "\\'") + '\',\'' + col + '\')">+</button>'
+    + '</div></td>';
+}
+
+function mdSimHTML(recado){
+  var res = _mdSim.res;
+  var linhas = mdSimContar();
   var nomes = (res.lista || []).map(function(p){ return p.nome; });
+  var poolCol = mdSimPoolPorCol();
+  var totalPool = Object.keys(poolCol).reduce(function(a, k){ return a + poolCol[k]; }, 0);
   var metaDe = function(n){ return ((res.metaPessoa || {})[n]) || res.metaEmissao; };
+
   var h = '<div class="cd" style="border-top:3px solid var(--az);margin-top:.9rem">'
     + '<div class="cd-t" style="justify-content:space-between">'
     +   '<span>🔍 Simulação da distribuição — ' + cpDataBR(_mdCfg.dataDist || mdDataSel())
     +   '</span>'
-    +   '<button class="btn btn-s" onclick="mdSimFechar()">✕ Fechar</button></div>'
-    + '<div class="al al-b" style="font-size:11.5px">ℹ Esta tela <strong>não grava nada</strong>: '
-    + 'é a mesma conta do botão de distribuir, só que para olhar antes. Em cada célula, o '
-    + 'número grande é o total e, embaixo, de onde ele vem — <strong>de ontem</strong> é o '
-    + 'item que já era daquela pessoa e continua em aberto, <strong>hoje</strong> é o que '
-    + 'entrou agora.</div>'
-    + '<div style="overflow:auto"><table><thead><tr>'
+    +   '<span style="display:flex;gap:8px">'
+    +     '<button class="btn btn-p" onclick="mdSimAplicar()">✔ Aplicar esta distribuição</button>'
+    +     '<button class="btn btn-s" onclick="mdSimDesfazer()">↺ Desfazer</button>'
+    +     '<button class="btn btn-s" onclick="mdSimFechar()">✕ Fechar</button></span></div>'
+    + '<div class="al al-b" style="font-size:11.5px">ℹ Enquanto você mexe aqui '
+    + '<strong>nada é gravado</strong>. Use o <strong>−</strong> para tirar itens de alguém '
+    + '(eles vão para os cards do bolo, em cima) e o <strong>+</strong> para dar esses itens '
+    + 'a outra pessoa. Quem escolhe <em>qual</em> item é o dash: ao tirar sai o menos urgente, '
+    + 'ao colocar entra o mais urgente. Só o botão <strong>Aplicar</strong> grava.</div>';
+
+  // ── os cards do bolo ─────────────────────────────────────────
+  h += '<div style="font-size:10px;font-weight:700;color:var(--tx2);letter-spacing:.5px;'
+    + 'margin:.8rem 0 .4rem">ITENS A DISTRIBUIR (BOLO)</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+  MD_SIM_COLS.forEach(function(c){
+    var v = poolCol[c.k] || 0;
+    h += '<div style="flex:1;min-width:132px;border:1.5px solid '
+      + (v ? 'var(--am)' : 'var(--brd)') + ';border-radius:10px;padding:.5rem .7rem;'
+      + 'background:' + (v ? 'var(--amc)' : 'var(--bg2)') + '">'
+      + '<div style="font-size:9px;font-weight:700;color:var(--tx2);letter-spacing:.3px;'
+      +   'text-transform:uppercase;line-height:1.25">' + cpEsc(c.nome) + '</div>'
+      + '<div style="font-size:21px;font-weight:800;line-height:1.1;color:'
+      +   (v ? 'var(--am)' : 'var(--tx2)') + '">' + cpNum(v) + '</div></div>';
+  });
+  h += '</div>';
+  h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:.45rem">'
+    + (totalPool
+        ? '<strong style="color:var(--am)">' + cpNum(totalPool) + '</strong> item(ns) sem dono '
+          + '— eles ficam de fora se você aplicar assim.'
+        : 'Nada no bolo: tudo que entrou na conta está com alguém.')
+    + '</div>';
+
+  // ── o passo ──────────────────────────────────────────────────
+  h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:.8rem 0 .2rem">'
+    + '<span style="font-size:10px;font-weight:700;color:var(--tx2);letter-spacing:.5px">'
+    +   'QUANTOS POR CLIQUE</span>'
+    + [1, 5, 10, 20, 50].map(function(v){
+        return '<button class="btn btn-s" style="padding:2px 10px'
+          + (_mdSim.passo === v ? ';border-color:var(--az);color:var(--az);font-weight:700' : '')
+          + '" onclick="mdSimPasso(' + v + ')">' + v + '</button>';
+      }).join('')
+    + '<input type="number" min="1" value="' + _mdSim.passo + '" onchange="mdSimPasso(this.value)"'
+    +   ' style="width:70px;font-size:12px;padding:3px 7px;border:1.5px solid var(--brd);'
+    +   'border-radius:7px">'
+    + '<span style="font-size:10.5px;color:var(--tx2)">A oportunidade não se divide, então '
+    + 'o número real pode passar um pouco do pedido.</span></div>';
+
+  if (recado) h += '<div style="font-size:11.5px;color:var(--az);margin:.3rem 0 .2rem">'
+    + cpEsc(recado) + '</div>';
+
+  // ── a tabela ─────────────────────────────────────────────────
+  h += '<div style="overflow:auto;margin-top:.5rem"><table><thead><tr>'
     +   '<th>Comprador</th>'
     +   MD_SIM_COLS.map(function(c){
-          return '<th style="text-align:center">' + cpEsc(c.nome) + '</th>'; }).join('')
+          return '<th style="text-align:center">' + cpEsc(c.nome)
+            + (poolCol[c.k] ? '<div style="font-size:9px;font-weight:700;color:var(--am)">'
+                + poolCol[c.k] + ' no bolo</div>' : '') + '</th>'; }).join('')
     +   '<th style="text-align:center">Total</th>'
     +   '</tr></thead><tbody>';
-  var tot = { antes:0, novo:0, total:0, cols:{} };
-  MD_SIM_COLS.forEach(function(c){ tot.cols[c.k] = { antes:0, novo:0, total:0 }; });
+  var tot = { antes:0, novo:0, mov:0, total:0, cols:{} };
+  MD_SIM_COLS.forEach(function(c){ tot.cols[c.k] = { antes:0, novo:0, mov:0, total:0 }; });
   nomes.forEach(function(n){
     var l = linhas[n];
+    var emi = l.emissao, meta = metaDe(n);
     h += '<tr><td style="font-weight:600">' + cpEsc(n)
-      + '<div style="font-size:9.5px;color:var(--tx2);font-weight:400">meta de emissão '
-      + metaDe(n) + '</div></td>';
+      + '<div style="font-size:9.5px;font-weight:400;color:'
+      +   (emi > meta ? 'var(--vm)' : 'var(--tx2)') + '">emissão ' + emi + ' / meta '
+      +   meta + '</div></td>';
     MD_SIM_COLS.forEach(function(c){
-      h += mdSimCelula(l.cols[c.k]);
-      tot.cols[c.k].antes += l.cols[c.k].antes;
-      tot.cols[c.k].novo  += l.cols[c.k].novo;
-      tot.cols[c.k].total += l.cols[c.k].total;
+      var cel = l.cols[c.k];
+      var podePor = (_mdSim.pool || []).some(function(b){
+        return (mdSimPacoteCols(b)[c.k] || 0) > 0 && mdSimPodeReceber(n, b); });
+      h += mdSimCelula(n, c.k, cel, cel.total > 0, podePor);
+      tot.cols[c.k].antes += cel.antes; tot.cols[c.k].novo += cel.novo;
+      tot.cols[c.k].mov += cel.mov;     tot.cols[c.k].total += cel.total;
     });
     h += '<td style="text-align:center;background:var(--cin)">'
       + '<div style="font-weight:700;font-size:14px">' + cpNum(l.total) + '</div>'
       + '<div style="font-size:9.5px;color:var(--tx2);white-space:nowrap">'
-      +   l.antes + ' + ' + l.novo + '</div></td></tr>';
-    tot.antes += l.antes; tot.novo += l.novo; tot.total += l.total;
+      +   l.antes + ' + ' + l.novo + (l.mov ? ' + ' + l.mov : '') + '</div></td></tr>';
+    tot.antes += l.antes; tot.novo += l.novo; tot.mov += l.mov; tot.total += l.total;
   });
   h += '<tr style="border-top:2px solid var(--brd)"><td style="font-weight:700">Equipe</td>';
-  MD_SIM_COLS.forEach(function(c){ h += mdSimCelula(tot.cols[c.k]); });
+  MD_SIM_COLS.forEach(function(c){
+    var cel = tot.cols[c.k];
+    h += '<td style="text-align:center">'
+      + '<div style="font-weight:700;font-size:13px">' + (cel.total ? cpNum(cel.total) : '—')
+      + '</div>'
+      + (cel.total ? '<div style="font-size:9.5px;color:var(--tx2)">' + cel.antes
+          + ' de ontem + ' + cel.novo + ' hoje</div>' : '') + '</td>';
+  });
   h += '<td style="text-align:center;background:var(--cin)">'
     + '<div style="font-weight:700;font-size:14px">' + cpNum(tot.total) + '</div>'
     + '<div style="font-size:9.5px;color:var(--tx2)">' + tot.antes + ' + ' + tot.novo
-    + '</div></td></tr>';
+    + (tot.mov ? ' + ' + tot.mov : '') + '</div></td></tr>';
   h += '</tbody></table></div>';
 
-  // o que não coube em ninguém — sem isto a soma da tabela não fecha
-  // com o total do dia, e aí o número vira desconfiança
-  var fila = {};
-  (res.fila || []).forEach(function(it){
-    MD_SIM_COLS.forEach(function(c){
-      if (c.st.indexOf(it.statusChave) !== -1) fila[c.k] = (fila[c.k] || 0) + 1;
-    });
-  });
-  var naFila = Object.keys(fila).reduce(function(a, k){ return a + fila[k]; }, 0);
-  if (naFila) {
-    h += '<div style="font-size:11px;color:var(--am);margin-top:.6rem">📥 <strong>'
-      + cpNum(naFila) + '</strong> item(ns) ficaram na fila, sem comprador: '
-      + MD_SIM_COLS.filter(function(c){ return fila[c.k]; })
-          .map(function(c){ return cpEsc(c.nome) + ' <strong>' + fila[c.k] + '</strong>'; })
-          .join(' · ') + '.</div>';
-  }
   if ((res.semAtividade || []).length) {
-    h += '<div style="font-size:11px;color:var(--vm);margin-top:4px">⚠ '
-      + cpNum(res.semAtividade.length) + ' item(ns) sem ninguém marcado na atividade.</div>';
+    h += '<div style="font-size:11px;color:var(--vm);margin-top:6px">⚠ '
+      + cpNum(res.semAtividade.length) + ' item(ns) sem ninguém marcado na atividade — '
+      + 'esses não entram nem no bolo, porque ninguém da equipe faz aquilo hoje.</div>';
   }
-  h += mdAvisoHerdado(res) + mdAvisoMeta(res) + '</div>';
+  h += mdAvisoPartidos(res) + mdAvisoHerdado(res) + '</div>';
   return h;
+}
+
+function mdSimRender(recado){
+  var box = document.getElementById('md-simulacao');
+  if (box && _mdSim) box.innerHTML = mdSimHTML(recado);
 }
 
 function mdSimFechar(){
   var box = document.getElementById('md-simulacao');
   if (box) box.innerHTML = '';
+  _mdSim = null;
 }
 
 async function mdSimular(){
   var st = document.getElementById('md-status');
-  var box = document.getElementById('md-simulacao');
   var prep = await mdPrepararItens(st);
   if (!prep.ok) {
     if (st) st.innerHTML = '<span style="color:' + prep.cor + '">' + prep.erro + '</span>';
@@ -29132,12 +29460,97 @@ async function mdSimular(){
   var res = mdCalcular(copia(prep.itensMapa), _mdCfg.pessoas, _mdCfg.atividades,
                        _mdCfg.cotaDia, _mdCfg.cotaSemana, _mdCfg.dias,
                        copia(prep.itensReap));
+  mdSimMontar(res, prep);
   if (st) st.innerHTML = '<span style="color:var(--az)">🔍 Simulação: '
     + cpNum(res.distribuidos) + ' itens entre '
     + res.lista.filter(function(p){ return p.n; }).length + ' comprador(es) · '
     + cpNum(res.fila.length) + ' ficariam na fila. Nada foi gravado.</span>';
-  if (box) box.innerHTML = mdSimHTML(res);
+  mdSimRender();
   return res;
+}
+
+// ── aplicar o que está na tela ──────────────────────────────────
+// Refaz os totais de cada pessoa a partir dos pacotes que ela tem
+// agora, redistribui os dias com a mesma conta de sempre e grava — o
+// mesmo caminho do botão de distribuir.
+function mdSimConsolidar(){
+  var res = _mdSim.res;
+  (res.lista || []).forEach(function(p){
+    p.itens = []; p.blocos = (_mdSim.atribuido[p.nome] || []).slice();
+    p.n = 0; p.fora = 0; p.reap = 0; p.emissao = 0;
+    p.tipo = { L:0, Q:0 }; p.tipoEmitir = { L:0, Q:0 };
+    MD_STATUS.forEach(function(x){ p.porStatus[x.chave] = 0; });
+    p.blocos.forEach(function(b){
+      b.itens.forEach(function(it){
+        it.pessoa = p.nome;
+        it.foraAtividade = false;
+        p.itens.push(it); p.n++;
+        p.porStatus[it.statusChave] = (p.porStatus[it.statusChave] || 0) + 1;
+        if (MD_EMISSAO.indexOf(it.statusChave) !== -1) p.emissao++;
+        if (it.statusChave === 'reap') p.reap++;
+        if (it.tipo === 'L' || it.tipo === 'Q') {
+          p.tipo[it.tipo]++;
+          if (it.statusChave === 'emitir') p.tipoEmitir[it.tipo]++;
+        }
+      });
+    });
+  });
+  res.fila = [];
+  (_mdSim.pool || []).forEach(function(b){
+    b.itens.forEach(function(it){ it.pessoa = ''; it.dia = 0; res.fila.push(it); });
+  });
+  res.foraAtividade = [];
+  res.reap = (res.lista || []).reduce(function(a, p){ return a + p.reap; }, 0);
+  mdColocarNosDias(res, (res.lista || []).map(function(p){ return p.nome; }),
+                   res.dias, res.cotaDia);
+  res.distribuidos = (res.lista || []).reduce(function(a, p){ return a + p.n; }, 0);
+  return res;
+}
+
+async function mdSimAplicar(){
+  if (!_mdSim) return;
+  var st = document.getElementById('md-status');
+  var prep = _mdSim.prep;
+  var res = mdSimConsolidar();
+  var nMov = (_mdSim.movimentos || []).length;
+  var _mb = (prep.temMapa && _mdBase) ? _mdBase : null;
+  var _mr = (prep.temReap && _mdrBase) ? _mdrBase : null;
+  _mdDist = {
+    data: (_mdCfg.dataDist || mdDataSel()), arquivo: (_mb ? _mb.arquivo : ''),
+    dataMapa: mdDataSel(), totalRejeitados: 0,
+    arquivoReap: _mr ? _mr.arquivo : '',
+    pessoas: _mdCfg.pessoas.slice(), atividades: _mdCfg.atividades,
+    cotaDia: _mdCfg.cotaDia, cotaSemana: _mdCfg.cotaSemana, dias: res.dias,
+    porStatus: _mb ? _mb.porStatus : {},
+    totalMapa: _mb ? _mb.total : 0,
+    totalReap: (prep.itensReap || []).length,
+    lotesReap: _mr ? Object.keys(_mr.lotes) : [],
+    res: res, geradoEm: new Date().toISOString(), geradoPor: cpQuem(),
+    daSimulacao: true, movimentos: nMov
+  };
+  mdRender();
+  await mdSalvarDia();
+  await mdrRegistrarLotes(prep.itensReap, mdDataSel(), mdrDataLoteDaTela());
+  if (_mr) mdrRenderResumo(_mr);
+  _mdSim.aplicado = true;
+  if (st) st.innerHTML = '<span style="color:var(--vd)">✓ Distribuição gravada a partir da '
+    + 'simulação: ' + cpNum(res.distribuidos) + ' itens entre '
+    + res.lista.filter(function(p){ return p.n; }).length + ' comprador(es)'
+    + (nMov ? ' · ' + nMov + ' remanejamento(s) seu(s)' : '')
+    + ' · ' + cpNum(res.fila.length) + ' na fila.</span>';
+  mdSimRender('✓ Gravado. O que está nesta tela é a distribuição do dia.');
+}
+
+// Oportunidades que tiveram de ser partidas por atividade.
+function mdAvisoPartidos(res){
+  var l = (res && res.partidos) || [];
+  if (!l.length) return '';
+  var soma = l.reduce(function(a, x){ return a + x.n; }, 0);
+  return '<div style="font-size:11px;color:var(--am);margin-top:4px">✂ <strong>'
+    + cpNum(l.length) + '</strong> oportunidade(s) (' + cpNum(soma) + ' itens) foram '
+    + 'partidas por atividade: ninguém da equipe está marcado em todas as atividades '
+    + 'delas. Cada parte foi para quem é marcado na dela — item nenhum vai para quem não '
+    + 'faz aquilo.</div>';
 }
 
 // O saldo que cada um trouxe de ontem, e quem por isso não recebeu
@@ -29319,6 +29732,7 @@ async function mdDistribuir(){
     + '.</span>'
     + mdAvisoDiasCurtos(res)
     + mdAvisoMantidos(res)
+    + mdAvisoPartidos(res)
     + mdAvisoHerdado(res)
     + mdAvisoMeta(res)
     + mdAvisoAcimaCota(res)
