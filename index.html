@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/11 15:00';
+var GTO_BUILD = '16/11 16:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -29309,16 +29309,23 @@ function mdSimTirar(nome, col){
     var b = cand[i];
     var qtd = mdSimPacoteCols(b)[col] || 0;
     var falta = alvo - movidos;
-    if (qtd > falta) {
-      if (_mdSim.dividir) {
-        var parte = mdSimPartir(b, col, falta);
-        if (!b.n) sai(b);                       // o pacote ficou vazio
-        vai(parte); movidos += falta; partiu++;
-        _mdSim.partidasMao.push({ op:parte.opOrig, n:falta, de:nome });
-        continue;
-      }
-      continue;                                 // pode haver um menor adiante
+    // COM O ✂ LIGADO, o movimento é por ITEM da fila pedida. Parte-se
+    // quando sobra algo no pacote: ou porque ele tem mais itens DESTA
+    // fila do que o pedido, ou porque tem itens de OUTRAS filas.
+    //
+    // Era só a primeira condição até 16/11, e por isso o André ligava o
+    // ✂ e não via diferença: a oportunidade dele tinha 1 de Emitir e 1
+    // de Abrir PATEC, o 1 pedido "cabia", e o pacote ia inteiro — saíam
+    // 2 itens de duas filas diferentes.
+    if (_mdSim.dividir && (qtd > falta || b.n > qtd)) {
+      var _q = Math.min(qtd, falta);
+      var _parte = mdSimPartir(b, col, _q);
+      if (!b.n) sai(b);                         // o pacote ficou vazio
+      vai(_parte); movidos += _q; partiu++;
+      _mdSim.partidasMao.push({ op:_parte.opOrig, n:_q, de:nome });
+      continue;
     }
+    if (qtd > falta) continue;                  // pode haver um menor adiante
     sai(b); vai(b); movidos += qtd;
   }
   // nada coube: leva o menor pacote inteiro, senão o clique não faz nada
@@ -29362,16 +29369,23 @@ function mdSimPor(nome, col){
     var b = cand[i];
     var qtd = mdSimPacoteCols(b)[col] || 0;
     var falta = alvo - movidos;
-    if (qtd > falta) {
-      if (_mdSim.dividir) {
-        var parte = mdSimPartir(b, col, falta);
-        if (!b.n) tira(b);
-        entra(parte); movidos += falta; partiu++;
-        _mdSim.partidasMao.push({ op:parte.opOrig, n:falta, para:nome });
-        continue;
-      }
+    // COM O ✂ LIGADO, o movimento é por ITEM da fila pedida. Parte-se
+    // quando sobra algo no pacote: ou porque ele tem mais itens DESTA
+    // fila do que o pedido, ou porque tem itens de OUTRAS filas.
+    //
+    // Era só a primeira condição até 16/11, e por isso o André ligava o
+    // ✂ e não via diferença: a oportunidade dele tinha 1 de Emitir e 1
+    // de Abrir PATEC, o 1 pedido "cabia", e o pacote ia inteiro — saíam
+    // 2 itens de duas filas diferentes.
+    if (_mdSim.dividir && (qtd > falta || b.n > qtd)) {
+      var _q = Math.min(qtd, falta);
+      var _parte = mdSimPartir(b, col, _q);
+      if (!b.n) tira(b);
+      entra(_parte); movidos += _q; partiu++;
+      _mdSim.partidasMao.push({ op:_parte.opOrig, n:_q, para:nome });
       continue;
     }
+    if (qtd > falta) continue;
     tira(b); entra(b); movidos += qtd;
   }
   if (!movidos && cand.length) {
