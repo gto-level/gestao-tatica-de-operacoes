@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/11 19:30';
+var GTO_BUILD = '16/11 20:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -28648,6 +28648,49 @@ function mdEfeitoEmitir(it){
   catch (e) { return ''; }
 }
 
+// ── O ITEM COM PEDIDO MEMORIZADO VOLTA PARA QUEM MEMORIZOU ──────
+//
+// Pergunta do André em 16/11: "para os itens que têm pedido memorizado
+// e não foram criados, como você está fazendo para que não sejam
+// redistribuídos no dia seguinte pela equipe? Memorizaram no sábado e
+// hoje entrou na demanda de outro comprador. Preciso saber de onde você
+// está puxando a informação do pedido memorizado."
+//
+// A resposta honesta era: não estava. O que segurava o item com a mesma
+// pessoa era só o DONO da última distribuição salva (gpDonoDe), e ele
+// falha em três casos — quando o dia não chegou a ser salvo, quando o
+// dono de ontem não está marcado naquela atividade hoje, e quando a RC
+// vem escrita diferente entre um MAPA e outro (zeros à esquerda). Nada
+// olhava para o pedido memorizado.
+//
+// A informação do memorizado vem da MEDIÇÃO: linha com STATUS_PROCESSO
+// de memorizado (status 2) e sem código de eliminação. De lá saem a RC,
+// o item, o número do pedido e o RESP_PEDIDO — quem memorizou. É o
+// mesmo documento que alimenta o card "Itens memorizados" da Governança
+// (config/governanca_memorizados).
+//
+// A chave é RC + item NORMALIZADA (sem zeros à esquerda e sem o ".0" do
+// Excel), porque a medição e o MAPA escrevem o mesmo número de jeitos
+// diferentes — comparar cru é perder metade dos casos.
+var _mdMemIx = null;
+function mdMemIxLimpar(){ _mdMemIx = null; }
+function mdMemIndice(){
+  if (_mdMemIx) return _mdMemIx;
+  _mdMemIx = {};
+  ((_gpMem && _gpMem.itens) || []).forEach(function(i){
+    if (!i || !i.comprador) return;
+    var k = _cpRespChave2(i.rc, i.item);
+    if (k && !_mdMemIx[k]) _mdMemIx[k] = { n:i.comprador, pedido:i.pedido || '',
+                                           criacao:i.criacao || '' };
+  });
+  return _mdMemIx;
+}
+function mdMemDono(rc, seq){
+  var k = _cpRespChave2(rc, seq);
+  if (!k) return null;
+  return mdMemIndice()[k] || null;
+}
+
 function mdEntraNaDistribuicao(it, dia){
   var achou = false;
   for (var i = 0; i < MD_STATUS.length; i++) {
@@ -29001,15 +29044,30 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
   //
   // A oportunidade não se divide, então o dono do bloco é o dono mais
   // frequente entre os itens dele.
+  // Quem memorizou vem ANTES do dono da última distribuição: memorizar
+  // é prova de que a pessoa já trabalhou naquele item, e o dono salvo é
+  // só quem o recebeu. Quando os dois existem e divergem, vale quem
+  // memorizou — e a tela diz quantas vezes isso aconteceu.
   var donoMaisFreq = function(b){
-    var cont = {}, melhorN = '', melhorQ = 0;
+    var mem = {}, dono = {}, mN = '', mQ = 0, dN = '', dQ = 0;
     (b.itens || []).forEach(function(it){
+      var m = mdMemDono(it.rc, it.seq);
+      if (m && m.n) {
+        mem[m.n] = (mem[m.n] || 0) + 1;
+        if (mem[m.n] > mQ) { mQ = mem[m.n]; mN = m.n; }
+      }
       var d = gpDonoDe(String(it.rc || '') + '|' + String(it.seq || ''));
-      if (!d) return;
-      cont[d] = (cont[d] || 0) + 1;
-      if (cont[d] > melhorQ) { melhorQ = cont[d]; melhorN = d; }
+      if (d) {
+        dono[d] = (dono[d] || 0) + 1;
+        if (dono[d] > dQ) { dQ = dono[d]; dN = d; }
+      }
     });
-    return melhorN;
+    if (mN) {
+      b.__porMem = true;
+      b.__memTrocou = !!(dN && dN !== mN);
+      return mN;
+    }
+    return dN;
   };
   var donoDoBloco = function(b, quemFaz){
     var melhorN = donoMaisFreq(b);
@@ -29018,11 +29076,15 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     if (quemFaz.indexOf(melhorN) !== -1) return melhorN;
     // não está: o item muda de mão, e isso tem de ser dito — foi uma
     // regra que não deu para cumprir, não uma escolha do rateio
+    if (b.__porMem) res.memPerdido.push({ nome:melhorN, rc:b.itens[0].rc, n:b.n });
     res.donoPerdido.push({ nome:melhorN, rc:b.itens[0].rc, n:b.n });
     return '';
   };
   res.mantidos = 0;
   res.donoPerdido = [];
+  res.memMantidos = 0;      // itens que voltaram para quem memorizou
+  res.memTrocou = 0;        // memorizou um, o dono salvo era outro
+  res.memPerdido = [];      // memorizou, mas não está na atividade hoje
 
   // ── O QUE A PESSOA JÁ CARREGA ENTRA ANTES DO QUE É NOVO (16/11) ──
   //
@@ -29102,6 +29164,10 @@ function mdCalcular(itens, pessoas, atividades, cotaDia, cotaSemana, dias, itens
     if (melhor) {
       b.__mantido = true;
       res.mantidos += b.n;
+      if (b.__porMem) {
+        res.memMantidos += b.n;
+        if (b.__memTrocou) res.memTrocou += b.n;
+      }
     }
     (melhor ? [] : cand).forEach(function(n){
       var p = res.pessoas[n];
@@ -30156,7 +30222,8 @@ function mdSimHTML(recado){
       + '. Essas oportunidades ficam com mais de um comprador — fora daqui o módulo '
       + 'trata a oportunidade como indivisível.</div>';
   }
-  h += mdAvisoPartidos(res) + mdAvisoQ18(res) + mdAvisoHerdado(res) + '</div>';
+  h += mdAvisoMemorizado(res) + mdAvisoPartidos(res) + mdAvisoQ18(res)
+     + mdAvisoHerdado(res) + '</div>';
   return h;
 }
 
@@ -30297,6 +30364,39 @@ function mdAvisoQ18(res){
           + ', porque o cabeçalho não tinha o nome — confira se é essa mesma a coluna.'
         : '')
     + '</div>';
+}
+
+// O pedido memorizado e não criado: de onde veio e o que ele segurou.
+function mdAvisoMemorizado(res){
+  if (!res) return '';
+  var base = ((_gpMem && _gpMem.itens) || []).length;
+  if (!base) {
+    return '<div style="font-size:11px;color:var(--am);margin-top:4px">📝 Não tenho a lista '
+      + 'de <strong>pedidos memorizados</strong> nesta sessão — sem ela, item memorizado e '
+      + 'não criado pode cair na mão de outro comprador amanhã. Suba a '
+      + '<strong>Medição do dia</strong> em Montar base.</div>';
+  }
+  var h = '<div style="font-size:11px;color:var(--azm);margin-top:4px">📝 <strong>'
+    + cpNum(res.memMantidos || 0) + '</strong> item(ns) voltaram para quem '
+    + '<strong>memorizou o pedido</strong> e não chegou a criar — de ' + cpNum(base)
+    + ' memorizados na última medição. A informação é a linha de status memorizado da '
+    + 'medição (RC + item + RESP_PEDIDO), a mesma do card <em>Itens memorizados</em>.';
+  if (res.memTrocou) h += ' Em <strong>' + cpNum(res.memTrocou) + '</strong> deles quem '
+    + 'memorizou é diferente de quem recebeu na última distribuição — valeu quem '
+    + 'memorizou.';
+  h += '</div>';
+  if ((res.memPerdido || []).length) {
+    var soma = res.memPerdido.reduce(function(a, x){ return a + x.n; }, 0);
+    var nomes = {};
+    res.memPerdido.forEach(function(x){ nomes[x.nome] = (nomes[x.nome] || 0) + x.n; });
+    h += '<div style="font-size:11px;color:var(--vm);margin-top:4px">⚠ <strong>'
+      + cpNum(soma) + '</strong> item(ns) memorizado(s) MUDARAM de mão porque quem '
+      + 'memorizou não está marcado naquela atividade hoje: '
+      + cpEsc(Object.keys(nomes).map(function(k){ return k + ' (' + nomes[k] + ')'; })
+          .join(' · '))
+      + '. Marque a pessoa na atividade para o item voltar para ela.</div>';
+  }
+  return h;
 }
 
 // Oportunidades que tiveram de ser partidas por atividade.
@@ -30490,6 +30590,7 @@ async function mdDistribuir(){
     + '.</span>'
     + mdAvisoDiasCurtos(res)
     + mdAvisoMantidos(res)
+    + mdAvisoMemorizado(res)
     + mdAvisoPartidos(res)
     + mdAvisoQ18(res)
     + mdAvisoHerdado(res)
@@ -31091,6 +31192,17 @@ async function mdCarregarBasesGov(){
     try { await emiCarregar(); } catch (e0) {}
     // o dono anterior de cada item: ele manda na distribuição de hoje
     try { await gpCarregarDono(); } catch (e00) {}
+    // e os memorizados da última medição: item com pedido memorizado
+    // volta para quem memorizou, não entra no rateio de novo
+    try {
+      var dm = await db.collection('config').doc('governanca_memorizados').get();
+      if (dm && dm.exists) {
+        var M = dm.data() || {};
+        _gpMem = { itens:M.itens || [], total:+M.total || 0, arquivo:M.arquivo || '',
+                   atualizadoEm:M.atualizadoEm || '', atualizadoPor:M.atualizadoPor || '' };
+      }
+      mdMemIxLimpar();
+    } catch (e01) {}
     var d = await Promise.all([
       db.collection('config').doc('governanca_rejeitados').get(),
       db.collection('config').doc('governanca_negociacao').get(),
