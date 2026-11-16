@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/11 22:00';
+var GTO_BUILD = '16/11 22:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -9141,6 +9141,21 @@ function modSoReuniao(m){ return FRENTES_SO_REUNIAO.indexOf(m) !== -1; }
 // Frentes que só têm a tela de PCP: o menu mostra só ela.
 var FRENTES_SO_PCP = ['adlv_pcp'];
 function modSoPcp(m){ return FRENTES_SO_PCP.indexOf(m) !== -1; }
+// As permissões que um perfil PROVISÓRIO recebe enquanto o cadastro de
+// verdade não chega do Firestore.
+//
+// BUG (16/11, meu): no login o perfil nasce com TODAS as permissões de
+// PERMS_SIDEBAR. Isso era inofensivo enquanto nenhuma tela de ADM saía
+// dessa lista — mas hoje eu fiz o "ADM da frente" olhar as permissões,
+// e com isso ele passava a aparecer para qualquer um nesses primeiros
+// segundos (e para quem ficasse com o perfil provisório por falha de
+// leitura). Tela de administrar não entra em lista padrão: só entra
+// marcada à mão em Admin › Usuários.
+function permsPadrao(){
+  return Object.keys(PERMS_SIDEBAR).filter(function(k){
+    return !PERMS_SIDEBAR[k] || !PERMS_SIDEBAR[k].soAdm;
+  });
+}
 // O "PATEC" propriamente dito: os dois blocos originais. A Administração
 // é uma tela só dele — nas frentes com base própria ela leria e gravaria
 // na base errada, e cada frente já tem o ADM dela.
@@ -56195,7 +56210,7 @@ async function authInit(){
           nome: user.email.split('@')[0],
           email: user.email,
           perfil: isAdm ? 'adm' : 'colaborador',
-          permissoes: Object.keys(PERMS_SIDEBAR),
+          permissoes: permsPadrao(),
           colabNome: isAdm ? 'André' : ''
         };
         // Mostrar app imediatamente
@@ -56221,7 +56236,7 @@ async function authCarregarPerfil(user){
     nome: user.email.split('@')[0],
     email: user.email,
     perfil: isAdm ? 'adm' : 'colaborador',
-    permissoes: Object.keys(PERMS_SIDEBAR),
+    permissoes: permsPadrao(),
     colabNome: ''
   };
 
@@ -56356,7 +56371,7 @@ function authMontarSidebar(emailParam){
   const isAdmFast = _isAdmFast();
   const podeVerTudo = isAdm || isAdmFast;
 
-  const perms = _authPerfil?.permissoes || Object.keys(PERMS_SIDEBAR);
+  const perms = _authPerfil?.permissoes || permsPadrao();
 
   // Remover todos os itens de navegação existentes
   sb.querySelectorAll('.sb-it, .sb-mod, .sb-sec').forEach(el => el.remove());
