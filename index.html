@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '16/11 22:40';
+var GTO_BUILD = '17/11 09:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1098,8 +1098,11 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
        montado por authMontarSidebar a partir de PERMS_SIDEBAR. -->
   <div class="sb-mod" id="sb-mod-estrategico" style="display:none">◈ ESTRATÉGICO</div>
   <div class="sb-mod">◈ EXECUÇÃO</div>
-  <div class="sb-it active" onclick="go('direcionamento',this)">📣 Direcionamento da Equipe</div>
-  <div class="sb-it" onclick="go('governanca',this)">⚖️ Governança</div>
+  <!-- 17/11: oculto nos dois módulos do PATEC. Fica aqui porque o menu
+       estático é só o esqueleto do primeiro desenho; quem manda é o
+       PERMS_SIDEBAR. -->
+  <div class="sb-it" onclick="go('direcionamento',this)" style="display:none">📣 Direcionamento da Equipe</div>
+  <div class="sb-it active" onclick="go('governanca',this)">⚖️ Governança</div>
   <div class="sb-it" id="sb-aa-it" onclick="go('analista-auto',this)">🤖 Analista Automático</div>
   <div class="sb-it" id="sb-q18-it" onclick="go('consulta-q18',this)">🚫 Consulta Q18</div>
 
@@ -55357,7 +55360,12 @@ const PERMS_SIDEBAR = {
   'vg-mercado':     { icon:'🌐', label:'Indicadores de Mercado',  mod:'ESTRATÉGICO', hidden:true },
   'radar':          { icon:'📡', label:'Radar Estratégico',        mod:'ESTRATÉGICO', hidden:true },
   'plano-acao':     { icon:'🎯', label:'Plano de Ação',            mod:'ESTRATÉGICO', hidden:true },
-  'direcionamento': { icon:'📣', label:'Direcionamento da Equipe', mod:'EXECUÇÃO' },
+  // 17/11: "o tópico direcionamento da equipe pode ocultar dos dois
+  // módulos" (ADLV e FAST). Escondido, não apagado: a página, o
+  // gerador e a aba dele no ADM continuam inteiros — trocar hidden
+  // para false devolve o item ao menu.
+  'direcionamento': { icon:'📣', label:'Direcionamento da Equipe', mod:'EXECUÇÃO',
+                      hidden:true },
   'pr-estrategico': { icon:'🎯', label:'Painel Estratégico',       mod:'EXECUÇÃO', hidden:true },
   'governanca':     { icon:'⚖️', label:'Governança',               mod:'EXECUÇÃO' },
   'planilha-critica':{ icon:'🔴', label:'Planilha Crítica',        mod:'EXECUÇÃO', redirect:'governanca', hidden:true },
@@ -56090,10 +56098,13 @@ function _entrarNoApp(){
   setTimeout(function(){
     try {
       if(document.getElementById('p-adm') && document.getElementById('p-adm').classList.contains('active')) return;
+      // 17/11: com o Direcionamento fora do menu, abrir nele deixaria o
+      // app numa tela que não existe mais na barra. A porta de entrada
+      // do PATEC passou a ser a Governança.
       var alvo = (_moduloAtivo === 'pedidos') ? 'pedidos'
                : (((typeof modSoPcp === 'function') && modSoPcp(_moduloAtivo)) ? 'pcp'
                : ((typeof FRENTE_TELA_INICIAL !== 'undefined' && FRENTE_TELA_INICIAL[_moduloAtivo])
-                  || 'direcionamento'));
+                  || 'governanca'));
       var it = [].slice.call(document.querySelectorAll('#sb .sb-it')).filter(function(x){
         return new RegExp("go\\('" + alvo + "'").test(x.getAttribute('onclick') || '');
       })[0];
