@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/11 09:30';
+var GTO_BUILD = '17/11 13:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -39498,6 +39498,43 @@ function govCalcPrazo(status, envio){
 }
 
 // Dias parados: corridos desde a Data da Solicitação, igual ao FAST.
+// ── A DATA DE ENVIO NASCE HOJE (17/11) ──────────────────────────
+//
+// Pedido do André: "quando estou fazendo o lançamento do item tratado,
+// o campo data do envio precisa ter como padrão a data de hoje; caso eu
+// for lançar algo que não seja de hoje eu mudo a data, mas o padrão
+// precisa ser data de hoje".
+//
+// Antes o campo vinha com a data de envio JÁ GRAVADA na RC — que é do
+// tratamento anterior, de outra fila. O lançamento de hoje nascia com a
+// data da semana passada e o item já entrava atrasado.
+//
+// A data antiga não é jogada fora calada: ela aparece embaixo do campo
+// com um clique para voltar, porque às vezes o lançamento é mesmo a
+// correção do envio antigo.
+var _acaoEnvioAntes = '';
+function _acaoEnvioPadrao(gravado){
+  var el = document.getElementById('acao-data-envio');
+  var av = document.getElementById('acao-envio-antes');
+  var hoje = _govHojeISO();
+  _acaoEnvioAntes = (gravado && gravado !== hoje) ? gravado : '';
+  if (el) el.value = hoje;
+  if (av) {
+    av.innerHTML = _acaoEnvioAntes
+      ? 'Havia <strong>' + cpDataBR(_acaoEnvioAntes) + '</strong> gravado · '
+        + '<a href="javascript:_acaoEnvioVoltar()" style="color:var(--az)">usar essa data</a>'
+      : '';
+  }
+  try { _acaoPrazoPrevia(); } catch (e) {}
+}
+function _acaoEnvioVoltar(){
+  var el = document.getElementById('acao-data-envio');
+  if (el && _acaoEnvioAntes) el.value = _acaoEnvioAntes;
+  var av = document.getElementById('acao-envio-antes');
+  if (av) av.innerHTML = '<span style="color:var(--tx2)">voltei para a data gravada</span>';
+  try { _acaoPrazoPrevia(); } catch (e) {}
+}
+
 function _govHojeISO(){
   var d = new Date();
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -45958,7 +45995,8 @@ function nrConcluir(chave){
   const _rcNum=document.getElementById('acao-rc-numero'); if(_rcNum) _rcNum.textContent=(r.rc||'')+(r.item?(' · Item '+r.item):'');
   const _idasBadge=document.getElementById('acao-idas-badge'); if(_idasBadge) _idasBadge.style.display='none';
   const m=_nrDados[chave]||{};
-  const _envioEl=document.getElementById('acao-data-envio'); if(_envioEl) _envioEl.value=m.envio||_nrHojeISO();
+  // mesma regra das outras aberturas: nasce hoje, com a gravada à mão
+  _acaoEnvioPadrao(m.envio || '');
   // Avança direto para o estágio 2 (tipo de conclusão)
   _prodCtx.tratamento='Concluído'; _prodCtx.conclusao=null;
   document.getElementById('acao-estagio-1').style.display='none';
@@ -55038,6 +55076,8 @@ function q18Consultar(valor){
         <div style="font-size:11px;font-weight:600;color:var(--tx2);margin-bottom:4px">📅 Data de Envio <span style="color:var(--vm)">*</span></div>
         <input type="date" id="acao-data-envio" oninput="_acaoPrazoPrevia()"
           style="width:100%;font-size:12px;padding:7px 10px;border:1.5px solid var(--brd);border-radius:7px">
+        <div id="acao-envio-antes" style="font-size:10px;color:var(--am);margin-top:3px;
+             min-height:12px"></div>
       </div>
     </div>
 
@@ -59940,9 +59980,8 @@ function prodAbrirModalRC(chave, tipo){
   if(_cobrEl) _cobrEl.value = Number(_gd.cobranca || 0);
   const _prevEl = document.getElementById('acao-prazo-previa');
   if(_prevEl) _prevEl.textContent = '';
-  const _envioEl = document.getElementById('acao-data-envio');
   const _finEl   = document.getElementById('acao-data-finalizado');
-  if(_envioEl && _gd.envio) _envioEl.value = _gd.envio;
+  _acaoEnvioPadrao(_gd.envio || '');
   if(_finEl && _gd.finalizado) _finEl.value = _gd.finalizado;
 }
 
@@ -60019,18 +60058,13 @@ function prodAbrirModal(origem, tipo){
       _idasBadge2.style.display = 'none';
     }
   }
-  // Preencher data de envio com hoje
-  const _hoje = new Date().toISOString().split('T')[0];
-  const _envioEl = document.getElementById('acao-data-envio');
-  const _finEl   = document.getElementById('acao-data-finalizado');
-  if(_envioEl) _envioEl.value = _hoje;
-  if(_finEl)   _finEl.value = '';
-  // Pré-preencher com dados existentes da RC se disponível
-  if(_prodCtx.rcChave && _govDados[_prodCtx.rcChave]){
-    const _gd = _govDados[_prodCtx.rcChave];
-    if(_envioEl && _gd.envio) _envioEl.value = _gd.envio;
-    if(_finEl && _gd.finalizado) _finEl.value = _gd.finalizado;
-  }
+  // A data de envio nasce HOJE; a gravada fica como atalho embaixo
+  const _finEl = document.getElementById('acao-data-finalizado');
+  if(_finEl) _finEl.value = '';
+  const _gdRc = (_prodCtx.rcChave && _govDados[_prodCtx.rcChave])
+    ? _govDados[_prodCtx.rcChave] : {};
+  _acaoEnvioPadrao(_gdRc.envio || '');
+  if(_finEl && _gdRc.finalizado) _finEl.value = _gdRc.finalizado;
   document.getElementById('modal-acao-rc').style.display = 'flex';
 }
 
@@ -60103,6 +60137,8 @@ function acaoSelecionarTratamento(btn, tratamento){
   if (tratamento !== 'Concluído' && tratamento !== _filaAntes) {
     const _c = document.getElementById('acao-cobranca');   if (_c) _c.value = 0;
     const _d = document.getElementById('acao-data-solic'); if (_d) _d.value = _govHojeISO();
+    // o envio também: é um envio novo, para outra fila
+    _acaoEnvioPadrao('');
   }
   try { _acaoPrazoPrevia(); } catch(e){}
 
