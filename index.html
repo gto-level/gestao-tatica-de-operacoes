@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/11 13:30';
+var GTO_BUILD = '17/11 15:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -2468,6 +2468,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
       <div class="stabs" id="adm-tabs">
         <button class="stab active" onclick="setAdmTab('ciclos',this)">🔄 Gestão de Ciclos</button>
         <button class="stab" onclick="setAdmTab('direcionamento',this)">📣 Direcionamento</button>
+        <button class="stab" onclick="setAdmTab('redistribuir',this)">🔁 Redistribuir demanda</button>
         <button class="stab" id="adm-nav-dados-consulta-btn" onclick="setAdmTab('dados-consulta',this)">📚 Dados de Consulta</button>
         <button class="stab" id="adm-nav-usuarios-btn" onclick="setAdmTab('usuarios',this)">👥 Usuários</button>
         <button class="stab" id="adm-nav-equipe-btn" onclick="setAdmTab('equipe',this)">🧑‍🤝‍🧑 Equipe (Metas RT)</button>
@@ -2534,6 +2535,22 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         </div>
         <div class="cd">
           <div id="dir-card" style="overflow-x:auto"></div>
+        </div>
+      </div>
+
+      <!-- 17/11: passar a demanda em aberto de um analista para outros.
+           Pedido do André quando a Lory saiu da frente. -->
+      <div id="adm-redistribuir" class="adm-tab" style="display:none">
+        <div class="cd" style="border-top:3px solid var(--azm)">
+          <div class="cd-t">🔁 Redistribuir a demanda de um analista</div>
+          <div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.9rem">
+            Passa para outras pessoas o que está <strong>em aberto</strong> no nome de um
+            analista. O que já foi <strong>concluído</strong> não é tocado — é histórico de
+            quem fez. A <strong>oportunidade não se divide</strong>: todas as RCs dela vão
+            para a mesma pessoa. A divisão é por itens, a mais igual que a regra da
+            oportunidade permite.
+          </div>
+          <div id="rds-corpo"></div>
         </div>
       </div>
 
@@ -13189,6 +13206,7 @@ function setAdmTab(id,btn){
   }
   if(id==='ciclos') setTimeout(()=>{cicloCarregarAtivo().then(initCicloADM);},50);
   if(id==='direcionamento') setTimeout(dirAbrir,50);
+  if(id==='redistribuir') setTimeout(rdsAbrir,50);
   if(id==='dados-consulta') setTimeout(dcAbrir,50);
   if(id==='online') setTimeout(admUltimoAcessoCarregar,50);
   if(id==='equipe') setTimeout(equipeAbrirEditor,50);
@@ -44555,6 +44573,286 @@ function govRenderConcluidos(){
 
 
 
+
+// ══════════ REDISTRIBUIR A DEMANDA DE UM ANALISTA (17/11) ════════
+//
+// Pedido do André: "a demanda que está com o nome da Lory dentro do
+// dash precisa ser redistribuída entre a Wanessa e a Ludy de forma
+// igual; a única coisa que preciso é que, se tiver uma oportunidade com
+// mais de uma RC, que seja distribuída apenas para a mesma analista.
+// Lembrando: só é para redistribuir os itens da Lory que NÃO foram
+// concluídos."
+//
+// Três regras, nesta ordem:
+//  1. entra só o que NÃO está concluído — item com data em finalizado
+//     fica como está, é histórico de quem fez;
+//  2. a oportunidade não se divide: todas as RCs dela vão para a mesma
+//     analista (a mesma regra que o módulo de Pedidos já usa);
+//  3. dividir por ITENS, o mais igual possível. Como a oportunidade é
+//     indivisível, a maior entra primeiro e vai para quem tem menos —
+//     é o que mais aproxima as duas pontas.
+//
+// A troca é gravada em gov_analista_overrides, a mesma coleção que a
+// edição de analista linha a linha já usa. Nada de novo na base.
+var _rdsPlano = null;
+
+function rdsAnalistasDaBase(){
+  var c = {};
+  (typeof govListaGovernanca === 'function' ? govListaGovernanca() : []).forEach(function(r){
+    var k = govChave(r);
+    if ((_govDados[k] || {}).finalizado) return;      // concluído não conta
+    var n = String(r.analista || '').trim();
+    if (n) c[n] = (c[n] || 0) + 1;
+  });
+  return Object.keys(c).sort(function(a, b){ return c[b] - c[a]; })
+    .map(function(n){ return { nome:n, n:c[n] }; });
+}
+
+// Os itens em aberto de um analista.
+function rdsAbertos(origem){
+  var alvo = cpNormNome(origem), out = [];
+  (typeof govListaGovernanca === 'function' ? govListaGovernanca() : []).forEach(function(r){
+    if (cpNormNome(r.analista || '') !== alvo) return;
+    var k = govChave(r);
+    if ((_govDados[k] || {}).finalizado) return;
+    out.push({ chave:k, rc:r.rc, seq:r.seq, oport:String(r.num_oport || '').trim(),
+               itemOp:r.item_op || r.item_rc || '', status:r.analista_auto || '' });
+  });
+  return out;
+}
+
+// O plano: oportunidade inteira para uma pessoa só, itens o mais
+// parelho possível.
+function rdsMontarPlano(origem, destinos){
+  var itens = rdsAbertos(origem);
+  var grupos = {}, ordem = [];
+  itens.forEach(function(i){
+    // sem número de oportunidade, a RC é o grupo — é o maior pedaço que
+    // dá para não dividir
+    var g = i.oport || ('RC:' + String(i.rc || '').trim());
+    if (!grupos[g]) { grupos[g] = { id:g, oport:i.oport, itens:[], rcs:{} }; ordem.push(g); }
+    grupos[g].itens.push(i);
+    grupos[g].rcs[String(i.rc || '').trim()] = 1;
+  });
+  var lista = ordem.map(function(g){
+    var o = grupos[g];
+    o.n = o.itens.length;
+    o.nRcs = Object.keys(o.rcs).length;
+    return o;
+  }).sort(function(a, b){
+    if (b.n !== a.n) return b.n - a.n;                 // a maior primeiro
+    return String(a.id).localeCompare(String(b.id));
+  });
+  var carga = {};
+  (destinos || []).forEach(function(d){ carga[d] = { nome:d, itens:0, grupos:0, rcs:0 }; });
+  lista.forEach(function(g){
+    var melhor = null;
+    (destinos || []).forEach(function(d){
+      if (!melhor) { melhor = d; return; }
+      var a = carga[d], m = carga[melhor];
+      if (a.itens !== m.itens) { if (a.itens < m.itens) melhor = d; return; }
+      if (a.grupos !== m.grupos) { if (a.grupos < m.grupos) melhor = d; return; }
+      if (String(d).localeCompare(String(melhor)) < 0) melhor = d;
+    });
+    g.para = melhor || '';
+    if (melhor) { carga[melhor].itens += g.n; carga[melhor].grupos++;
+                  carga[melhor].rcs += g.nRcs; }
+  });
+  return { origem:origem, destinos:(destinos || []).slice(), grupos:lista,
+           carga:carga, totalItens:itens.length,
+           totalGrupos:lista.length,
+           comVariasRcs:lista.filter(function(g){ return g.nRcs > 1; }).length };
+}
+
+function rdsDestinosDaTela(){
+  return [].slice.call(document.querySelectorAll('#rds-destinos input:checked'))
+    .map(function(x){ return x.value; });
+}
+
+function rdsPrever(){
+  var sel = document.getElementById('rds-origem');
+  var origem = sel ? sel.value : '';
+  var destinos = rdsDestinosDaTela().filter(function(d){
+    return cpNormNome(d) !== cpNormNome(origem); });
+  if (!origem || !destinos.length) {
+    _rdsPlano = null;
+    rdsRender('Escolha de quem sai a demanda e para quem ela vai.');
+    return;
+  }
+  _rdsPlano = rdsMontarPlano(origem, destinos);
+  rdsRender('');
+}
+
+function rdsRender(recado){
+  var box = document.getElementById('rds-corpo');
+  if (!box) return;
+  var pessoas = rdsAnalistasDaBase();
+  var sel = document.getElementById('rds-origem');
+  var origem = sel ? sel.value : '';
+  var h = '';
+
+  // de quem sai
+  h += '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">'
+    + '<div><div style="font-size:10px;font-weight:700;color:var(--tx2);letter-spacing:.5px;'
+    +   'margin-bottom:4px">DE QUEM SAI</div>'
+    + '<select id="rds-origem" onchange="rdsPrever()" style="font-size:12px;padding:6px 10px;'
+    +   'border:1.5px solid var(--brd);border-radius:7px;min-width:190px">'
+    + '<option value="">— escolha —</option>'
+    + pessoas.map(function(p){
+        return '<option value="' + cpEsc(p.nome) + '"' + (p.nome === origem ? ' selected' : '')
+          + '>' + cpEsc(p.nome) + ' · ' + p.n + ' em aberto</option>'; }).join('')
+    + '</select></div>';
+
+  // para quem vai
+  h += '<div><div style="font-size:10px;font-weight:700;color:var(--tx2);letter-spacing:.5px;'
+    +   'margin-bottom:4px">PARA QUEM VAI</div>'
+    + '<div id="rds-destinos" style="display:flex;gap:6px;flex-wrap:wrap;max-width:560px">'
+    + (typeof COLABS !== 'undefined' ? COLABS : []).filter(function(c){
+        return cpNormNome(c) !== cpNormNome(origem); })
+      .map(function(c){
+        var marcado = _rdsPlano && _rdsPlano.destinos.indexOf(c) !== -1;
+        return '<label style="display:flex;align-items:center;gap:5px;font-size:11.5px;'
+          + 'cursor:pointer;background:var(--cin);padding:5px 10px;border-radius:7px;'
+          + 'border:1.5px solid ' + (marcado ? 'var(--az)' : 'var(--brd)') + '">'
+          + '<input type="checkbox" value="' + cpEsc(c) + '"' + (marcado ? ' checked' : '')
+          + ' onchange="rdsPrever()"> ' + cpEsc(c) + '</label>';
+      }).join('')
+    + '</div></div></div>';
+
+  if (recado) h += '<div style="font-size:11.5px;color:var(--tx2);margin-top:.8rem">'
+    + cpEsc(recado) + '</div>';
+
+  var p = _rdsPlano;
+  if (p && p.totalGrupos) {
+    h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:1rem">'
+      + '<div style="flex:1;min-width:150px;background:var(--cin);border:1.5px solid var(--brd);'
+      +   'border-radius:10px;padding:.7rem .9rem">'
+      +   '<div style="font-size:9px;font-weight:700;color:var(--tx2)">EM ABERTO COM '
+      +     cpEsc(String(p.origem).toUpperCase()) + '</div>'
+      +   '<div style="font-size:22px;font-weight:800;color:var(--az)">' + cpNum(p.totalItens)
+      +   '</div><div style="font-size:10px;color:var(--tx2)">' + cpNum(p.totalGrupos)
+      +   ' oportunidade(s) · ' + cpNum(p.comVariasRcs) + ' com mais de uma RC</div></div>'
+      + p.destinos.map(function(d){
+          var c = p.carga[d];
+          return '<div style="flex:1;min-width:150px;background:var(--vdc);'
+            + 'border:1.5px solid var(--vd);border-radius:10px;padding:.7rem .9rem">'
+            + '<div style="font-size:9px;font-weight:700;color:var(--tx2)">'
+            + cpEsc(String(d).toUpperCase()) + '</div>'
+            + '<div style="font-size:22px;font-weight:800;color:var(--vd)">' + cpNum(c.itens)
+            + '</div><div style="font-size:10px;color:var(--tx2)">' + cpNum(c.grupos)
+            + ' oportunidade(s) · ' + cpNum(c.rcs) + ' RC(s)</div></div>';
+        }).join('')
+      + '</div>';
+
+    h += '<div class="al al-b" style="font-size:11.5px;margin-top:.8rem">ℹ Entra só o que '
+      + '<strong>não está concluído</strong>. A oportunidade vai inteira para a mesma pessoa '
+      + '— por isso os números podem não fechar exatamente iguais: a maior entra primeiro e '
+      + 'vai para quem está com menos.</div>';
+
+    h += '<div style="display:flex;gap:8px;margin-top:.8rem;flex-wrap:wrap">'
+      + '<button class="btn btn-p" onclick="rdsAplicar()">✔ Aplicar a redistribuição</button>'
+      + '<button class="btn btn-s" onclick="rdsBaixar()">⬇ Baixar a prévia</button>'
+      + '<span id="rds-status" style="font-size:11.5px;align-self:center"></span></div>';
+
+    h += '<div style="overflow:auto;max-height:420px;margin-top:.8rem"><table>'
+      + '<thead><tr><th>Oportunidade</th><th style="text-align:right">RCs</th>'
+      +   '<th style="text-align:right">Itens</th><th>Vai para</th><th>RCs da oportunidade</th>'
+      +   '</tr></thead><tbody>';
+    p.grupos.forEach(function(g){
+      h += '<tr><td style="font-weight:600">' + cpEsc(g.oport || '(sem oportunidade)')
+        + '</td>'
+        + '<td style="text-align:right' + (g.nRcs > 1 ? ';color:var(--az);font-weight:700' : '')
+        +   '">' + cpNum(g.nRcs) + '</td>'
+        + '<td style="text-align:right">' + cpNum(g.n) + '</td>'
+        + '<td style="font-weight:600;color:var(--vd)">' + cpEsc(g.para) + '</td>'
+        + '<td style="font-size:10.5px;color:var(--tx2)">'
+        +   cpEsc(Object.keys(g.rcs).join(' · ')) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  } else if (p) {
+    h += '<div class="al al-a" style="font-size:12px;margin-top:.8rem">Nada em aberto no nome '
+      + 'de <strong>' + cpEsc(p.origem) + '</strong>. Ou tudo já foi concluído, ou o Radar '
+      + 'desta sessão não tem itens com esse analista.</div>';
+  }
+  box.innerHTML = h;
+}
+
+function rdsAbrir(){
+  _rdsPlano = null;
+  rdsRender('');
+}
+
+// Grava a troca na mesma coleção que a edição linha a linha usa.
+async function rdsAplicar(){
+  var p = _rdsPlano;
+  var st = document.getElementById('rds-status');
+  if (!p || !p.totalGrupos) return;
+  var tudo = [];
+  p.grupos.forEach(function(g){
+    g.itens.forEach(function(i){ tudo.push({ chave:i.chave, para:g.para }); });
+  });
+  if (!confirm('Passar ' + tudo.length + ' item(ns) em aberto de ' + p.origem + ' para '
+      + p.destinos.join(' e ') + '?\n\nOs concluídos não são tocados.')) return;
+  if (st) st.innerHTML = '<span style="color:var(--am)">⏳ gravando...</span>';
+  var db = null;
+  try { db = getDB(); } catch (e) {}
+  var gravados = 0, erro = '';
+  try {
+    for (var i = 0; i < tudo.length; i++) {
+      var t = tudo[i];
+      _govAnalistaOverrides[t.chave] = t.para;
+      var ix = (_radarDados || []).findIndex(function(r){ return govChave(r) === t.chave; });
+      if (ix >= 0) _radarDados[ix].analista = t.para;
+      if (db) {
+        await db.collection('gov_analista_overrides').doc(t.chave.replace(/[|]/g, '_'))
+          .set({ chave:t.chave, analista:t.para, ts:new Date().toISOString(),
+                 de:p.origem, lote:'redistribuicao' });
+      }
+      gravados++;
+      if (st && (gravados % 25 === 0)) st.innerHTML = '<span style="color:var(--am)">⏳ '
+        + gravados + ' de ' + tudo.length + '...</span>';
+    }
+  } catch (e) { erro = e.message || 'erro ao gravar'; }
+  if (st) {
+    st.innerHTML = erro
+      ? '<span style="color:var(--vm)">✗ parei em ' + gravados + ' de ' + tudo.length
+        + ': ' + cpEsc(erro) + '</span>'
+      : '<span style="color:var(--vd)">✓ ' + gravados + ' item(ns) passaram para '
+        + cpEsc(p.destinos.join(' e ')) + (db ? '.' : ' (só nesta sessão — base fora do ar).')
+        + '</span>';
+  }
+  try {
+    if (typeof govRenderMapa === 'function') govRenderMapa(govListaGovernanca());
+    if (typeof govPainelRender === 'function') govPainelRender();
+  } catch (e) {}
+  _rdsPlano = rdsMontarPlano(p.origem, p.destinos);
+  rdsRender('');
+  var st2 = document.getElementById('rds-status');
+  if (st2 && !erro) st2.innerHTML = '<span style="color:var(--vd)">✓ ' + gravados
+    + ' item(ns) passaram para ' + cpEsc(p.destinos.join(' e ')) + '.</span>';
+}
+
+function rdsBaixar(){
+  var p = _rdsPlano;
+  if (!p || !p.totalGrupos) return;
+  try {
+    var aoa = [['Oportunidade','RCs na oportunidade','Itens','Sai de','Vai para','RCs']];
+    p.grupos.forEach(function(g){
+      aoa.push([g.oport || '(sem oportunidade)', g.nRcs, g.n, p.origem, g.para,
+                Object.keys(g.rcs).join(' | ')]);
+    });
+    aoa.push([]);
+    p.destinos.forEach(function(d){
+      aoa.push(['TOTAL ' + d, p.carga[d].grupos, p.carga[d].itens, '', '', '']);
+    });
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{ wch:20 }, { wch:20 }, { wch:10 }, { wch:16 }, { wch:16 }, { wch:50 }];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Redistribuição');
+    XLSX.writeFile(wb, 'Redistribuicao_' + cpNormNome(p.origem).replace(/\s+/g, '_')
+                       + '_' + String(cpHojeISO()).replace(/-/g, '') + '.xlsx');
+  } catch (e) { alert('Não consegui gerar a prévia: ' + e.message); }
+}
 
 // ── SINCRONIZAR MAPA COM RADAR ──
 async function govCarregarAnalistaOverrides(){
