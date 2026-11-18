@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/11 18:00';
+var GTO_BUILD = '17/11 19:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -44595,6 +44595,9 @@ function govRenderConcluidos(){
 // A troca é gravada em gov_analista_overrides, a mesma coleção que a
 // edição de analista linha a linha já usa. Nada de novo na base.
 var _rdsPlano = null;
+// a RC em tratamento como ficou depois da última redistribuição, para o
+// botão de baixar entregar o arquivo no mesmo modelo do upload
+var _rdsTrat = null;
 
 function rdsAnalistasDaBase(){
   var c = {};
@@ -44752,6 +44755,8 @@ function rdsRender(recado){
     h += '<div style="display:flex;gap:8px;margin-top:.8rem;flex-wrap:wrap">'
       + '<button class="btn btn-p" onclick="rdsAplicar()">✔ Aplicar a redistribuição</button>'
       + '<button class="btn btn-s" onclick="rdsBaixar()">⬇ Baixar a prévia</button>'
+      + '<button class="btn btn-s" onclick="rdsBaixarTrat()">⬇ RC em tratamento '
+      +   '(modelo do upload)</button>'
       + '<span id="rds-status" style="font-size:11.5px;align-self:center"></span></div>';
 
     h += '<div style="overflow:auto;max-height:420px;margin-top:.8rem"><table>'
@@ -44817,13 +44822,28 @@ async function rdsAtualizarTratamento(tudo, porChave){
       var k = porChave[t.chave];
       if (k) _aagEscolhas[k] = t.para;
     });
+    var antes = (_aagArq.trat.linhas || []).length;
+    var guardadoAntes = { cab:(_aagArq.trat.cab || []).slice(),
+                          linhas:(_aagArq.trat.linhas || []).slice() };
     var m = aagMontarTratamento();
+    r.antes = antes; r.novas = m.novas; r.trocadas = m.trocadas;
+    r.total = m.linhas.length;
+    // Encolheu? Então a tabela guardada foi descartada no meio do
+    // caminho (acontece quando o arquivo só tem a chave concatenada, e
+    // não as colunas RC/SEQ/OP/ITEM). Gravar isso apagaria o acumulado.
+    if (m.linhas.length < antes) {
+      _aagArq.trat = guardadoAntes;
+      r.motivo = 'a tabela sairia menor do que está (' + m.linhas.length + ' contra '
+               + antes + ') — não gravei';
+      return r;
+    }
     _aagArq.trat = { nome:'RC em tratamento (atualizada na redistribuição)', cab:m.cab,
                      linhas:m.linhas, guardado:true };
     await aagGuardar('trat');
     _aagEscolhas = {};
     try { await aagSalvarEscolhas(); } catch (e) {}
-    r.ok = true; r.novas = m.novas; r.trocadas = m.trocadas; r.total = m.linhas.length;
+    r.ok = true;
+    _rdsTrat = { cab:m.cab, linhas:m.linhas };
   } catch (e) { r.motivo = e.message || 'erro ao gravar'; }
   return r;
 }
@@ -44837,10 +44857,16 @@ async function rdsAplicar(){
   p.grupos.forEach(function(g){
     g.itens.forEach(function(i){
       tudo.push({ chave:i.chave, para:g.para });
-      // a chave do Analista Completo tem o item da oportunidade a mais
-      chaveAag[i.chave] = [String(i.rc || '').trim(), String(i.seq || '').trim(),
-                           String(i.oport || '').trim(),
-                           String(i.itemOp || '').trim()].join('|');
+      // A chave do Analista Completo tem o item da oportunidade a mais —
+      // e passa pelo MESMO aagId() que ele usa para ler o arquivo.
+      //
+      // BUG (17/11): eu montava a chave com o valor cru. O arquivo dele
+      // guarda a RC como 0036935444 e o dash como 36935444; sem
+      // normalizar, a linha não era encontrada e o aagMontarTratamento
+      // CRIAVA outra. Era o "está puxando mais item" que ele viu.
+      var _id = (typeof aagId === 'function') ? aagId
+              : function(v){ return String(v == null ? '' : v).trim(); };
+      chaveAag[i.chave] = [_id(i.rc), _id(i.seq), _id(i.oport), _id(i.itemOp)].join('|');
     });
   });
   if (!confirm('Passar ' + tudo.length + ' item(ns) em aberto de ' + p.origem + ' para '
@@ -44878,9 +44904,12 @@ async function rdsAplicar(){
   if (!erro) tr = await rdsAtualizarTratamento(tudo, chaveAag);
   var recadoTrat = tr.ok
     ? '<div style="color:var(--vd);font-size:11px;margin-top:3px">✓ RC em tratamento '
-      + 'atualizada no dash: ' + cpNum(tr.trocadas) + ' analista(s) trocado(s), '
-      + cpNum(tr.total) + ' linha(s) no total. Amanhã o Montar tudo já sai com os nomes '
-      + 'novos, sem upload.</div>'
+      + 'atualizada: <strong>' + cpNum(tr.trocadas) + '</strong> analista(s) trocado(s)'
+      + (tr.novas ? ' e <strong style="color:var(--am)">' + cpNum(tr.novas)
+                    + '</strong> linha(s) nova(s)' : ', nenhuma linha nova')
+      + ' — de ' + cpNum(tr.antes) + ' para ' + cpNum(tr.total) + ' linhas. '
+      + '<a href="javascript:rdsBaixarTrat()" style="color:var(--az);font-weight:600">'
+      + '⬇ baixar a RC em tratamento</a></div>'
     : '<div style="color:var(--am);font-size:11px;margin-top:3px">⚠ A RC em tratamento NÃO '
       + 'foi atualizada (' + cpEsc(tr.motivo) + '). Abra <strong>ADM › Analista Completo'
       + '</strong>, espere a tabela guardada carregar e aplique de novo — senão amanhã o '
@@ -44895,6 +44924,36 @@ async function rdsAplicar(){
   var st2 = document.getElementById('rds-status');
   if (st2 && !erro) st2.innerHTML = '<span style="color:var(--vd)">✓ ' + gravados
     + ' item(ns) passaram para ' + cpEsc(p.destinos.join(' e ')) + '.</span>' + recadoTrat;
+}
+
+// O arquivo no MESMO modelo da RC em tratamento: o cabeçalho que o
+// upload espera e as linhas como ficaram depois da redistribuição.
+// Pedido do André em 17/11: "crie um arquivo igual ao modelo RC em
+// tratamento, que quando fizer a redistribuição eu consiga extrair o
+// relatório correto — aí quando for fazer o upload amanhã esteja com o
+// arquivo correto, evitando problemas na distribuição".
+function rdsBaixarTrat(){
+  var t = _rdsTrat;
+  if (!t && _aagArq && _aagArq.trat && (_aagArq.trat.linhas || []).length) {
+    t = { cab:_aagArq.trat.cab, linhas:_aagArq.trat.linhas };
+  }
+  if (!t || !(t.linhas || []).length) {
+    alert('Não tenho a RC em tratamento nesta sessão. Abra ADM › Analista Completo, '
+        + 'espere a tabela guardada carregar, e aplique a redistribuição.');
+    return;
+  }
+  try {
+    var aoa = [ (t.cab || []).slice() ].concat(t.linhas.map(function(l){
+      return (t.cab || []).map(function(_, n){ return l[n] === undefined ? '' : l[n]; });
+    }));
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = (t.cab || []).map(function(c){
+      return { wch: Math.max(10, Math.min(28, String(c).length + 6)) }; });
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'RC em tratamento');
+    XLSX.writeFile(wb, 'RC_em_tratamento_' + String(cpHojeISO()).replace(/-/g, '')
+                       + '.xlsx');
+  } catch (e) { alert('Não consegui gerar o arquivo: ' + e.message); }
 }
 
 function rdsBaixar(){
