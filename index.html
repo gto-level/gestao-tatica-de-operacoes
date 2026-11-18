@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/11 20:30';
+var GTO_BUILD = '18/11 10:25';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -10023,8 +10023,14 @@ function go(id, el) {
     if(!Object.keys(_govDados||{}).length)        promises.push(govCarregarFirebase());
     if(!_radarDados?.length)                       promises.push(fbCarregarRadar().then(()=>{ setTimeout(paAtualizarBacklogAuto,800); }));
     if(!Object.keys(_desfechoCache||{}).length)    promises.push(desfechoCarregarFirebase());
+    // BUG (17/11): govCarregarAnalistaOverrides existia e NUNCA era
+    // chamada. O analista trocado na plataforma — na linha ou pela
+    // redistribuição — vivia só na sessão: no dia seguinte o Radar
+    // devolvia o nome antigo e a troca sumia sem avisar. A coleção
+    // gov_analista_overrides é "soberana sobre upload", mas ninguém a
+    // lia de volta.
+    promises.push(govCarregarAnalistaOverrides());
     Promise.all(promises).then(()=>{ govInicializar(); if(!_bkDados?.rows?.length) bkCarregarFirebase().then(()=>pcInicializar()); else pcInicializar(); });
-    if(promises.length===0){ govInicializar(); pcInicializar(); }
   }, 300);
   if(id==='governanca-pedidos') setTimeout(()=>{ try{ gpAbrir(); }catch(e){ console.warn('gpAbrir:', e); } }, 80);
   if(id==='radar') setTimeout(()=>{
@@ -34216,6 +34222,15 @@ async function radarOnFile(file){
     if(lbl) lbl.textContent = file.name + ' — ' + new Date(_radarTs).toLocaleDateString('pt-BR') + ' às ' + new Date(_radarTs).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
     // Atualizar MAPA: fila + novos itens (sem sobrescrever Status/Envio/Finalizado)
     govSincronizarMapa(rows);
+    // O upload traz o analista do arquivo e acabou de sobrescrever
+    // _radarDados inteiro. Reaplicar as trocas feitas na plataforma —
+    // senão a redistribuição de ontem some no upload de hoje.
+    try {
+      govCarregarAnalistaOverrides().then(function(){
+        try { if(typeof govRenderMapa === 'function' && _moduloAtivo !== 'fast')
+                govRenderMapa(govListaGovernanca()); } catch(e){}
+      });
+    } catch(e){ console.warn('overrides pós-radar:', e); }
     radarRenderPreview(rows);
     syncPatecFinalizadoRadar();
     // Atualizar backlog automático após upload (força regravar o marco do dia)
@@ -40730,7 +40745,10 @@ function _govDetDefs(){
         + 'pediu prioridade. O item é procurado primeiro no XGL e no Status B '
         + '(chave RC + item da RC) e, se não estiver lá, na carteira (com a '
         + 'oportunidade). Status de tratamento, prazo e status vêm de lá sozinhos; '
-        + 'o card conta só o que está em tratamento.',
+        + 'o SLA vem sempre do Radar (o "*" quer dizer que é o maior SLA da RC, '
+        + 'porque o item não casou); o selo VENCIDO ao lado do analista sai do '
+        + 'card ⏰ Vencidos (com "?" quando a RC está lá por outro item); o card '
+        + 'conta só o que está em tratamento.',
       cols: AGR_COLS,
       topo: agrTopo,
       // o que sobra fora da conta aqui é quem errou a chave: o concluído
@@ -40792,6 +40810,130 @@ function _agrIdx(){
     });
   } catch (e) {}
   return ix;
+}
+
+// ── o SLA da RC ─────────────────────────────────────────────────
+//
+// O SLA não se digita em lugar nenhum deste card: quem conta os dias é
+// o Radar. E o item aqui pode ter chegado pelo XGL, pelo Status B ou
+// pelo PID — nenhuma dessas três bases carrega o SLA. Então o número
+// vem SEMPRE do Radar, procurado por RC + item da RC.
+//
+// Quando o Radar tem a RC mas o item está escrito diferente, vale o
+// MAIOR SLA da RC — e a célula diz isso na dica, para ninguém tomar
+// por exato um número que é o do pior item da RC.
+function _agrSlaIdx(){
+  var ix = { item:{}, rc:{}, qd:{} };
+  try {
+    (typeof _radarDados !== 'undefined' ? (_radarDados || []) : []).forEach(function(r){
+      var rc = _agrN(r.rc); if (!rc) return;
+      var sla = Number(r.sla) || 0;
+      var k = rc + '|' + _agrN(r.seq);
+      if (ix.item[k] == null || sla > ix.item[k]) ix.item[k] = sla;
+      if (ix.rc[rc] == null || sla > ix.rc[rc]) ix.rc[rc] = sla;
+      ix.qd[rc] = (ix.qd[rc] || 0) + 1;
+    });
+  } catch (e) {}
+  return ix;
+}
+
+// Põe o SLA na linha e guarda de onde ele saiu.
+function _agrPorSla(o, rc, itemRc, slaIx){
+  slaIx = slaIx || _agrSlaIdx();
+  var k = _agrN(rc) + '|' + _agrN(itemRc);
+  if (slaIx.item[k] != null) {
+    o.sla = slaIx.item[k];
+    o.slaDe = 'SLA do Radar, na linha desta RC + item da RC.';
+    return o;
+  }
+  if (slaIx.rc[_agrN(rc)] != null) {
+    o.sla = slaIx.rc[_agrN(rc)];
+    o.slaDe = 'O Radar tem esta RC, mas não com o item ' + (_agrN(itemRc) || '(vazio)')
+      + ' — este é o MAIOR SLA entre as '
+      + (slaIx.qd[_agrN(rc)] || 1) + ' linha(s) da RC, não o do item.';
+    o.slaPelaRc = true;
+    return o;
+  }
+  o.sla = null;
+  o.slaDe = 'Sem SLA: esta RC não está no Radar. Suba o Radar do dia '
+    + 'para o número aparecer.';
+  return o;
+}
+
+// A régua de cor é a mesma do Top SLA da tela inicial: 150 dias ou mais
+// é vermelho, 90 ou mais é amarelo, abaixo disso é verde.
+function _agrCelSla(x){
+  var dica = _govPainelEsc(x.slaDe || '');
+  if (x.sla == null)
+    return '<span title="' + dica + '" style="color:var(--tx2)">—</span>';
+  var cor = x.sla >= 150 ? 'var(--vm)' : x.sla >= 90 ? 'var(--am)' : 'var(--vd)';
+  return '<span title="' + dica + '" style="font-weight:700;color:' + cor + '">'
+    + x.sla + (x.slaPelaRc ? '<span style="font-weight:700;color:var(--am)">*</span>' : '')
+    + '</span>';
+}
+
+// ── o selo de VENCIDO, ao lado do analista ──────────────────────
+//
+// Pedido do André em 18/11: o mesmo tipo de selo que o XGL e o Status B
+// já têm, só que para o card Vencidos — e na coluna do Analista, que é
+// por onde cada um procura o que é seu.
+//
+// O selo sai EXATAMENTE da lista do card ⏰ Vencidos (validade da
+// proposta vencida, em aberto): é a mesma função, _govPcLista('venc'),
+// não uma segunda conta. Se o número do card mudar, o selo muda junto —
+// é a regra de uma fonte só.
+function _agrVencIdx(){
+  var ix = { item:{}, rc:{}, n:0 };
+  try {
+    (_govPcLista('venc') || []).forEach(function(r){
+      var rc = String(r.rc || '').trim(); if (!rc) return;
+      var d = { validade: String(r.validade || '').trim(),
+                sla: Number(r.sla) || 0,
+                itemRc: String(r.seq || r.item_rc || '').trim() };
+      var k = rc + '|' + d.itemRc;
+      if (!ix.item[k]) ix.item[k] = d;
+      if (!ix.rc[rc]) ix.rc[rc] = d;
+      ix.n++;
+    });
+  } catch (e) {}
+  return ix;
+}
+
+// Põe o selo na linha — e guarda se ele veio do item ou só da RC, que
+// é diferença que muda o que a pessoa vai fazer com a informação.
+function _agrPorVenc(o, rc, itemRc, vencIx){
+  vencIx = vencIx || _agrVencIdx();
+  var k = _agrN(rc) + '|' + _agrN(itemRc);
+  var d = vencIx.item[k];
+  if (d) {
+    o.venc = true; o.vencPelaRc = false;
+    o.vencDe = 'Está no card ⏰ Vencidos: ' + (d.validade || 'proposta vencida')
+      + (d.sla ? ' · SLA ' + d.sla + ' dias' : '') + '.';
+    return o;
+  }
+  d = vencIx.rc[_agrN(rc)];
+  if (d) {
+    o.venc = true; o.vencPelaRc = true;
+    o.vencDe = 'A RC está no card ⏰ Vencidos, mas no item '
+      + (d.itemRc || '(sem item)') + ', não no ' + (_agrN(itemRc) || '(vazio)')
+      + ' — confira antes de cobrar.';
+    return o;
+  }
+  o.venc = false; o.vencPelaRc = false; o.vencDe = '';
+  return o;
+}
+
+function _agrSeloVenc(x){
+  if (!x.venc) return '';
+  return ' <span title="' + _govPainelEsc(x.vencDe)
+    + '" style="font-size:9px;font-weight:800;color:var(--vm);background:var(--vmc);'
+    + 'border:1px solid var(--vm);border-radius:4px;padding:1px 5px;margin-left:4px;'
+    + 'white-space:nowrap">VENCIDO' + (x.vencPelaRc ? '?' : '') + '</span>';
+}
+
+// A célula do analista: o nome, e o selo colado nele
+function _agrCelAnalista(x){
+  return _govPainelEsc(x.analista) + _agrSeloVenc(x);
 }
 
 // Índice do Status B por RC + item da RC, que é a chave daquele card.
@@ -40948,16 +41090,26 @@ function _agrAnalista(v){
 // primeiro pela chave inteira, ele aparecia como "fora da carteira"
 // mesmo estando bem vivo no XGL.
 function agrLinha(it, ix, idxs){
-  idxs = idxs || { 'XGL': _agrXglIdx(), 'Status B': _agrSbIdx() };
+  idxs = idxs || { 'XGL': _agrXglIdx(), 'Status B': _agrSbIdx(),
+                   'SLA': _agrSlaIdx(), 'VENC': _agrVencIdx() };
   var ch = agrChave(it.rc, it.itemRc, it.oport, it.itemOp);
   var rc = _agrN(it.rc), itemRc = _agrN(it.itemRc), oport = _agrN(it.oport);
   var o = { __ch: ch,
             rc: rc || '—', itemRc: itemRc || '—',
             oport: oport || '—', itemOp: _agrN(it.itemOp) || '—',
+            sla: null, slaDe: '', slaPelaRc: false,
+            venc: false, vencDe: '', vencPelaRc: false,
             tipoContato: _agrN(it.tipoContato), pessoa: _agrN(it.pessoa),
             analista: '—',
             trat: '—', prazo: '—', status: '—', concluidoEm: '',
             origem: '', spGrupo: '', __tambem: [] };
+
+  // O SLA é do Radar e vale para TODA linha do card — inclusive a que
+  // veio do XGL, do Status B, do PID ou a que já saiu da carteira. Por
+  // isso entra aqui, antes de qualquer caminho de saída.
+  _agrPorSla(o, rc, itemRc, idxs['SLA']);
+  // o selo de vencido também vale para toda linha, venha ela de onde vier
+  _agrPorVenc(o, rc, itemRc, idxs['VENC']);
 
   // ── 1º: XGL e Status B, por RC + item da RC ──
   //
@@ -41020,6 +41172,12 @@ function agrLinha(it, ix, idxs){
   }
   o.origem = 'Carteira';
   o.analista = _agrAnalista(r.analista);
+  // achei a linha exata na carteira: o SLA é o dela, sem o "maior da RC"
+  if (r.sla != null && r.sla !== '') {
+    o.sla = Number(r.sla) || 0;
+    o.slaPelaRc = false;
+    o.slaDe = 'SLA do Radar, na linha deste item na carteira.';
+  }
   // Em qual dos dois botões a linha cai. Cancelado e 100% Reprovado
   // moram com o Finalizado — é a mesma conta do Status do Patec do
   // painel, e separá-los aqui criaria um terceiro grupo que não tem
@@ -41120,7 +41278,7 @@ function _agrTodosItens(){
 
 function agrLista(){
   var ix = _agrIdx();
-  var idxs = { 'XGL': _agrXglIdx(), 'Status B': _agrSbIdx() };
+  var idxs = { 'XGL': _agrXglIdx(), 'Status B': _agrSbIdx(), 'SLA': _agrSlaIdx() };
   return _agrTodosItens().map(function(it){
     var o = agrLinha(it, ix, idxs);
     if (it.__pid) o.__pid = true;
@@ -41144,21 +41302,37 @@ var _agrVerConcluidos = false;   // por padrão, concluído não aparece
 // (que leva junto XGL e Status B). É só um filtro de VISTA — o número
 // do card continua sendo a fila inteira.
 var _agrFiltroSp = '';
+// O vencido é outra pergunta: um item pode estar vencido em qualquer
+// dos dois grupos. Por isso é um filtro à parte, que soma com o outro
+// em vez de substituí-lo.
+var _agrSoVenc = false;
 function agrFiltrarSp(qual){
   _agrFiltroSp = (_agrFiltroSp === qual) ? '' : qual;
+  govPainelRender();
+}
+function agrFiltrarVenc(){
+  _agrSoVenc = !_agrSoVenc;
+  govPainelRender();
+}
+// Limpa os dois recortes de uma vez — com dois filtros ligados, zerar
+// só um deixava a lista ainda cortada e parecia que o botão falhou.
+function agrVerTudo(){
+  _agrFiltroSp = ''; _agrSoVenc = false;
   govPainelRender();
 }
 function agrListaVisivel(){
   var l = agrLista();
   if (!_agrVerConcluidos) l = l.filter(function(x){ return !_agrConcluido(x); });
   if (_agrFiltroSp) l = l.filter(function(x){ return x.spGrupo === _agrFiltroSp; });
+  if (_agrSoVenc) l = l.filter(function(x){ return !!x.venc; });
   return l;
 }
 // Quantos itens em tratamento há em cada grupo — é o número do botão
 function agrContaSp(){
-  var c = { andamento:0, finalizado:0, fora:0 };
+  var c = { andamento:0, finalizado:0, fora:0, venc:0 };
   agrLista().forEach(function(x){
     if (_agrConcluido(x)) return;
+    if (x.venc) c.venc++;
     if (x.spGrupo === 'andamento') c.andamento++;
     else if (x.spGrupo === 'finalizado') c.finalizado++;
     else c.fora++;
@@ -41222,7 +41396,11 @@ function agrExpLinha(x){
     'Item da RC':         tracinho(x.itemRc),
     'Oportunidade':       tracinho(x.oport),
     'Item da OP':         tracinho(x.itemOp),
+    'SLA':                x.sla == null ? '' : x.sla,
+    'SLA de onde':        _agrN(x.slaDe),
     'Analista':           tracinho(x.analista),
+    'Vencido':            x.venc ? (x.vencPelaRc ? 'Confira (pela RC)' : 'Sim') : '',
+    'Vencido de onde':    _agrN(x.vencDe),
     'Tipo de contato':    _agrN(x.tipoContato),
     'Pessoa de contato':  _agrN(x.pessoa),
     'Status Tratamento':  tracinho(x.trat),
@@ -41499,8 +41677,14 @@ var AGR_COLS = [
   { t:'Item da RC',         k:'itemRc', w:'58px' },
   { t:'Oportunidade',       k:'oport', w:'96px' },
   { t:'Item da OP',         k:'itemOp', w:'58px' },
+  // o SLA vem do Radar — é a única base deste card que conta os dias;
+  // o "*" avisa que o número é o maior da RC, não o do item
+  { t:'SLA',                k:'sla', w:'52px', st:'text-align:center',
+    html:function(x){ return _agrCelSla(x); } },
   // quem responde pelo item — vem da carteira ou do Status B, não se digita
-  { t:'Analista',           k:'analista', w:'86px', st:'font-weight:600' },
+  // o nome leva junto o selo VENCIDO, que sai do card ⏰ Vencidos
+  { t:'Analista',           k:'analista', w:'150px', st:'font-weight:600',
+    html:function(x){ return _agrCelAnalista(x); } },
   { t:'Tipo',               k:'tipoContato', w:'76px',
     html:function(x){ return _agrInput(x, 'tipoContato', 'Teams…', true, 60); } },
   { t:'Pessoa de contato',  k:'pessoa',
@@ -41542,10 +41726,23 @@ function agrBotoesSp(){
       + '<div style="font-size:8.5px;font-weight:700;text-transform:uppercase;'
       + 'letter-spacing:.3px">' + rotulo + '</div></button>';
   };
+  // O botão de vencidos fica junto, mas é toggle próprio: ele SOMA com o
+  // recorte de Patec em andamento / finalizado em vez de trocar por ele.
+  var btVenc = '<button type="button" onclick="agrFiltrarVenc()"'
+    + ' title="' + (_agrSoVenc ? 'Clique para ver todos de novo'
+                               : 'Ver só os que estão no card ⏰ Vencidos')
+    + '" style="cursor:pointer;border:1.5px solid var(--vm);border-radius:8px;'
+    + 'background:' + (_agrSoVenc ? 'var(--vm)' : 'var(--vmc)')
+    + ';color:' + (_agrSoVenc ? '#fff' : 'var(--vm)')
+    + ';padding:4px 12px;text-align:center;line-height:1.15;min-width:104px">'
+    + '<div style="font-size:15px;font-weight:800">' + c.venc + '</div>'
+    + '<div style="font-size:8.5px;font-weight:700;text-transform:uppercase;'
+    + 'letter-spacing:.3px">⏰ Vencidos</div></button>';
   return '<div style="display:flex;gap:8px;margin-left:auto;align-items:center">'
-    + (_agrFiltroSp
-        ? '<button class="btn btn-s" type="button" onclick="agrFiltrarSp(\'\')"'
+    + ((_agrFiltroSp || _agrSoVenc)
+        ? '<button class="btn btn-s" type="button" onclick="agrVerTudo()"'
           + ' style="font-size:10px;padding:2px 9px">✕ ver tudo</button>' : '')
+    + btVenc
     + bt('andamento', 'Patec em andamento', c.andamento, 'var(--azm)', 'var(--azc)')
     + bt('finalizado', 'Patec finalizado', c.finalizado, 'var(--vd)', 'var(--vdc)')
     + '</div>';
