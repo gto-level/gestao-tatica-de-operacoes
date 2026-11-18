@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/11 19:30';
+var GTO_BUILD = '17/11 20:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -44805,45 +44805,94 @@ function rdsAbrir(){
 // gravo. aagMontarTratamento começaria uma tabela do zero e o
 // aagGuardar apagaria o acumulado dele — seria trocar um problema por
 // um estrago.
-async function rdsAtualizarTratamento(tudo, porChave){
-  var r = { ok:false, motivo:'', novas:0, trocadas:0, total:0 };
+async function rdsAtualizarTratamento(tudo, origem){
+  var r = { ok:false, motivo:'', novas:0, trocadas:0, total:0, antes:0,
+            origem:origem || '', sobrouN:0, sobraram:[], remontou:false, col:'' };
   try {
-    if (typeof aagCarregarGuardadas !== 'function'
-        || typeof aagMontarTratamento !== 'function') {
+    if (typeof aagCol !== 'function') {
       r.motivo = 'o Analista Completo não está nesta tela'; return r;
     }
-    if (!_aagArq.trat) { try { await aagCarregarGuardadas(); } catch (e) {} }
-    if (!_aagArq.trat || !(_aagArq.trat.linhas || []).length) {
+    if (!_aagArq.trat && typeof aagCarregarGuardadas === 'function') {
+      try { await aagCarregarGuardadas(); } catch (e) {}
+    }
+    var d = _aagArq.trat;
+    if (!d || !(d.linhas || []).length) {
       r.motivo = 'a RC em tratamento guardada não abriu — não vou gravar por cima dela';
       return r;
     }
-    try { await aagCarregarEscolhas(); } catch (e) {}
-    tudo.forEach(function(t){
-      var k = porChave[t.chave];
-      if (k) _aagEscolhas[k] = t.para;
-    });
-    var antes = (_aagArq.trat.linhas || []).length;
-    var guardadoAntes = { cab:(_aagArq.trat.cab || []).slice(),
-                          linhas:(_aagArq.trat.linhas || []).slice() };
-    var m = aagMontarTratamento();
-    r.antes = antes; r.novas = m.novas; r.trocadas = m.trocadas;
-    r.total = m.linhas.length;
-    // Encolheu? Então a tabela guardada foi descartada no meio do
-    // caminho (acontece quando o arquivo só tem a chave concatenada, e
-    // não as colunas RC/SEQ/OP/ITEM). Gravar isso apagaria o acumulado.
-    if (m.linhas.length < antes) {
-      _aagArq.trat = guardadoAntes;
-      r.motivo = 'a tabela sairia menor do que está (' + m.linhas.length + ' contra '
-               + antes + ') — não gravei';
+    var cab = (d.cab || []).slice();
+    var iA = aagCol(cab, ['ANALISTA PATEC','ANALISTA','RESPONSAVEL','COMPRADOR']);
+    var iRc = aagCol(cab, ['RC']);
+    var iSeq = aagCol(cab, ['SEQ','ITEM_RC','LINHAREQUISICAO']);
+    var iOp = aagCol(cab, ['NUMERO_OPORTUNIDADE','OPORTUNIDADE']);
+    var iIop = aagCol(cab, ['ITEM_OPORTUNIDADE','ITEM OP','ITEM']);
+    if (iA === -1 || iRc === -1) {
+      r.motivo = 'não achei as colunas de analista e RC no arquivo guardado ('
+               + cab.join(' · ') + ')';
       return r;
     }
-    _aagArq.trat = { nome:'RC em tratamento (atualizada na redistribuição)', cab:m.cab,
-                     linhas:m.linhas, guardado:true };
+    r.col = cab[iA];
+    // A CHAVE É RC + ITEM DA RC, normalizada.
+    //
+    // A tabela tem quatro partes na chave (RC, SEQ, oportunidade e item
+    // da OP), mas as duas últimas são as que mais variam entre o arquivo
+    // dele e o Radar — e é por elas que a troca não achava a linha e
+    // criava outra. RC + item identifica o item do mesmo jeito e erra
+    // muito menos. Quando o SEQ não existe na tabela, vale só a RC.
+    var _id = (typeof aagId === 'function') ? aagId
+            : function(v){ return String(v == null ? '' : v).trim(); };
+    var k = function(rc, seq){
+      return _id(rc) + (iSeq === -1 ? '' : ('|' + _id(seq)));
+    };
+    var querem = {};
+    (tudo || []).forEach(function(t){ querem[k(t.rc, t.seq)] = t.para; });
+
+    var linhas = (d.linhas || []).map(function(l){ return l.slice(); });
+    r.antes = linhas.length;
+    var achou = {};
+    linhas.forEach(function(l){
+      var kk = k(l[iRc], iSeq === -1 ? '' : l[iSeq]);
+      var nome = querem[kk];
+      if (!nome) return;
+      achou[kk] = 1;
+      if (cpNormNome(l[iA]) !== cpNormNome(nome)) { l[iA] = nome; r.trocadas++; }
+      else achou[kk] = 1;
+    });
+    // o que não estava na tabela entra como linha nova
+    (tudo || []).forEach(function(t){
+      var kk = k(t.rc, t.seq);
+      if (achou[kk]) return;
+      achou[kk] = 1;
+      var l = cab.map(function(){ return ''; });
+      l[iA] = t.para;
+      l[iRc] = t.rc;
+      if (iSeq !== -1) l[iSeq] = t.seq;
+      if (iOp !== -1) l[iOp] = t.oport;
+      if (iIop !== -1) l[iIop] = t.itemOp;
+      linhas.push(l);
+      r.novas++;
+    });
+    r.total = linhas.length;
+
+    _aagArq.trat = { nome:'RC em tratamento (atualizada na redistribuição)', cab:cab,
+                     linhas:linhas, guardado:true };
     await aagGuardar('trat');
-    _aagEscolhas = {};
-    try { await aagSalvarEscolhas(); } catch (e) {}
     r.ok = true;
-    _rdsTrat = { cab:m.cab, linhas:m.linhas };
+    _rdsTrat = { cab:cab, linhas:linhas };
+
+    // O relatório do Analista Completo não é a tabela — é o resultado do
+    // "Montar tudo". Sem remontar, ele continuava com o nome velho, que
+    // foi o "ainda sai com o nome da Lory".
+    try { if (typeof aagPintarUploads === 'function') aagPintarUploads(); } catch (e) {}
+    try { if (typeof aagProcessar === 'function') { aagProcessar(); r.remontou = true; } }
+    catch (e) { r.remontou = false; }
+
+    // sobrou alguém no nome de quem saiu?
+    linhas.forEach(function(l){
+      if (cpNormNome(l[iA]) !== cpNormNome(r.origem || '')) return;
+      r.sobrouN++;
+      if (r.sobraram.length < 8) r.sobraram.push(aagTxt(l[iRc]));
+    });
   } catch (e) { r.motivo = e.message || 'erro ao gravar'; }
   return r;
 }
@@ -44853,20 +44902,11 @@ async function rdsAplicar(){
   var p = _rdsPlano;
   var st = document.getElementById('rds-status');
   if (!p || !p.totalGrupos) return;
-  var tudo = [], chaveAag = {};
+  var tudo = [];
   p.grupos.forEach(function(g){
     g.itens.forEach(function(i){
-      tudo.push({ chave:i.chave, para:g.para });
-      // A chave do Analista Completo tem o item da oportunidade a mais —
-      // e passa pelo MESMO aagId() que ele usa para ler o arquivo.
-      //
-      // BUG (17/11): eu montava a chave com o valor cru. O arquivo dele
-      // guarda a RC como 0036935444 e o dash como 36935444; sem
-      // normalizar, a linha não era encontrada e o aagMontarTratamento
-      // CRIAVA outra. Era o "está puxando mais item" que ele viu.
-      var _id = (typeof aagId === 'function') ? aagId
-              : function(v){ return String(v == null ? '' : v).trim(); };
-      chaveAag[i.chave] = [_id(i.rc), _id(i.seq), _id(i.oport), _id(i.itemOp)].join('|');
+      tudo.push({ chave:i.chave, para:g.para, rc:i.rc, seq:i.seq,
+                  oport:i.oport, itemOp:i.itemOp });
     });
   });
   if (!confirm('Passar ' + tudo.length + ' item(ns) em aberto de ' + p.origem + ' para '
@@ -44901,15 +44941,27 @@ async function rdsAplicar(){
   }
   // e a RC em tratamento, de onde o Analista Completo tira o analista
   var tr = { ok:false, motivo:'não tentei' };
-  if (!erro) tr = await rdsAtualizarTratamento(tudo, chaveAag);
+  if (!erro) tr = await rdsAtualizarTratamento(tudo, p.origem);
   var recadoTrat = tr.ok
     ? '<div style="color:var(--vd);font-size:11px;margin-top:3px">✓ RC em tratamento '
       + 'atualizada: <strong>' + cpNum(tr.trocadas) + '</strong> analista(s) trocado(s)'
       + (tr.novas ? ' e <strong style="color:var(--am)">' + cpNum(tr.novas)
                     + '</strong> linha(s) nova(s)' : ', nenhuma linha nova')
-      + ' — de ' + cpNum(tr.antes) + ' para ' + cpNum(tr.total) + ' linhas. '
-      + '<a href="javascript:rdsBaixarTrat()" style="color:var(--az);font-weight:600">'
+      + ' — de ' + cpNum(tr.antes) + ' para ' + cpNum(tr.total) + ' linhas.'
+      + (tr.remontou ? ' O relatório do Analista Completo foi remontado com os nomes '
+                       + 'novos.' : '')
+      + ' <a href="javascript:rdsBaixarTrat()" style="color:var(--az);font-weight:600">'
       + '⬇ baixar a RC em tratamento</a></div>'
+      + (tr.sobrouN
+          ? '<div style="color:var(--vm);font-size:11px;margin-top:3px">⚠ Ainda sobram '
+            + '<strong>' + cpNum(tr.sobrouN) + '</strong> linha(s) no nome de '
+            + cpEsc(tr.origem) + ' na RC em tratamento: ' + cpEsc(tr.sobraram.join(' · '))
+            + (tr.sobrouN > tr.sobraram.length ? ' e mais ' + (tr.sobrouN - tr.sobraram.length)
+               : '')
+            + '. São itens que estão na tabela mas não apareceram na Governança desta '
+            + 'sessão — provavelmente já concluídos ou fora do Radar de hoje.</div>'
+          : '<div style="color:var(--vd);font-size:11px;margin-top:3px">✓ Não sobrou nenhuma '
+            + 'linha no nome de ' + cpEsc(tr.origem) + ' na RC em tratamento.</div>')
     : '<div style="color:var(--am);font-size:11px;margin-top:3px">⚠ A RC em tratamento NÃO '
       + 'foi atualizada (' + cpEsc(tr.motivo) + '). Abra <strong>ADM › Analista Completo'
       + '</strong>, espere a tabela guardada carregar e aplique de novo — senão amanhã o '
