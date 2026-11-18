@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '17/11 15:00';
+var GTO_BUILD = '17/11 18:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -44782,14 +44782,66 @@ function rdsAbrir(){
   rdsRender('');
 }
 
+// ── A RC EM TRATAMENTO ANDA JUNTO (17/11) ───────────────────────
+//
+// "Agora como eu vou tirar a RC em tratamento atualizada, para eu subir
+// no Montar base amanhã com os dados corretos?"
+//
+// Não precisa tirar nada: a RC em tratamento já mora no dash (o
+// Analista Completo guarda ela no Firebase). O que faltava era a
+// redistribuição chegar até lá — ela mexia só no analista da
+// Governança, e o Analista Completo continuava com o nome antigo.
+//
+// Agora a troca entra também nas escolhas do Analista Completo, que é
+// de onde a RC em tratamento é montada. Amanhã, no Montar tudo, os
+// nomes já saem certos sem upload nenhum.
+//
+// TRAVA: se a tabela guardada ainda não foi lida nesta sessão, eu NÃO
+// gravo. aagMontarTratamento começaria uma tabela do zero e o
+// aagGuardar apagaria o acumulado dele — seria trocar um problema por
+// um estrago.
+async function rdsAtualizarTratamento(tudo, porChave){
+  var r = { ok:false, motivo:'', novas:0, trocadas:0, total:0 };
+  try {
+    if (typeof aagCarregarGuardadas !== 'function'
+        || typeof aagMontarTratamento !== 'function') {
+      r.motivo = 'o Analista Completo não está nesta tela'; return r;
+    }
+    if (!_aagArq.trat) { try { await aagCarregarGuardadas(); } catch (e) {} }
+    if (!_aagArq.trat || !(_aagArq.trat.linhas || []).length) {
+      r.motivo = 'a RC em tratamento guardada não abriu — não vou gravar por cima dela';
+      return r;
+    }
+    try { await aagCarregarEscolhas(); } catch (e) {}
+    tudo.forEach(function(t){
+      var k = porChave[t.chave];
+      if (k) _aagEscolhas[k] = t.para;
+    });
+    var m = aagMontarTratamento();
+    _aagArq.trat = { nome:'RC em tratamento (atualizada na redistribuição)', cab:m.cab,
+                     linhas:m.linhas, guardado:true };
+    await aagGuardar('trat');
+    _aagEscolhas = {};
+    try { await aagSalvarEscolhas(); } catch (e) {}
+    r.ok = true; r.novas = m.novas; r.trocadas = m.trocadas; r.total = m.linhas.length;
+  } catch (e) { r.motivo = e.message || 'erro ao gravar'; }
+  return r;
+}
+
 // Grava a troca na mesma coleção que a edição linha a linha usa.
 async function rdsAplicar(){
   var p = _rdsPlano;
   var st = document.getElementById('rds-status');
   if (!p || !p.totalGrupos) return;
-  var tudo = [];
+  var tudo = [], chaveAag = {};
   p.grupos.forEach(function(g){
-    g.itens.forEach(function(i){ tudo.push({ chave:i.chave, para:g.para }); });
+    g.itens.forEach(function(i){
+      tudo.push({ chave:i.chave, para:g.para });
+      // a chave do Analista Completo tem o item da oportunidade a mais
+      chaveAag[i.chave] = [String(i.rc || '').trim(), String(i.seq || '').trim(),
+                           String(i.oport || '').trim(),
+                           String(i.itemOp || '').trim()].join('|');
+    });
   });
   if (!confirm('Passar ' + tudo.length + ' item(ns) em aberto de ' + p.origem + ' para '
       + p.destinos.join(' e ') + '?\n\nOs concluídos não são tocados.')) return;
@@ -44821,15 +44873,28 @@ async function rdsAplicar(){
         + cpEsc(p.destinos.join(' e ')) + (db ? '.' : ' (só nesta sessão — base fora do ar).')
         + '</span>';
   }
+  // e a RC em tratamento, de onde o Analista Completo tira o analista
+  var tr = { ok:false, motivo:'não tentei' };
+  if (!erro) tr = await rdsAtualizarTratamento(tudo, chaveAag);
+  var recadoTrat = tr.ok
+    ? '<div style="color:var(--vd);font-size:11px;margin-top:3px">✓ RC em tratamento '
+      + 'atualizada no dash: ' + cpNum(tr.trocadas) + ' analista(s) trocado(s), '
+      + cpNum(tr.total) + ' linha(s) no total. Amanhã o Montar tudo já sai com os nomes '
+      + 'novos, sem upload.</div>'
+    : '<div style="color:var(--am);font-size:11px;margin-top:3px">⚠ A RC em tratamento NÃO '
+      + 'foi atualizada (' + cpEsc(tr.motivo) + '). Abra <strong>ADM › Analista Completo'
+      + '</strong>, espere a tabela guardada carregar e aplique de novo — senão amanhã o '
+      + 'Analista Automático volta com o nome antigo.</div>';
   try {
     if (typeof govRenderMapa === 'function') govRenderMapa(govListaGovernanca());
     if (typeof govPainelRender === 'function') govPainelRender();
   } catch (e) {}
   _rdsPlano = rdsMontarPlano(p.origem, p.destinos);
   rdsRender('');
+  // o status final é escrito DEPOIS do redesenho, senão ele some junto
   var st2 = document.getElementById('rds-status');
   if (st2 && !erro) st2.innerHTML = '<span style="color:var(--vd)">✓ ' + gravados
-    + ' item(ns) passaram para ' + cpEsc(p.destinos.join(' e ')) + '.</span>';
+    + ' item(ns) passaram para ' + cpEsc(p.destinos.join(' e ')) + '.</span>' + recadoTrat;
 }
 
 function rdsBaixar(){
