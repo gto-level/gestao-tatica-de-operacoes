@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/11 09:50';
+var GTO_BUILD = '19/11 11:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -7009,7 +7009,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
            tudo respondendo a UM filtro só: a combinação de STATUS DO
            MAPA. Cada card abre a lista das RCs que o formam. -->
       <div id="gov-main-content-saude" style="display:none">
-        <div class="cd" style="margin-bottom:1rem;border-top:3px solid var(--azm)">
+        <!-- position/z-index: o dropdown da combinação sai para fora deste
+             cartão. Sem levantar o cartão inteiro, os cards de baixo (que
+             são position:relative) passavam por cima da lista. -->
+        <div class="cd" style="margin-bottom:1rem;border-top:3px solid var(--azm);position:relative;z-index:60">
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
             <div>
               <div class="cd-t" style="margin:0">📊 Saúde da carteira</div>
@@ -7035,9 +7038,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
                 Todos os status do mapa
               </div>
               <span style="pointer-events:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--tx2);font-size:12px">▾</span>
-              <div id="sc-combo-dd" style="display:none;position:absolute;top:calc(100% + 4px);left:0;min-width:380px;background:var(--card);border:1.5px solid var(--brd);border-radius:10px;box-shadow:0 8px 24px rgba(13,35,71,.18);z-index:999;padding:.625rem 0">
+              <div id="sc-combo-dd" style="display:none;position:absolute;top:calc(100% + 4px);left:0;width:max(100%,460px);background:var(--card);border:1.5px solid var(--azm);border-radius:10px;box-shadow:0 14px 38px rgba(13,35,71,.28);z-index:999;padding:.625rem 0">
                 <div style="padding:6px 14px 8px;border-bottom:1px solid var(--brd);display:flex;align-items:center;justify-content:space-between;gap:10px">
-                  <span style="font-size:10px;font-weight:700;color:var(--tx2);text-transform:uppercase;letter-spacing:.5px">Selecionar combinação</span>
+                  <span style="font-size:10px;font-weight:700;color:var(--tx2);text-transform:uppercase;letter-spacing:.5px">Selecionar combinação <span id="sc-combo-conta" style="color:var(--azm);margin-left:6px"></span></span>
                   <div style="display:flex;gap:8px">
                     <button type="button" onclick="scComboTodos()" style="font-size:10px;color:var(--azm);background:none;border:none;cursor:pointer;font-weight:700;padding:0">Todos</button>
                     <button type="button" onclick="scComboLimpar()" style="font-size:10px;color:var(--vm);background:none;border:none;cursor:pointer;font-weight:700;padding:0">Limpar</button>
@@ -75994,19 +75997,29 @@ function scDesenhar(){
       + 'line-height:1.6;border:1px solid ' + a.cor + ';background:' + a.fundo + ';color:var(--tx)">'
       + a.t + '</div>'; }).join('');
 
-  // topo: o total do recorte, com o seu próprio "+"
-  elT.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">'
+  // topo: o total do recorte e um card por status do mapa dentro dele
+  var nSt = 0;
+  elT.innerHTML = '<div class="cd" style="margin-bottom:0">'
+    + '<div class="cd-t" style="margin:0 0 .25rem">🗺 Status do Mapa no filtro</div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-bottom:.8rem">'
+    + 'Um card por status marcado na combinação, do maior para o menor. '
+    + 'O <strong>+</strong> abre as RCs daquele status.</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">'
     + scCardHTML({ k:'tudo', t:'Itens no filtro', ico:'🗂', cor:'var(--az)' }, total, total)
     + (function(){
-        // os três status mais pesados do recorte, para dar o tamanho da
-        // conta — cada um com o seu "+", como todo card desta aba
+        // Um card por status do mapa que está no filtro — TODOS, não só os
+        // maiores: quem marcou seis status quer ver os seis. Status marcado
+        // que hoje não tem item aparece zerado, senão some sem explicação.
         var c = {};
         rows.forEach(function(r){ var s = scStatusDe(r); c[s] = (c[s] || 0) + 1; });
-        return Object.keys(c).map(function(s){ return { s:s, n:c[s] }; })
-          .sort(function(a, b){ return b.n - a.n; }).slice(0, 3)
+        if (_scSel) _scSel.forEach(function(s){ if (c[s] == null) c[s] = 0; });
+        var ks = Object.keys(c);
+        nSt = ks.length;
+        return ks.map(function(s){ return { s:s, n:c[s] }; })
+          .sort(function(a, b){ return b.n - a.n || a.s.localeCompare(b.s); })
           .map(function(x){ return scCardHTML(scCorte('st:' + x.s), x.n, total); }).join('');
       })()
-    + '</div>';
+    + '</div></div>';
 
   scDesenharRosca(rows);
 
@@ -76103,22 +76116,41 @@ function scComboLista(){
   var el = document.getElementById('sc-combo-lista');
   if (!el) return;
   var pend = _scPend || [];
-  el.innerHTML = scStatusLista().map(function(x, i){
+  var lista = scStatusLista();
+  el.innerHTML = lista.map(function(x, i){
     var on = pend.indexOf(x.nome) !== -1;
-    return '<label style="display:flex;align-items:center;gap:9px;padding:5px 14px;cursor:pointer;'
-      + 'font-size:12px;color:var(--tx)">'
+    return '<label style="display:flex;align-items:center;gap:10px;padding:7px 14px;cursor:pointer;'
+      + 'font-size:12.5px;line-height:1.3;color:var(--tx);border-bottom:1px solid var(--brd);'
+      + 'background:' + (on ? 'var(--azc)' : 'transparent') + '">'
       + '<input type="checkbox" data-sc-st="' + i + '"' + (on ? ' checked' : '')
-      + ' onchange="scComboMarcar(' + scArg(x.nome) + ',this.checked)">'
-      + '<span style="flex:1">' + scEsc(x.nome) + '</span>'
-      + '<span style="font-size:11px;font-weight:700;color:var(--tx2)">' + scNum(x.n) + '</span>'
+      + ' onchange="scComboMarcar(' + scArg(x.nome) + ',this.checked,this)"'
+      + ' style="flex:0 0 auto;width:15px;height:15px;cursor:pointer">'
+      + '<span style="flex:1;font-weight:' + (on ? '700' : '500') + '">' + scEsc(x.nome) + '</span>'
+      + '<span style="font-size:12px;font-weight:800;color:var(--az);flex:0 0 auto;'
+      + 'min-width:46px;text-align:right">' + scNum(x.n) + '</span>'
       + '</label>';
   }).join('') || '<div style="padding:10px 14px;font-size:11.5px;color:var(--tx2)">'
     + 'O Radar está vazio — não há status do mapa para combinar.</div>';
+  var cnt = document.getElementById('sc-combo-conta');
+  if (cnt) cnt.textContent = lista.length
+    ? (pend.length + ' de ' + lista.length + ' marcados') : '';
 }
-function scComboMarcar(nome, on){
+function scComboMarcar(nome, on, el){
   if (!_scPend) _scPend = [];
   if (on) { if (_scPend.indexOf(nome) === -1) _scPend.push(nome); }
   else _scPend = _scPend.filter(function(x){ return x !== nome; });
+  // sem redesenhar a lista inteira: a rolagem do André voltaria ao topo
+  // a cada clique, e marcar cinco status viraria uma caça ao item
+  try {
+    var lab = el && el.closest ? el.closest('label') : null;
+    if (lab) {
+      lab.style.background = on ? 'var(--azc)' : 'transparent';
+      var txt = lab.querySelector('span');
+      if (txt) txt.style.fontWeight = on ? '700' : '500';
+    }
+    var cnt = document.getElementById('sc-combo-conta');
+    if (cnt) cnt.textContent = _scPend.length + ' de ' + scStatusLista().length + ' marcados';
+  } catch (e) {}
 }
 function scComboTodos(){
   _scPend = scStatusLista().map(function(x){ return x.nome; });
