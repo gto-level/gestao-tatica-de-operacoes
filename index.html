@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '18/11 10:25';
+var GTO_BUILD = '19/11 09:50';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -6674,6 +6674,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         <button id="gov-main-tab-govnova" onclick="govMainTab('govnova',this)" style="padding:.6rem 1.4rem;font-size:13px;font-weight:700;border:none;background:none;cursor:pointer;color:var(--tx2);border-bottom:3px solid transparent;margin-bottom:-2px">🆕 Governança Nova</button>
         <button id="gov-main-tab-detpatec" onclick="govMainTab('detpatec',this)" style="padding:.6rem 1.4rem;font-size:13px;font-weight:700;border:none;background:none;cursor:pointer;color:var(--tx2);border-bottom:3px solid transparent;margin-bottom:-2px">📋 Detalhamento do Patec</button>
         <button id="gov-main-tab-urg" onclick="govMainTab('urg',this)" style="padding:.6rem 1.4rem;font-size:13px;font-weight:700;border:none;background:none;cursor:pointer;color:var(--tx2);border-bottom:3px solid transparent;margin-bottom:-2px">🚦 Urgência</button>
+        <button id="gov-main-tab-saude" onclick="govMainTab('saude',this)" style="padding:.6rem 1.4rem;font-size:13px;font-weight:700;border:none;background:none;cursor:pointer;color:var(--tx2);border-bottom:3px solid transparent;margin-bottom:-2px">📊 Saúde da Carteira</button>
       </div>
 
       <!-- ── ABA: COBRANÇA POR STATUS (exclusiva do módulo FAST) ── -->
@@ -7000,6 +7001,65 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         <div id="un-cards" style="margin-bottom:1rem"></div>
         <div id="un-detalhe"></div>
         <div id="un-rodape" style="font-size:10.5px;color:var(--tx2);line-height:1.7;margin-top:.9rem"></div>
+      </div>
+
+      <!-- ══ SAÚDE DA CARTEIRA ══════════════════════════════════════
+           Os mesmos recortes do Radar Estratégico (segmento, PATEC
+           obrigatório e urgência) e a rosca da saúde da carteira, mas
+           tudo respondendo a UM filtro só: a combinação de STATUS DO
+           MAPA. Cada card abre a lista das RCs que o formam. -->
+      <div id="gov-main-content-saude" style="display:none">
+        <div class="cd" style="margin-bottom:1rem;border-top:3px solid var(--azm)">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+            <div>
+              <div class="cd-t" style="margin:0">📊 Saúde da carteira</div>
+              <div style="font-size:11px;color:var(--tx2);margin-top:2px">
+                Tudo nesta aba — cards e rosca — sai do <strong>mapa do dia</strong> (o Radar),
+                recortado pela <strong>combinação de Status do Mapa</strong> escolhida aqui em cima.
+                Cada card abre as RCs que o formam no <strong>+</strong>.
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <span id="sc-fonte" style="font-size:11px;color:var(--tx2)"></span>
+              <button class="btn btn-s" style="font-size:11px" onclick="scRecarregar()">↻ Atualizar</button>
+              <button class="btn btn-s" style="font-size:11px" onclick="scBaixarTudo()">⬇ Exportar</button>
+            </div>
+          </div>
+
+          <!-- filtro de combinação -->
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:.875rem">
+            <div style="font-size:11px;font-weight:700;color:var(--tx2);text-transform:uppercase;letter-spacing:.8px;white-space:nowrap">🔀 Combinação · Status do Mapa</div>
+            <div style="position:relative;min-width:260px;max-width:420px;flex:1">
+              <div id="sc-combo-btn" onclick="scComboToggle()"
+                style="width:100%;font-size:12px;font-weight:500;padding:7px 36px 7px 12px;border:1.5px solid var(--brd);border-radius:8px;background:var(--card);color:var(--tx);cursor:pointer;user-select:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                Todos os status do mapa
+              </div>
+              <span style="pointer-events:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--tx2);font-size:12px">▾</span>
+              <div id="sc-combo-dd" style="display:none;position:absolute;top:calc(100% + 4px);left:0;min-width:380px;background:var(--card);border:1.5px solid var(--brd);border-radius:10px;box-shadow:0 8px 24px rgba(13,35,71,.18);z-index:999;padding:.625rem 0">
+                <div style="padding:6px 14px 8px;border-bottom:1px solid var(--brd);display:flex;align-items:center;justify-content:space-between;gap:10px">
+                  <span style="font-size:10px;font-weight:700;color:var(--tx2);text-transform:uppercase;letter-spacing:.5px">Selecionar combinação</span>
+                  <div style="display:flex;gap:8px">
+                    <button type="button" onclick="scComboTodos()" style="font-size:10px;color:var(--azm);background:none;border:none;cursor:pointer;font-weight:700;padding:0">Todos</button>
+                    <button type="button" onclick="scComboLimpar()" style="font-size:10px;color:var(--vm);background:none;border:none;cursor:pointer;font-weight:700;padding:0">Limpar</button>
+                  </div>
+                </div>
+                <div id="sc-combo-lista" style="padding:.4rem 0;max-height:280px;overflow-y:auto"></div>
+                <div style="padding:8px 14px 0;border-top:1px solid var(--brd)">
+                  <button type="button" onclick="scComboAplicar()" class="btn btn-p" style="width:100%;justify-content:center;font-size:12px;padding:7px">✓ Aplicar</button>
+                </div>
+              </div>
+            </div>
+            <div id="sc-badge" style="display:none;font-size:11px;padding:4px 10px;border-radius:6px;background:var(--azc);color:var(--azm);font-weight:700;border:1px solid rgba(26,74,138,.2)"></div>
+            <button type="button" id="sc-limpar" onclick="scComboTudo()" style="display:none;font-size:11px;padding:4px 10px;border-radius:6px;background:var(--vmc);color:var(--vm);border:1px solid rgba(217,64,64,.2);cursor:pointer;font-weight:700">✕ Ver a carteira inteira</button>
+          </div>
+          <div id="sc-aviso"></div>
+        </div>
+
+        <div id="sc-topo" style="margin-bottom:1rem"></div>
+        <div id="sc-saude" style="margin-bottom:1rem"></div>
+        <div id="sc-cards" style="margin-bottom:1rem"></div>
+        <div id="sc-detalhe"></div>
+        <div id="sc-rodape" style="font-size:10.5px;color:var(--tx2);line-height:1.7;margin-top:.9rem"></div>
       </div>
 
       <div id="gov-main-content-govnova" style="display:none">
@@ -39611,7 +39671,7 @@ function _govUrgPainelSync(){
 // vazio, parecendo tela quebrada em vez de tela que não é de lá.
 // A Urgência entrou na lista em 30/10 pelo mesmo motivo do Detalhamento:
 // ela lê o levelboard e o mapa do PATEC do ADLV, e no FAST abriria vazia.
-var GOV_ABAS_OCULTAS_FAST = ['gov', 'pc', 'sla', 'prazo', 'cobranca', 'detpatec', 'urg'];
+var GOV_ABAS_OCULTAS_FAST = ['gov', 'pc', 'sla', 'prazo', 'cobranca', 'detpatec', 'urg', 'saude'];
 
 // Abas cujo BOTÃO fica escondido em qualquer módulo. As telas continuam
 // inteiras e continuam sendo o destino do botão "abrir a tela" dos cards
@@ -39671,7 +39731,7 @@ function govMainTab(aba, btn){
     aba = 'gov'; btn = document.getElementById('gov-main-tab-gov');
   }
   // Alternar entre abas principais: Governança e Planilha Crítica
-  ['gov','pc','sla','prazo','cobranca','pedidos','govnova','detpatec','urg'].forEach(t => {
+  ['gov','pc','sla','prazo','cobranca','pedidos','govnova','detpatec','urg','saude'].forEach(t => {
     const content = document.getElementById('gov-main-content-'+t);
     const tabBtn  = document.getElementById('gov-main-tab-'+t);
     if(content) content.style.display = t===aba ? '' : 'none';
@@ -39688,6 +39748,7 @@ function govMainTab(aba, btn){
   if(aba==='govnova')  { govNovaRender(); _govUrgPainelSync(); }
   if(aba==='detpatec') { if (typeof dpAbrir === 'function') dpAbrir(); }
   if(aba==='urg')      { if (typeof unAbrir === 'function') unAbrir(); }
+  if(aba==='saude')    { if (typeof scAbrir === 'function') scAbrir(); }
   if(typeof _fcAgendarVarredura==='function') _fcAgendarVarredura();
 }
 
@@ -75633,6 +75694,509 @@ async function unAbrir(){
 async function unRecarregar(){
   _unIdx.lido = false; _unIdx.achou = false; _unIdx.mapa = {}; _unAberto = '';
   await unAbrir();
+}
+
+// ══════════════════════════════════════════════════════════════════
+// GOVERNANÇA › SAÚDE DA CARTEIRA
+//
+// Pedido do André em 19/11: uma aba ao lado da Urgência com os mesmos
+// recortes que o Radar Estratégico já mostra (segmento, PATEC
+// obrigatório e urgência) MAIS a rosca da saúde da carteira — e tudo
+// isso respondendo a um filtro de combinação de STATUS DO MAPA.
+//
+// Duas decisões que valem explicar:
+//
+// 1. As contas são COPIADAS do Radar Estratégico, linha por linha
+//    (mesma coluna, mesma comparação). Se as duas telas usassem regras
+//    próprias, o André teria dois números para a mesma pergunta — que é
+//    exatamente o erro que este projeto já pagou caro várias vezes.
+//
+// 2. A urgência aqui sai da coluna do Radar, como no Radar Estratégico.
+//    A aba 🚦 Urgência usa o levelboard (índice do Montar base), que é
+//    mais novo. Quando os dois discordam, o rodapé desta aba diz isso
+//    em vez de deixar o André descobrir sozinho.
+// ══════════════════════════════════════════════════════════════════
+var SC_MAX = 400;              // linhas desenhadas; o XLSX leva todas
+var SC_SEM_STATUS = '(sem status no mapa)';
+var _scSel = null;             // null = a carteira inteira
+var _scPend = null;            // a marcação dentro do dropdown, ainda não aplicada
+var _scAberto = '';            // chave do card aberto
+var _scChart = null;
+
+function scEsc(v){ return (typeof cpEsc === 'function') ? cpEsc(v) : String(v == null ? '' : v); }
+function scNum(v){ return (typeof cpNum === 'function') ? cpNum(v) : String(v); }
+// sem acento e em minúsculas — a mesma normalização do Radar Estratégico
+function scNormUrg(v){
+  return String(v == null ? '' : v).trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+function scStatusDe(r){ return String(r.analista_auto || '').trim() || SC_SEM_STATUS; }
+function scPrazo(r){ return Number(r.prazo_c || 0); }
+
+// ── a base ────────────────────────────────────────────────────────
+function scBase(){
+  return (typeof _radarDados !== 'undefined' && _radarDados) ? _radarDados : [];
+}
+// Todos os status do mapa que existem HOJE, com quantos itens cada um
+// tem — é a lista do filtro de combinação.
+function scStatusLista(){
+  var c = {};
+  scBase().forEach(function(r){ var s = scStatusDe(r); c[s] = (c[s] || 0) + 1; });
+  return Object.keys(c).map(function(s){ return { nome:s, n:c[s] }; })
+    .sort(function(a, b){ return b.n - a.n || a.nome.localeCompare(b.nome); });
+}
+// A carteira recortada pela combinação. Seleção vazia é diferente de
+// "sem seleção": vazia mostra zero (e a tela diz isso), null mostra tudo.
+function scRows(){
+  var base = scBase();
+  if (_scSel === null) return base;
+  var ok = {};
+  _scSel.forEach(function(s){ ok[s] = 1; });
+  return base.filter(function(r){ return !!ok[scStatusDe(r)]; });
+}
+
+// ── os cards ──────────────────────────────────────────────────────
+// Cada um traz o teste que o forma — é o MESMO teste usado para contar
+// e para listar as RCs no "+", então o número do card e o tamanho da
+// lista nunca podem divergir.
+var SC_CARDS = [
+  { g:'seg', k:'segop',   t:'Seg. Operacional',  ico:'⚙️', cor:'var(--tx)',
+    f:function(r){ return r.seguimento === 'Operacional'; } },
+  { g:'seg', k:'segcrit', t:'Seg. Crítico',      ico:'🔴', cor:'var(--tx)',
+    f:function(r){ return r.seguimento === 'Crítica'; } },
+  { g:'seg', k:'segpag',  t:'Página Amarela',    ico:'🟡', cor:'var(--tx)',
+    f:function(r){ return r.seguimento === 'Página amarela'; } },
+  { g:'seg', k:'segestr', t:'Seg. Estratégico',  ico:'🎯', cor:'var(--tx)',
+    f:function(r){ return r.seguimento === 'Estratégica'; } },
+  { g:'seg', k:'pobrig',  t:'PATEC Obrigatório', ico:'✅', cor:'var(--tx)',
+    f:function(r){ return r.patec_obrig === 'Sim'; } },
+  { g:'seg', k:'pnao',    t:'PATEC ID Não',      ico:'🚫', cor:'var(--tx)',
+    f:function(r){ return r.patec_obrig === 'Não'; } },
+
+  { g:'urg', k:'urgma',   t:'Urgência Muito Alta', ico:'🔴', cor:'var(--vm)',
+    f:function(r){ return scNormUrg(r.urgencia).indexOf('muito alt') !== -1; } },
+  { g:'urg', k:'urga',    t:'Urgência Alta',       ico:'🟠', cor:'var(--am)',
+    f:function(r){ var u = scNormUrg(r.urgencia); return u === 'alto' || u === 'alta'; } },
+  { g:'urg', k:'urgb',    t:'Urgência Baixa',      ico:'🟢', cor:'var(--vd)',
+    f:function(r){ var u = scNormUrg(r.urgencia); return u === 'baixo' || u === 'baixa'; } }
+];
+
+// A rosca: as três faixas de PRAZO, exatamente como o Radar Estratégico
+// as calcula (coluna PRAZO, col C do mapa).
+var SC_SAUDE = [
+  { k:'venc',  t:'Vencida (≥ 91 dias)',                  cor:'#D94040',
+    f:function(r){ return scPrazo(r) >= 91; } },
+  { k:'alert', t:'Próximo do vencimento (60–90 dias)',   cor:'#E87722',
+    f:function(r){ var v = scPrazo(r); return v >= 60 && v <= 90; } },
+  { k:'ok',    t:'Dentro do prazo (≤ 59 dias)',          cor:'#3A7D44',
+    f:function(r){ return scPrazo(r) <= 59; } }
+];
+
+function scCorte(k){
+  for (var i = 0; i < SC_CARDS.length; i++) if (SC_CARDS[i].k === k) return SC_CARDS[i];
+  for (var j = 0; j < SC_SAUDE.length; j++) if (SC_SAUDE[j].k === k) return SC_SAUDE[j];
+  if (k === 'tudo') return { k:'tudo', t:'Carteira filtrada', cor:'var(--azm)',
+                             f:function(){ return true; } };
+  // os cards dos status mais pesados do recorte — o nome vai na chave,
+  // para o "+" deles abrir a lista como qualquer outro card
+  if (String(k).indexOf('st:') === 0) {
+    var nome = String(k).slice(3);
+    return { k:k, t:nome, ico:'🗺', cor:'var(--az)',
+             f:function(r){ return scStatusDe(r) === nome; } };
+  }
+  return null;
+}
+function scItens(k){
+  var c = scCorte(k);
+  if (!c) return [];
+  return scRows().filter(c.f);
+}
+
+// ── o detalhe: as RCs que formam o card ───────────────────────────
+var SC_DET_COLS = [
+  { t:'RC',             v:function(r){ return r.rc; } },
+  { t:'SEQ',            v:function(r){ return r.seq; } },
+  { t:'Item da RC',     v:function(r){ return r.item_rc; } },
+  { t:'Nº Oportunidade',v:function(r){ return r.num_oport; } },
+  { t:'Item OP',        v:function(r){ return r.item_op; } },
+  { t:'Analista',       v:function(r){ return (r.analista === '#N/A') ? '' : r.analista; } },
+  { t:'Fila',           v:function(r){ return r.fila; } },
+  { t:'Status do Mapa', v:function(r){ return scStatusDe(r); } },
+  { t:'Segmento',       v:function(r){ return r.seguimento; } },
+  { t:'PATEC Obrig.',   v:function(r){ return r.patec_obrig; } },
+  { t:'Urgência',       v:function(r){ return r.urgencia; } },
+  { t:'SLA',            v:function(r){ return Number(r.sla || 0) || ''; } },
+  { t:'Prazo',          v:function(r){ return scPrazo(r) || ''; } },
+  { t:'Centro',         v:function(r){ return r.centro; } },
+  { t:'Status (GOV)',   v:function(r){ return r.status; } }
+];
+
+function scArg(s){
+  return "'" + String(s == null ? '' : s)
+    .replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')
+    .replace(/</g, '\\x3c') + "'";
+}
+function scVer(k){
+  _scAberto = (_scAberto === k) ? '' : k;
+  scDesenhar();
+  if (_scAberto) {
+    var el = document.getElementById('sc-detalhe');
+    if (el && el.scrollIntoView) el.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  }
+}
+function scFechar(){ _scAberto = ''; scDesenhar(); }
+
+// O "+" de cada card — é o que abre a lista das RCs daquele recorte
+function scMais(k){
+  var on = (_scAberto === k);
+  return '<button type="button" onclick="scVer(' + scArg(k) + ')"'
+    + ' title="' + (on ? 'Fechar a lista' : 'Ver as RCs deste card')
+    + '" style="position:absolute;top:6px;right:6px;width:22px;height:22px;line-height:1;'
+    + 'border-radius:50%;border:1.5px solid ' + (on ? 'var(--azm)' : 'var(--brd)')
+    + ';background:' + (on ? 'var(--azm)' : 'var(--card)')
+    + ';color:' + (on ? '#fff' : 'var(--azm)')
+    + ';cursor:pointer;font-size:13px;font-weight:800;padding:0">'
+    + (on ? '−' : '+') + '</button>';
+}
+
+function scCardHTML(c, n, total){
+  var pct = total ? Math.round(n / total * 100) : 0;
+  return '<div style="position:relative;background:var(--card);border-radius:10px;'
+    + 'padding:.875rem .75rem;text-align:center;border:1px solid var(--brd)'
+    + (_scAberto === c.k ? ';box-shadow:0 0 0 2px var(--azm)' : '') + '">'
+    + scMais(c.k)
+    + '<div style="font-size:16px;margin-bottom:4px">' + (c.ico || '') + '</div>'
+    + '<div style="font-size:10px;font-weight:700;color:var(--tx2);margin-bottom:4px;'
+    + 'line-height:1.3">' + scEsc(c.t) + '</div>'
+    + '<div style="font-size:22px;font-weight:700;color:' + c.cor + ';line-height:1">'
+    + scNum(n) + '</div>'
+    + '<div style="font-size:9.5px;color:var(--tx2);margin-top:3px">' + pct + '% do filtro</div>'
+    + '</div>';
+}
+
+// ── a rosca ───────────────────────────────────────────────────────
+function scDesenharRosca(rows){
+  var el = document.getElementById('sc-saude');
+  if (!el) return;
+  var n = {}, total = rows.length;
+  SC_SAUDE.forEach(function(f){ n[f.k] = rows.filter(f.f).length; });
+  var pct = function(x){ return total ? Math.round(x / total * 100) : 0; };
+
+  var legenda = SC_SAUDE.map(function(f){
+    return '<div style="position:relative;border:1px solid var(--brd);border-radius:9px;'
+      + 'padding:.6rem .75rem .6rem .8rem;background:var(--card)'
+      + (_scAberto === f.k ? ';box-shadow:0 0 0 2px var(--azm)' : '') + '">'
+      + scMais(f.k)
+      + '<div style="display:flex;align-items:center;gap:8px">'
+      + '<span style="width:12px;height:12px;border-radius:3px;background:' + f.cor
+      + ';flex:0 0 auto"></span>'
+      + '<span style="font-size:11.5px;font-weight:700;color:var(--tx)">' + scEsc(f.t) + '</span>'
+      + '</div>'
+      + '<div style="font-size:20px;font-weight:800;color:' + f.cor + ';margin-top:3px">'
+      + scNum(n[f.k]) + ' <span style="font-size:13px">(' + pct(n[f.k]) + '%)</span></div>'
+      + '</div>';
+  }).join('');
+
+  el.innerHTML = '<div class="cd">'
+    + '<div class="cd-t" style="margin:0 0 .25rem">📊 Saúde da carteira — validade da proposta</div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-bottom:.8rem">'
+    + 'Coluna <strong>PRAZO</strong> do mapa do dia, na mesma régua do Radar Estratégico. '
+    + 'Clique no <strong>+</strong> de cada faixa para ver as RCs.</div>'
+    + '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">'
+    +   '<div style="position:relative;width:190px;height:190px;flex:0 0 auto">'
+    +     '<canvas id="sc-rosca"></canvas>'
+    +     '<div style="position:absolute;inset:0;display:flex;flex-direction:column;'
+    +     'align-items:center;justify-content:center;pointer-events:none">'
+    +       '<div style="font-size:26px;font-weight:800;color:var(--az);line-height:1">'
+    +       scNum(total) + '</div>'
+    +       '<div style="font-size:10px;color:var(--tx2)">total</div>'
+    +     '</div>'
+    +   '</div>'
+    +   '<div style="flex:1;min-width:240px;display:grid;gap:8px">' + legenda + '</div>'
+    + '</div></div>';
+
+  try {
+    if (_scChart) { _scChart.destroy(); _scChart = null; }
+    var cv = document.getElementById('sc-rosca');
+    if (!cv || typeof Chart === 'undefined') return;
+    var vazio = total === 0;
+    _scChart = new Chart(cv, {
+      type:'doughnut',
+      data:{ datasets:[{
+        data: vazio ? [1] : SC_SAUDE.map(function(f){ return n[f.k]; }),
+        backgroundColor: vazio ? ['#e0e0e0'] : SC_SAUDE.map(function(f){ return f.cor; }),
+        borderWidth:2, borderColor:'#fff', hoverOffset:8 }] },
+      options:{ cutout:'68%', animation:{ duration:500 },
+        plugins:{ legend:{ display:false }, tooltip:{ callbacks:{ label:function(ctx){
+          if (vazio) return ' Sem dados';
+          return ' ' + SC_SAUDE[ctx.dataIndex].t + ': ' + ctx.parsed
+               + ' (' + pct(ctx.parsed) + '%)'; } } } } }
+    });
+  } catch (e) { console.warn('scDesenharRosca:', e); }
+}
+
+// ── a tela ────────────────────────────────────────────────────────
+function scDesenhar(){
+  var elT = document.getElementById('sc-topo');
+  var elC = document.getElementById('sc-cards');
+  if (!elT || !elC) return;
+  var base = scBase(), rows = scRows(), total = rows.length;
+  var lista = scStatusLista();
+
+  // cabeçalho: de que mapa saiu isto
+  var fonte = document.getElementById('sc-fonte');
+  if (fonte) {
+    var dt = '';
+    // a mesma procedência que o Detalhamento do Patec mostra: quando o
+    // Radar foi subido. Sem isso não dá para saber se o número é de hoje.
+    try {
+      if (typeof _radarTs !== 'undefined' && _radarTs)
+        dt = 'subido em ' + new Date(_radarTs).toLocaleString('pt-BR');
+    } catch (e) {}
+    fonte.innerHTML = base.length
+      ? ('mapa do dia com <b>' + scNum(base.length) + '</b> item(ns)'
+         + (dt ? ' · ' + scEsc(dt) : ''))
+      : 'Radar não carregado';
+  }
+
+  // o que está filtrado
+  var badge = document.getElementById('sc-badge');
+  var limpar = document.getElementById('sc-limpar');
+  var btn = document.getElementById('sc-combo-btn');
+  if (btn) {
+    btn.textContent = (_scSel === null) ? 'Todos os status do mapa'
+      : (!_scSel.length ? 'Nenhum status marcado'
+         : (_scSel.length === 1 ? _scSel[0] : _scSel.length + ' status selecionados'));
+  }
+  if (badge) {
+    if (_scSel === null) badge.style.display = 'none';
+    else {
+      badge.style.display = '';
+      badge.textContent = scNum(total) + ' de ' + scNum(base.length) + ' itens da carteira';
+    }
+  }
+  if (limpar) limpar.style.display = (_scSel === null) ? 'none' : '';
+
+  // avisos
+  var av = [];
+  if (!base.length) {
+    av.push({ cor:'var(--vm)', fundo:'var(--vmc)',
+      t:'✗ O Radar do PATEC está vazio — sem ele não há carteira para medir. '
+      + 'Suba o Radar do dia e volte aqui.' });
+  } else if (_scSel !== null && !_scSel.length) {
+    av.push({ cor:'var(--am)', fundo:'var(--amc)',
+      t:'⚠ Nenhum status do mapa está marcado, por isso tudo está zerado. '
+      + 'Marque ao menos um na combinação, ou clique em <strong>✕ Ver a carteira inteira</strong>.' });
+  }
+  var elA = document.getElementById('sc-aviso');
+  if (elA) elA.innerHTML = av.map(function(a){
+    return '<div style="margin-top:.75rem;padding:.6rem .875rem;border-radius:7px;font-size:11.5px;'
+      + 'line-height:1.6;border:1px solid ' + a.cor + ';background:' + a.fundo + ';color:var(--tx)">'
+      + a.t + '</div>'; }).join('');
+
+  // topo: o total do recorte, com o seu próprio "+"
+  elT.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">'
+    + scCardHTML({ k:'tudo', t:'Itens no filtro', ico:'🗂', cor:'var(--az)' }, total, total)
+    + (function(){
+        // os três status mais pesados do recorte, para dar o tamanho da
+        // conta — cada um com o seu "+", como todo card desta aba
+        var c = {};
+        rows.forEach(function(r){ var s = scStatusDe(r); c[s] = (c[s] || 0) + 1; });
+        return Object.keys(c).map(function(s){ return { s:s, n:c[s] }; })
+          .sort(function(a, b){ return b.n - a.n; }).slice(0, 3)
+          .map(function(x){ return scCardHTML(scCorte('st:' + x.s), x.n, total); }).join('');
+      })()
+    + '</div>';
+
+  scDesenharRosca(rows);
+
+  // os cards do Radar Estratégico, recortados
+  var bloco = function(titulo, sub, g){
+    return '<div class="cd" style="margin-bottom:1rem">'
+      + '<div class="cd-t" style="margin:0 0 .25rem">' + titulo + '</div>'
+      + '<div style="font-size:10.5px;color:var(--tx2);margin-bottom:.8rem">' + sub + '</div>'
+      + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">'
+      + SC_CARDS.filter(function(c){ return c.g === g; }).map(function(c){
+          return scCardHTML(c, rows.filter(c.f).length, total); }).join('')
+      + '</div></div>';
+  };
+  elC.innerHTML =
+      bloco('🏷 Segmento e PATEC',
+            'Colunas <strong>Seguimento</strong> e <strong>Patec Obrigatório</strong> do mapa — '
+            + 'as mesmas contas dos cards do Radar Estratégico.', 'seg')
+    + bloco('🚦 Urgência da necessidade',
+            'Coluna <strong>URGENCIA</strong> do mapa. A aba 🚦 Urgência usa o levelboard do '
+            + 'Montar base, que é mais novo — por isso os dois podem não bater.', 'urg');
+
+  scDesenharDetalhe();
+  scRodape(base, rows, lista);
+}
+
+function scDesenharDetalhe(){
+  var el = document.getElementById('sc-detalhe');
+  if (!el) return;
+  if (!_scAberto) { el.innerHTML = ''; return; }
+  var c = scCorte(_scAberto);
+  if (!c) { el.innerHTML = ''; return; }
+  var itens = scItens(_scAberto);
+  var corpo = itens.slice(0, SC_MAX).map(function(r){
+    return '<tr>' + SC_DET_COLS.map(function(col){
+      return '<td style="font-size:11px">' + scEsc(col.v(r)) + '</td>'; }).join('') + '</tr>';
+  }).join('');
+  el.innerHTML = '<div class="cd" style="border-top:3px solid ' + (c.cor || 'var(--azm)') + '">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">'
+    + '<div class="cd-t" style="margin:0">' + (c.ico ? c.ico + ' ' : '') + scEsc(c.t)
+    + ' <span style="font-weight:600;color:var(--tx2);font-size:12px">— '
+    + scNum(itens.length) + ' item(ns) no filtro de hoje</span></div>'
+    + '<div style="display:flex;gap:8px">'
+    + '<button class="btn btn-s" style="font-size:11px" onclick="scBaixarCorte(' + scArg(c.k)
+    + ')">⬇ XLSX</button>'
+    + '<button class="btn btn-s" style="font-size:11px" onclick="scFechar()">✕ Fechar</button>'
+    + '</div></div>'
+    + '<div class="tw" style="margin-top:.7rem;max-height:460px"><table><thead><tr>'
+    + SC_DET_COLS.map(function(col){ return '<th>' + col.t + '</th>'; }).join('')
+    + '</tr></thead><tbody>' + (corpo || '<tr><td colspan="' + SC_DET_COLS.length
+    + '" style="text-align:center;color:var(--tx2);padding:1.2rem">Nenhum item neste recorte.</td></tr>')
+    + '</tbody></table></div>'
+    + (itens.length > SC_MAX
+       ? '<div style="font-size:10.5px;color:var(--tx2);margin-top:.5rem">mostrando os '
+         + scNum(SC_MAX) + ' primeiros de ' + scNum(itens.length) + ' — o ⬇ XLSX leva todos</div>'
+       : '')
+    + '</div>';
+}
+
+// O rodapé conta o que NÃO entrou em card nenhum. Sem isso, somar os
+// cards e não chegar no total vira desconfiança da tela inteira.
+function scRodape(base, rows, lista){
+  var el = document.getElementById('sc-rodape');
+  if (!el) return;
+  var semSeg = rows.filter(function(r){ return !String(r.seguimento || '').trim(); }).length;
+  var semUrg = rows.filter(function(r){ return !scNormUrg(r.urgencia); }).length;
+  var semPat = rows.filter(function(r){ return !String(r.patec_obrig || '').trim(); }).length;
+  var semPrazo = rows.filter(function(r){ return !scPrazo(r); }).length;
+  var t = [];
+  t.push('A combinação lê <strong>' + scNum(lista.length) + '</strong> status do mapa diferentes '
+       + 'no Radar de hoje; o recorte atual tem <strong>' + scNum(rows.length) + '</strong> de '
+       + scNum(base.length) + ' itens.');
+  t.push('Fora dos cards de segmento: <strong>' + scNum(semSeg) + '</strong> sem Seguimento · '
+       + '<strong>' + scNum(semPat) + '</strong> sem Patec Obrigatório (#N/A e vazio não contam '
+       + 'nem como Sim nem como Não) · <strong>' + scNum(semUrg) + '</strong> sem urgência no mapa.');
+  t.push('Na rosca, item sem PRAZO preenchido (<strong>' + scNum(semPrazo) + '</strong>) cai em '
+       + '"dentro do prazo" — é a regra do Radar Estratégico, mantida aqui para os dois baterem.');
+  el.innerHTML = t.map(function(x){ return '<div>• ' + x + '</div>'; }).join('');
+}
+
+// ── o filtro de combinação ────────────────────────────────────────
+function scComboToggle(){
+  var dd = document.getElementById('sc-combo-dd');
+  if (!dd) return;
+  if (dd.style.display === 'none' || !dd.style.display) {
+    _scPend = (_scSel === null) ? scStatusLista().map(function(x){ return x.nome; })
+                                : _scSel.slice();
+    scComboLista();
+    // 'block' explícito: deixar vazio faz o próprio teste de aberto/fechado
+    // dar falso na segunda vez, e o botão nunca fecharia a lista
+    dd.style.display = 'block';
+  } else dd.style.display = 'none';
+}
+function scComboLista(){
+  var el = document.getElementById('sc-combo-lista');
+  if (!el) return;
+  var pend = _scPend || [];
+  el.innerHTML = scStatusLista().map(function(x, i){
+    var on = pend.indexOf(x.nome) !== -1;
+    return '<label style="display:flex;align-items:center;gap:9px;padding:5px 14px;cursor:pointer;'
+      + 'font-size:12px;color:var(--tx)">'
+      + '<input type="checkbox" data-sc-st="' + i + '"' + (on ? ' checked' : '')
+      + ' onchange="scComboMarcar(' + scArg(x.nome) + ',this.checked)">'
+      + '<span style="flex:1">' + scEsc(x.nome) + '</span>'
+      + '<span style="font-size:11px;font-weight:700;color:var(--tx2)">' + scNum(x.n) + '</span>'
+      + '</label>';
+  }).join('') || '<div style="padding:10px 14px;font-size:11.5px;color:var(--tx2)">'
+    + 'O Radar está vazio — não há status do mapa para combinar.</div>';
+}
+function scComboMarcar(nome, on){
+  if (!_scPend) _scPend = [];
+  if (on) { if (_scPend.indexOf(nome) === -1) _scPend.push(nome); }
+  else _scPend = _scPend.filter(function(x){ return x !== nome; });
+}
+function scComboTodos(){
+  _scPend = scStatusLista().map(function(x){ return x.nome; });
+  scComboLista();
+}
+function scComboLimpar(){ _scPend = []; scComboLista(); }
+function scComboAplicar(){
+  var todos = scStatusLista().map(function(x){ return x.nome; });
+  var sel = (_scPend || []).slice();
+  // marcou todos = a carteira inteira; assim o rótulo não mente
+  _scSel = (sel.length === todos.length && todos.length) ? null : sel;
+  var dd = document.getElementById('sc-combo-dd');
+  if (dd) dd.style.display = 'none';
+  _scAberto = '';
+  scDesenhar();
+}
+function scComboTudo(){
+  _scSel = null; _scPend = null; _scAberto = '';
+  var dd = document.getElementById('sc-combo-dd');
+  if (dd) dd.style.display = 'none';
+  scDesenhar();
+}
+
+// ── exportar ──────────────────────────────────────────────────────
+function scLinhasXls(itens){
+  return itens.map(function(r){
+    var o = {};
+    SC_DET_COLS.forEach(function(c){ o[c.t] = c.v(r); });
+    return o;
+  });
+}
+function scNomeAba(t){
+  return String(t).replace(/[\\\/\?\*\[\]:]/g, ' ').slice(0, 30) || 'Recorte';
+}
+function scBaixarCorte(k){
+  if (typeof XLSX === 'undefined') return;
+  var c = scCorte(k); if (!c) return;
+  var itens = scItens(k);
+  if (!itens.length) return;
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(scLinhasXls(itens)), scNomeAba(c.t));
+  XLSX.writeFile(wb, 'Saude_' + scNomeAba(c.t).replace(/\s+/g, '_') + '_'
+    + cpHojeISO().replace(/-/g, '') + '.xlsx');
+}
+// O arquivo inteiro: uma aba com o recorte e uma aba por card — é o
+// mesmo corte que está na tela, e a primeira aba diz qual filtro era.
+function scBaixarTudo(){
+  if (typeof XLSX === 'undefined') return;
+  var rows = scRows();
+  if (!rows.length) return;
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([{
+    'Filtro de combinação': (_scSel === null) ? 'Carteira inteira' : _scSel.join(' · '),
+    'Itens no filtro': rows.length,
+    'Itens na carteira': scBase().length,
+    'Gerado em': cpDataBR(cpHojeISO())
+  }]), 'Filtro');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(scLinhasXls(rows)), 'Tudo');
+  SC_SAUDE.concat(SC_CARDS).forEach(function(c){
+    var itens = rows.filter(c.f);
+    if (!itens.length) return;
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(scLinhasXls(itens)), scNomeAba(c.t));
+  });
+  XLSX.writeFile(wb, 'Saude_da_carteira_' + cpHojeISO().replace(/-/g, '') + '.xlsx');
+}
+
+// ── abrir / recarregar ────────────────────────────────────────────
+async function scAbrir(){
+  scDesenhar();
+  if (!scBase().length) {
+    try { if (typeof _govUrgGarantirDados === 'function') await _govUrgGarantirDados(); } catch (e) {}
+    scDesenhar();
+  }
+}
+async function scRecarregar(){
+  try { if (typeof fbCarregarRadar === 'function') await fbCarregarRadar(); } catch (e) {}
+  _scAberto = '';
+  scDesenhar();
 }
 
 </script>
