@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '21/11 00:20';
+var GTO_BUILD = '21/11 01:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -40751,8 +40751,36 @@ function _govDetLinhaFora(idx, rc, itemRc, campos, chaveGov){
   return o;
 }
 
+// As quatro caixas do Crítico × Urgente, cada uma abrindo a sua lista
+// no mesmo painel dos outros cards. A coluna "Por quê" vai junto: sem
+// ela o rótulo é uma afirmação que ninguém consegue conferir.
+function _govDetCU(){
+  var defs = {};
+  CU_CLASSES.forEach(function(c){
+    defs['cu_' + c.k] = {
+      t: c.ico + ' ' + c.t, aba:'',
+      sub: 'Regra: ' + c.regra + '. ' + c.acao
+         + ' Conta só a carteira de trabalho (' + CU_STATUS_MAPA.join(', ')
+         + ') e não obedece a filtro nenhum — é sempre a carteira inteira.',
+      extraCols:[{ t:'Por quê', k:'__cuPorque', st:'color:var(--tx2)' }],
+      lista: function(){
+        cuIxLimpar();
+        var ix = cuIxAtual();
+        return cuUniverso(typeof _radarDados !== 'undefined' ? _radarDados : [])
+          .filter(function(r){ return cuClassificar(r, ix) === c.k; })
+          .map(function(r){
+            var o = _govDetLinha(r);
+            o.__cuPorque = cuMotivo(r, ix);
+            return o;
+          });
+      }
+    };
+  });
+  return defs;
+}
+
 function _govDetDefs(){
-  return {
+  return Object.assign(_govDetCU(), {
     venc: {
       t:'⏰ Vencidos', aba:'vencido',
       sub:'Itens com a validade da proposta vencida, em PATEC Finalizado — a mesma conta da aba Vencido da Planilha Crítica.',
@@ -40861,7 +40889,7 @@ function _govDetDefs(){
       lista: agrListaVisivel,
       vazio:'Nenhum acionamento em tratativa — inclua a primeira RC aí em cima.'
     }
-  };
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -42165,6 +42193,32 @@ function _govPainelRenderInterno(){
       + esc(t) + '</span></div>';
   };
 
+  // ── acima de "Onde focar hoje": a prioridade do dia ──
+  //
+  // As mesmas quatro caixas da aba Saúde da Carteira, mas aqui elas NÃO
+  // obedecem a filtro nenhum: é sempre a carteira de trabalho inteira
+  // (Analisar PATEC Finalizado, PATEC Finalizado sem fornecedores
+  // aprovados e Analisar PATEC Cancelado), com as regras combinadas.
+  // Lá o André explora; aqui ele abre a tela e já vê o que atacar.
+  var blocoCU = '';
+  if (cuEhAdlv()) {
+    cuIxLimpar();
+    var nCU = cuContar(_radarDados || []);
+    var corCU = { cu:['var(--vm)','var(--vmc)'], cnu:['#E87722','#FDEDE3'],
+                  unc:['var(--am)','var(--amc)'], nn:['var(--tx2)','var(--cin)'] };
+    blocoCU = titulo('· Prioridade — crítico × urgente (' + nCU.total + ' na carteira de trabalho)')
+      + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+      + CU_CLASSES.map(function(c){
+          var q2 = nCU[c.k] || 0;
+          var pct = nCU.total ? Math.round(q2 / nCU.total * 100) : 0;
+          return cartao(q2 + ' <span style="font-size:12px">(' + pct + '%)</span>',
+            c.ico + ' ' + c.t, corCU[c.k][0], corCU[c.k][1],
+            "govPainelDetalhe('cu_" + c.k + "')",
+            c.regra + ' — ' + c.acao + ' Clique para ver a lista.');
+        }).join('')
+      + '</div>';
+  }
+
   var blocoCritica = titulo('· Onde focar hoje')
     + '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
     + cartao(pc.vencidos,  'Vencidos',       'var(--vm)',  'var(--vmc)', "govPainelDetalhe('venc')",   'Ver a lista aqui mesmo')
@@ -42236,6 +42290,7 @@ function _govPainelRenderInterno(){
   box.innerHTML = '<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:stretch;padding-right:20px">'
     + lateral
     + '<div style="flex:1 1 0;min-width:0;display:flex;flex-direction:column">'
+    + blocoCU
     + blocoCritica
     // margin-top:auto encosta o bloco no rodapé da coluna, alinhando
     // com a última linha da lateral (Tipo de Processo / Nova Reserva)
