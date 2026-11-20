@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '20/11 21:30';
+var GTO_BUILD = '20/11 23:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -60887,7 +60887,7 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   // urgente". A classificação é a do ADLV (card Vencidos + PRAZO + PID)
   // e vale para a situação de HOJE do item, não para a do dia da ação —
   // o mapa de ontem não fica guardado. Está escrito na aba.
-  var cuOk = (mod === 'adlv') && (typeof cuVencIdx === 'function')
+  var cuOk = (mod === 'adlv') && (typeof cuClassificar === 'function')
           && (typeof _radarDados !== 'undefined') && (_radarDados || []).length > 0;
   var ws3d = wb.addWorksheet('Crítico x Urgente', { views:[{ showGridLines:false }] });
   ws3d.columns = [{ width:26 }, { width:13 }, { width:13 }, { width:13 }, { width:13 },
@@ -60900,25 +60900,30 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
         : 'A classificação é do ADLV. No FAST as regras são outras — lá existe o contador de '
           + 'cobrança —, e repetir aqui o número do ADLV seria inventar dado.', 8);
   } else {
-    var cuIx = cuVencIdx();
-    // a classe de cada RC+item da carteira de hoje
+    // só a carteira de TRABALHO: Analisar PATEC Finalizado, PATEC
+    // Finalizado sem fornecedores aprovados e Analisar PATEC Cancelado.
+    // O resto do Radar está em abertura ou esperando o PATEC fechar.
+    var universo = cuUniverso(_radarDados || []);
     var classeDe = {};
-    (_radarDados || []).forEach(function(rr){
+    universo.forEach(function(rr){
       var rc = String(rr.rc || '').trim(); if (!rc) return;
       var k = rc + '|' + String(rr.seq || rr.item_rc || '').trim();
-      if (!classeDe[k]) classeDe[k] = cuClassificar(rr, cuIx);
+      if (!classeDe[k]) classeDe[k] = cuClassificar(rr);
       if (!classeDe[rc]) classeDe[rc] = classeDe[k];
     });
     var classeDaLinha = function(l){
       return classeDe[l.rc + '|' + l.item] || classeDe[l.rc] || 'fora';
     };
-    var carteira = cuContar(_radarDados || [], cuIx);
+    var carteira = cuContar(universo);
 
     _esfTitulo(ws3d, 'Crítico × Urgente — a equipe está trabalhando no que pesa?',
-      'Cada ação do período foi classificada pela situação ATUAL do item na carteira '
-      + '(crítico = está no card ⏰ Vencidos · urgente = proposta vencida, PRAZO ≥ 91, ou PID). '
-      + 'Compare a coluna "% do esforço" com o "% da carteira" logo abaixo: se a carteira tem 10% de '
-      + 'crítico e urgente e o esforço também tem 10%, a equipe está no lugar certo.', 8);
+      'A carteira de trabalho são os ' + carteira.total + ' itens em ' + CU_STATUS_MAPA.join(', ')
+      + ' — o resto do Radar (' + ((_radarDados || []).length - universo.length)
+      + ' linhas em abertura ou aguardando o PATEC fechar) fica de fora. '
+      + 'Cada ação do período foi classificada pela situação ATUAL do item '
+      + '(🔴 proposta vencida ou PID · 🟠 SLA ≥ ' + CU_SLA_ALTO + ' dias · 🟡 proposta a 60–90 dias). '
+      + 'Compare "% do esforço" com "% da carteira": se a carteira tem 10% de crítico e urgente e '
+      + 'o esforço também tem 10%, a equipe está no lugar certo.', 8);
 
     var L3d = 4;
     _esfCabecalho(ws3d, L3d, ['Classe', 'Ações', '% do esforço', 'RCs distintas',
@@ -60947,10 +60952,11 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     });
     var fora = porClasse['fora'] || 0;
     if (fora) {
-      _esfLinha(ws3d, L3d, ['(item não está na carteira de hoje)', fora,
+      _esfLinha(ws3d, L3d, ['(fora da carteira de trabalho)', fora,
         _esfPct(totalClass ? fora / totalClass : 0),
         Object.keys(rcsClasse['fora'] || {}).length, '—', '—', '—',
-        'Foi concluído ou saiu do mapa depois da ação — fica fora da comparação.'],
+        'Item já concluído, ou que está em outro status do mapa (abertura, aguardando o PATEC '
+        + 'fechar). Trabalho feito, mas fora desta comparação.'],
         { fill:ESF_C.GREY_L, wrap:true });
       ws3d.getCell(L3d, 8).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
       L3d++;
@@ -60961,20 +60967,25 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
 
     // por analista
     _esfCabecalho(ws3d, L3d, ['Analista', '🔴 Crít. e urg.', '🟠 Crít. não urg.',
-                              '🟡 Urg. não crít.', '⚪ Nem um nem outro', 'Fora da carteira',
-                              '% em crítico', 'Total de ações'], ESF_C.BLUE); L3d++;
+                              '🟡 Urg. não crít.', '⚪ Nem um nem outro',
+                              'Fora da carteira de trabalho', '% em crítico',
+                              'Total de ações'], ESF_C.BLUE); L3d++;
     pessoas.forEach(function(p, i){
       var ls = r.linhas.filter(function(l){ return l.quem === p.nome; });
       var c = { cu:0, cnu:0, unc:0, nn:0, fora:0 };
       ls.forEach(function(l){ c[classeDaLinha(l)]++; });
       var crit = c.cu + c.cnu;
+      // o % é sobre as ações DENTRO da carteira de trabalho — senão
+      // quem mexeu muito em item de abertura apareceria com % baixo
+      // por um motivo que não é o que se quer medir
+      var dentro = c.cu + c.cnu + c.unc + c.nn;
       _esfLinha(ws3d, L3d, [p.nome, c.cu, c.cnu, c.unc, c.nn, c.fora,
-        ls.length ? _esfPct(crit / ls.length) : '—', ls.length],
+        dentro ? _esfPct(crit / dentro) : '—', ls.length],
         { fill: i % 2 ? ESF_C.GREY_L : null });
-      if (ls.length) {
+      if (dentro) {
         var cel = ws3d.getCell(L3d, 7);
         cel.font = { name:'Calibri', size:10, bold:true,
-          color:{ argb: (crit / ls.length) >= 0.5 ? ESF_C.GREEN : ESF_C.GREY_TXT } };
+          color:{ argb: (crit / dentro) >= 0.5 ? ESF_C.GREEN : ESF_C.GREY_TXT } };
       }
       L3d++;
     });
@@ -77031,41 +77042,68 @@ async function unRecarregar(){
 // CRÍTICO × URGENTE  (ADLV)
 //
 // Classificação que o André mandou para a equipe em 20/11, para a
-// priorização do dia a dia. Duas perguntas, nessa ordem:
+// priorização do dia a dia. Três informações do mapa decidem tudo:
 //
-//   CRÍTICO? → o item está no card ⏰ Vencidos da Governança.
-//              Foi a régua que ele escolheu para "SLA alto" no ADLV.
-//   URGENTE? → proposta VENCIDA (PRAZO ≥ 91 dias) ou item PID.
+//   PROPOSTA → o PRAZO da OP: ≥ 91 dias vencida · 60 a 90 próxima do
+//              vencimento · até 59 dentro do prazo;
+//   SLA      → dias de casa do item: alto a partir de 90 (a mesma
+//              régua do Top SLA e da coluna SLA dos Acionamentos);
+//   PID      → a coluna PID do mapa.
 //
-//   proposta PRÓXIMA do vencimento = PRAZO entre 60 e 90 dias.
+// As quatro caixas saem de uma escada, não de um cruzamento (veja
+// cuClassificar). Toda linha da carteira cai em exatamente uma — não
+// existe item sem classificação, senão a conta não fecha com o total.
 //
-// O cruzamento das duas dá as quatro caixas da mensagem dele. Toda
-// linha da carteira cai em exatamente uma — não existe item sem
-// classificação, senão a conta não fecha com o total.
-//
-// Duas coisas que ele definiu e que valem estar escritas aqui:
+// O que ele definiu e vale estar escrito aqui:
 //   · "com cobrança" NÃO entra: o contador de cobrança só existe no
 //     FAST, e esta classificação é só do ADLV;
-//   · "Parada" NÃO entra: ficou só o PID.
+//   · "Parada" NÃO entra: ficou só o PID;
+//   · o card ⏰ Vencidos chegou a ser a régua de "SLA alto" numa
+//     primeira versão; em 20/11 ele trocou pelo número de dias, e o
+//     card deixou de participar da conta.
 // ══════════════════════════════════════════════════════════════════
 var CU_CLASSES = [
   { k:'cu',  t:'Crítico e urgente',      ico:'🔴', cor:'var(--vm)',  fundo:'var(--vmc)',
-    regra:'está no card ⏰ Vencidos E (proposta vencida ou PID)',
+    regra:'proposta vencida (PRAZO ≥ 91 dias) ou PID',
     acao:'Prioridade máxima: atuar imediatamente para regularizar e evitar impacto na operação.' },
   { k:'cnu', t:'Crítico, não urgente',   ico:'🟠', cor:'#E87722',    fundo:'#FDEDE3',
-    regra:'está no card ⏰ Vencidos, mas a proposta ainda não venceu e não é PID',
+    regra:'SLA alto (≥ 90 dias) — a proposta ainda não venceu e não é PID',
     acao:'Antecipar o tratamento, acompanhar de perto e atuar antes de virar urgente.' },
   { k:'unc', t:'Urgente, não crítico',   ico:'🟡', cor:'var(--am)',  fundo:'var(--amc)',
-    regra:'não está no card Vencidos, mas a proposta venceu, está a 60–90 dias ou é PID',
+    regra:'SLA baixo e proposta próxima do vencimento (60–90 dias)',
     acao:'Manter o monitoramento e tratar dentro do prazo, para a proposta não vencer.' },
   { k:'nn',  t:'Nem crítico, nem urgente', ico:'⚪', cor:'var(--tx2)', fundo:'var(--cin)',
-    regra:'não está no card Vencidos, PRAZO até 59 dias e não é PID',
+    regra:'SLA baixo, PRAZO até 59 dias e não é PID',
     acao:'Podem ficar para um segundo momento, sem culpa — depois dos de maior risco.' }
 ];
 function cuClasse(k){
   for (var i = 0; i < CU_CLASSES.length; i++) if (CU_CLASSES[i].k === k) return CU_CLASSES[i];
   return CU_CLASSES[CU_CLASSES.length - 1];
 }
+
+// ── o universo: só o que é carteira de trabalho ──────────────────
+//
+// Correção do André em 20/11: "esses dados precisam ser apenas do
+// Analisar PATEC Finalizado, PATEC Cancelado e PATEC Finalizado sem
+// fornecedores aprovados (dados do mapa)".
+//
+// Sem isso a conta pegava o Radar inteiro — 3.194 linhas, a maior
+// parte em abertura ou aguardando o PATEC fechar. Item que ainda nem
+// chegou à mão da equipe não pode diluir a prioridade de quem já está.
+var CU_STATUS_MAPA = [
+  'Analisar PATEC Finalizado',
+  'PATEC Finalizado sem fornecedores aprovados',
+  'Analisar PATEC Cancelado'
+];
+function _cuNorm(v){
+  return String(v == null ? '' : v).trim().toUpperCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+}
+var _CU_STATUS_SET = CU_STATUS_MAPA.map(_cuNorm);
+function cuNoUniverso(r){
+  return _CU_STATUS_SET.indexOf(_cuNorm(r && r.analista_auto)) !== -1;
+}
+function cuUniverso(rows){ return (rows || []).filter(cuNoUniverso); }
 // A classificação é do ADLV. No FAST as regras são outras (lá existe o
 // contador de cobrança), e inventar número para o FAST seria pior do
 // que não mostrar.
@@ -77073,55 +77111,58 @@ function cuEhAdlv(){
   try { return String(_moduloAtivo || '').indexOf('fast') !== 0; } catch (e) { return true; }
 }
 
-// Índice do card ⏰ Vencidos por RC + item — é ele que diz quem é crítico
-function cuVencIdx(){
-  var ix = {};
-  try {
-    (_govPcLista('venc') || []).forEach(function(r){
-      var rc = String(r.rc || '').trim(); if (!rc) return;
-      ix[rc + '|' + String(r.seq || r.item_rc || '').trim()] = 1;
-      ix[rc] = ix[rc] || 1;   // fallback pela RC, para o item escrito diferente
-    });
-  } catch (e) {}
-  return ix;
-}
-function cuEhCritico(r, ix){
-  var rc = String(r.rc || '').trim();
-  if (!rc) return false;
-  var k = rc + '|' + String(r.seq || r.item_rc || '').trim();
-  return !!(ix[k] || ix[rc]);
-}
-function cuEhPid(r){ return String(r.pid || '').trim() !== ''; }
-function cuPrazo(r){ return Number(r.prazo_c || 0); }
+// SLA alto: 90 dias ou mais. É a mesma régua do Top SLA e da coluna SLA
+// do card Acionamentos (até 89 verde, 90–149 amarelo, 150+ vermelho), que
+// o André escolheu em 20/11 para separar o 🟠 do 🟡.
+var CU_SLA_ALTO = 90;
+function cuSla(r){ return Number(r && r.sla) || 0; }
+function cuSlaAlto(r){ return cuSla(r) >= CU_SLA_ALTO; }
+function cuEhPid(r){ return String(r && r.pid || '').trim() !== ''; }
+function cuPrazo(r){ return Number(r && r.prazo_c) || 0; }
 function cuVencida(r){ return cuPrazo(r) >= 91; }
 function cuProxima(r){ var v = cuPrazo(r); return v >= 60 && v <= 90; }
 
-function cuClassificar(r, ix){
-  ix = ix || cuVencIdx();
-  var critico = cuEhCritico(r, ix);
-  var urgente = cuVencida(r) || cuEhPid(r);
-  if (critico && urgente) return 'cu';
-  if (critico) return 'cnu';
-  if (urgente || cuProxima(r)) return 'unc';
+// A escada, na ordem que ele ditou. Primeira que casar vale — é o que
+// garante que cada item caia em UMA caixa só e que as quatro fechem o
+// total, sem item órfão:
+//
+//   1. proposta vencida ou PID        → 🔴 tem de ser atacado hoje
+//   2. SLA alto (≥ 90 dias)           → 🟠 crítico, mas ainda dá tempo
+//   3. proposta próxima (60–90 dias)  → 🟡 urgente, não crítico
+//   4. o resto                        → ⚪ pode esperar
+//
+// O passo 2 cobre também o SLA alto com prazo curto, que não estava na
+// mensagem dele: é crítico pelo tempo de casa, mesmo sem a proposta
+// perto de vencer.
+function cuClassificar(r){
+  if (cuVencida(r) || cuEhPid(r)) return 'cu';
+  if (cuSlaAlto(r))               return 'cnu';
+  if (cuProxima(r))               return 'unc';
   return 'nn';
 }
+
 // O porquê daquela linha, em uma frase — é o que a tabela mostra na
 // coluna "Por quê", para ninguém ter de confiar no rótulo sozinho.
-function cuMotivo(r, ix){
+function cuMotivo(r){
   var p = [];
-  if (cuEhCritico(r, ix)) p.push('no card Vencidos');
-  if (cuVencida(r)) p.push('proposta vencida (' + cuPrazo(r) + ' dias)');
-  else if (cuProxima(r)) p.push('próxima do vencimento (' + cuPrazo(r) + ' dias)');
-  else p.push('prazo ' + (cuPrazo(r) || '—') + ' dias');
+  if (cuVencida(r)) p.push('proposta vencida (PRAZO ' + cuPrazo(r) + ')');
+  else if (cuProxima(r)) p.push('próxima do vencimento (PRAZO ' + cuPrazo(r) + ')');
+  else p.push('PRAZO ' + (cuPrazo(r) || '—'));
+  p.push('SLA ' + cuSla(r) + (cuSlaAlto(r) ? ' (alto)' : ''));
   if (cuEhPid(r)) p.push('PID');
   return p.join(' · ');
 }
 
 // Contagem por classe sobre um conjunto de linhas do Radar
-function cuContar(rows, ix){
-  ix = ix || cuVencIdx();
-  var o = { cu:0, cnu:0, unc:0, nn:0, total:0 };
-  (rows || []).forEach(function(r){ o[cuClassificar(r, ix)]++; o.total++; });
+// Conta só o universo de trabalho; "fora" diz quantas linhas ficaram
+// de fora, para a diferença com o total nunca ser um mistério.
+function cuContar(rows){
+  var o = { cu:0, cnu:0, unc:0, nn:0, total:0, fora:0, bruto:0 };
+  (rows || []).forEach(function(r){
+    o.bruto++;
+    if (!cuNoUniverso(r)) { o.fora++; return; }
+    o[cuClassificar(r)]++; o.total++;
+  });
   return o;
 }
 
@@ -77131,9 +77172,6 @@ var _scSel = null;             // null = a carteira inteira
 var _scPend = null;            // a marcação dentro do dropdown, ainda não aplicada
 var _scAberto = '';            // chave do card aberto
 var _scChart = null;
-// índice do card Vencidos, recalculado a cada desenho — serve às colunas
-// de Crítico × Urgente sem refazer a conta linha a linha
-var _scCuIx = null;
 
 function scEsc(v){ return (typeof cpEsc === 'function') ? cpEsc(v) : String(v == null ? '' : v); }
 function scNum(v){ return (typeof cpNum === 'function') ? cpNum(v) : String(v); }
@@ -77212,9 +77250,8 @@ function scCorte(k){
   // as quatro caixas do Crítico × Urgente
   if (String(k).indexOf('cu:') === 0) {
     var cl = cuClasse(String(k).slice(3));
-    var ixv = cuVencIdx();
     return { k:k, t:cl.ico + ' ' + cl.t, ico:cl.ico, cor:cl.cor,
-             f:function(r){ return cuClassificar(r, ixv) === cl.k; } };
+             f:function(r){ return cuNoUniverso(r) && cuClassificar(r) === cl.k; } };
   }
   // os cards dos status mais pesados do recorte — o nome vai na chave,
   // para o "+" deles abrir a lista como qualquer outro card
@@ -77242,10 +77279,10 @@ var SC_DET_COLS = [
   { t:'Fila',           v:function(r){ return r.fila; } },
   { t:'Status do Mapa', v:function(r){ return scStatusDe(r); } },
   { t:'Crítico × Urgente', v:function(r){
-      var c = cuClasse(cuClassificar(r, _scCuIx || (_scCuIx = cuVencIdx())));
+      var c = cuClasse(cuClassificar(r));
       return c.ico + ' ' + c.t; } },
   { t:'Por quê',        v:function(r){
-      return cuMotivo(r, _scCuIx || (_scCuIx = cuVencIdx())); } },
+      return cuMotivo(r); } },
   { t:'Segmento',       v:function(r){ return r.seguimento; } },
   { t:'PATEC Obrig.',   v:function(r){ return r.patec_obrig; } },
   { t:'Urgência',       v:function(r){ return r.urgencia; } },
@@ -77309,9 +77346,8 @@ function scDesenharCU(rows){
       + 'de cobrança —, e mostrar o número do ADLV aqui seria inventar dado.</div></div>';
     return;
   }
-  var ix = cuVencIdx();
-  var n = cuContar(rows, ix);
-  var total = rows.length;
+  var n = cuContar(rows);
+  var total = n.total;              // o universo, não o filtro inteiro
   var cards = CU_CLASSES.map(function(c){
     var q = n[c.k] || 0;
     var pct = total ? Math.round(q / total * 100) : 0;
@@ -77332,11 +77368,18 @@ function scDesenharCU(rows){
   el.innerHTML = '<div class="cd">'
     + '<div class="cd-t" style="margin:0 0 .25rem">🚦 Crítico × Urgente — onde o esforço tem de estar</div>'
     + '<div style="font-size:10.5px;color:var(--tx2);margin-bottom:.8rem">'
-    + '<strong>Crítico</strong> = o item está no card ⏰ Vencidos da Governança. '
-    + '<strong>Urgente</strong> = proposta vencida (PRAZO ≥ 91 dias) ou PID. '
-    + 'Proposta <strong>próxima</strong> do vencimento = PRAZO de 60 a 90 dias. '
-    + 'Cada item da carteira cai em uma caixa só, e as quatro somam o total do filtro. '
+    + 'Lido de cima para baixo, a primeira regra que casar vale: '
+    + '<strong>proposta vencida</strong> (PRAZO ≥ 91) ou <strong>PID</strong> → 🔴 · '
+    + '<strong>SLA alto</strong> (≥ ' + CU_SLA_ALTO + ' dias) → 🟠 · '
+    + '<strong>proposta próxima</strong> (PRAZO 60–90) → 🟡 · o resto → ⚪. '
     + 'Clique no <strong>+</strong> para ver as RCs.</div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-bottom:.8rem;padding:.5rem .7rem;'
+    + 'background:var(--cin);border-left:3px solid var(--azm);border-radius:4px">'
+    + 'Classificando <strong>' + scNum(n.total) + '</strong> item(ns): só entram os status do mapa '
+    + '<strong>' + CU_STATUS_MAPA.join('</strong>, <strong>') + '</strong>, que é a carteira de '
+    + 'trabalho da equipe. Os outros <strong>' + scNum(n.fora) + '</strong> do filtro ficam de fora '
+    + '— ainda estão em abertura ou aguardando o PATEC fechar, e diluiriam a prioridade de quem '
+    + 'já está na mão.</div>'
     + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">'
     + cards + '</div></div>';
 }
@@ -77408,7 +77451,6 @@ function scDesenhar(){
   var elC = document.getElementById('sc-cards');
   if (!elT || !elC) return;
   var base = scBase(), rows = scRows(), total = rows.length;
-  _scCuIx = cuVencIdx();
   var lista = scStatusLista();
 
   // cabeçalho: de que mapa saiu isto
@@ -77675,9 +77717,8 @@ function scBaixarTudo(){
     'Gerado em': cpDataBR(cpHojeISO())
   }]), 'Filtro');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(scLinhasXls(rows)), 'Tudo');
-  var cuIx = cuVencIdx();
   var cortesCU = cuEhAdlv() ? CU_CLASSES.map(function(c){
-    return { t:c.t, f:function(r){ return cuClassificar(r, cuIx) === c.k; } };
+    return { t:c.t, f:function(r){ return cuNoUniverso(r) && cuClassificar(r) === c.k; } };
   }) : [];
   cortesCU.concat(SC_SAUDE).concat(SC_CARDS).forEach(function(c){
     var itens = rows.filter(c.f);
