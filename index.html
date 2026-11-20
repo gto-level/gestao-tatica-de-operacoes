@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '20/11 23:40';
+var GTO_BUILD = '21/11 00:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -60887,6 +60887,7 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   // urgente". A classificação é a do ADLV (card Vencidos + PRAZO + PID)
   // e vale para a situação de HOJE do item, não para a do dia da ação —
   // o mapa de ontem não fica guardado. Está escrito na aba.
+  cuIxLimpar();
   var cuOk = (mod === 'adlv') && (typeof cuClassificar === 'function')
           && (typeof _radarDados !== 'undefined') && (_radarDados || []).length > 0;
   var ws3d = wb.addWorksheet('Crítico x Urgente', { views:[{ showGridLines:false }] });
@@ -60921,7 +60922,8 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
       + ' — o resto do Radar (' + ((_radarDados || []).length - universo.length)
       + ' linhas em abertura ou aguardando o PATEC fechar) fica de fora. '
       + 'Cada ação do período foi classificada pela situação ATUAL do item '
-      + '(🔴 proposta vencida ou PID · 🟠 SLA ≥ ' + CU_SLA_ALTO + ' dias · 🟡 proposta a 60–90 dias). '
+      + '(🔴 no card ⏰ Vencidos ou PID · 🟠 SLA da RC ≥ ' + CU_SLA_ALTO
+      + ' dias · 🟡 PRAZO da OP ≥ 60). '
       + 'Compare "% do esforço" com "% da carteira": se a carteira tem 10% de crítico e urgente e '
       + 'o esforço também tem 10%, a equipe está no lugar certo.', 8);
 
@@ -77042,35 +77044,28 @@ async function unRecarregar(){
 // CRÍTICO × URGENTE  (ADLV)
 //
 // Classificação que o André mandou para a equipe em 20/11, para a
-// priorização do dia a dia. Três informações do mapa decidem tudo:
-//
-//   PROPOSTA → o PRAZO da OP: ≥ 91 dias vencida · 60 a 90 próxima do
-//              vencimento · até 59 dentro do prazo;
-//   SLA      → dias de casa do item: alto a partir de 90 (a mesma
-//              régua do Top SLA e da coluna SLA dos Acionamentos);
-//   PID      → a coluna PID do mapa.
-//
-// As quatro caixas saem de uma escada, não de um cruzamento (veja
-// cuClassificar). Toda linha da carteira cai em exatamente uma — não
-// existe item sem classificação, senão a conta não fecha com o total.
+// priorização do dia a dia. As quatro caixas saem de uma escada, não
+// de um cruzamento (veja cuClassificar). Toda linha da carteira cai em
+// exatamente uma — não existe item sem classificação, senão a conta
+// não fecha com o total.
 //
 // O que ele definiu e vale estar escrito aqui:
 //   · "com cobrança" NÃO entra: o contador de cobrança só existe no
 //     FAST, e esta classificação é só do ADLV;
 //   · "Parada" NÃO entra: ficou só o PID;
-//   · o card ⏰ Vencidos chegou a ser a régua de "SLA alto" numa
-//     primeira versão; em 20/11 ele trocou pelo número de dias, e o
-//     card deixou de participar da conta.
+//   · proposta vencida é o card ⏰ Vencidos, e SÓ ele. O SLA da RC é
+//     outra informação, independente — foi a correção de 20/11, depois
+//     de eu ter usado o PRAZO da OP como vencimento.
 // ══════════════════════════════════════════════════════════════════
 var CU_CLASSES = [
   { k:'cu',  t:'Crítico e urgente',      ico:'🔴', cor:'var(--vm)',  fundo:'var(--vmc)',
-    regra:'proposta vencida (PRAZO ≥ 91 dias) ou PID',
+    regra:'está no card ⏰ Vencidos (proposta vencida) ou é PID',
     acao:'Prioridade máxima: atuar imediatamente para regularizar e evitar impacto na operação.' },
   { k:'cnu', t:'Crítico, não urgente',   ico:'🟠', cor:'#E87722',    fundo:'#FDEDE3',
-    regra:'SLA alto (≥ 90 dias) — a proposta ainda não venceu e não é PID',
+    regra:'SLA alto (≥ 90 dias) — não está no card Vencidos e não é PID',
     acao:'Antecipar o tratamento, acompanhar de perto e atuar antes de virar urgente.' },
   { k:'unc', t:'Urgente, não crítico',   ico:'🟡', cor:'var(--am)',  fundo:'var(--amc)',
-    regra:'SLA baixo e proposta próxima do vencimento (60–90 dias)',
+    regra:'SLA baixo e PRAZO de 60 dias ou mais (próxima do vencimento)',
     acao:'Manter o monitoramento e tratar dentro do prazo, para a proposta não vencer.' },
   { k:'nn',  t:'Nem crítico, nem urgente', ico:'⚪', cor:'var(--tx2)', fundo:'var(--cin)',
     regra:'SLA baixo, PRAZO até 59 dias e não é PID',
@@ -77111,43 +77106,84 @@ function cuEhAdlv(){
   try { return String(_moduloAtivo || '').indexOf('fast') !== 0; } catch (e) { return true; }
 }
 
-// SLA alto: 90 dias ou mais. É a mesma régua do Top SLA e da coluna SLA
-// do card Acionamentos (até 89 verde, 90–149 amarelo, 150+ vermelho), que
-// o André escolheu em 20/11 para separar o 🟠 do 🟡.
+// As três informações que decidem, e elas são INDEPENDENTES entre si —
+// foi a correção do André em 20/11: "SLA da RC não tem ligação com
+// proposta vencida".
+//
+//   PROPOSTA VENCIDA → o item está no card ⏰ Vencidos da Governança.
+//                      Esse card já tem a regra dele alinhada (validade
+//                      da proposta vencida, em PATEC Finalizado) e é a
+//                      única fonte disso aqui. O PRAZO da OP não decide
+//                      vencimento nenhum.
+//   SLA ALTO         → 90 dias ou mais de SLA da RC. Mesma régua do Top
+//                      SLA e da coluna SLA dos Acionamentos.
+//   PRÓXIMA          → PRAZO da OP entre 60 e 90 dias.
+//   PID              → a coluna PID do mapa.
 var CU_SLA_ALTO = 90;
 function cuSla(r){ return Number(r && r.sla) || 0; }
 function cuSlaAlto(r){ return cuSla(r) >= CU_SLA_ALTO; }
 function cuEhPid(r){ return String(r && r.pid || '').trim() !== ''; }
 function cuPrazo(r){ return Number(r && r.prazo_c) || 0; }
-function cuVencida(r){ return cuPrazo(r) >= 91; }
 function cuProxima(r){ var v = cuPrazo(r); return v >= 60 && v <= 90; }
+
+// Índice do card ⏰ Vencidos por RC + item. É a ÚNICA definição de
+// "proposta vencida" nesta tela — uma fonte só, a mesma que o card
+// mostra na Governança.
+function cuVencIdx(){
+  var ix = {};
+  try {
+    (_govPcLista('venc') || []).forEach(function(r){
+      var rc = String(r.rc || '').trim(); if (!rc) return;
+      ix[rc + '|' + String(r.seq || r.item_rc || '').trim()] = 1;
+      ix[rc] = 1;   // fallback pela RC, para o item escrito diferente
+    });
+  } catch (e) {}
+  return ix;
+}
+// O índice é caro (varre a Planilha Crítica inteira), e as colunas da
+// tabela chamam a classificação linha a linha. Então ele é montado uma
+// vez por desenho e guardado — quem redesenha chama cuIxLimpar() antes.
+var _cuIx = null;
+function cuIxAtual(){ return _cuIx || (_cuIx = cuVencIdx()); }
+function cuIxLimpar(){ _cuIx = null; }
+function cuVencida(r, ix){
+  if (!ix) ix = cuIxAtual();
+  var rc = String(r && r.rc || '').trim();
+  if (!rc) return false;
+  return !!(ix[rc + '|' + String(r.seq || r.item_rc || '').trim()] || ix[rc]);
+}
 
 // A escada, na ordem que ele ditou. Primeira que casar vale — é o que
 // garante que cada item caia em UMA caixa só e que as quatro fechem o
 // total, sem item órfão:
 //
-//   1. proposta vencida ou PID        → 🔴 tem de ser atacado hoje
+//   1. no card ⏰ Vencidos, ou PID    → 🔴 tem de ser atacado hoje
 //   2. SLA alto (≥ 90 dias)           → 🟠 crítico, mas ainda dá tempo
-//   3. proposta próxima (60–90 dias)  → 🟡 urgente, não crítico
+//   3. PRAZO de 60 dias ou mais       → 🟡 urgente, não crítico
 //   4. o resto                        → ⚪ pode esperar
 //
-// O passo 2 cobre também o SLA alto com prazo curto, que não estava na
-// mensagem dele: é crítico pelo tempo de casa, mesmo sem a proposta
-// perto de vencer.
-function cuClassificar(r){
-  if (cuVencida(r) || cuEhPid(r)) return 'cu';
-  if (cuSlaAlto(r))               return 'cnu';
-  if (cuProxima(r))               return 'unc';
+// Dois casos que não estavam na mensagem dele e precisavam de destino:
+//   · SLA alto com prazo curto cai no 🟠 — é crítico pelo tempo de casa;
+//   · PRAZO acima de 90 sem estar no card Vencidos cai no 🟡 junto com a
+//     faixa 60–90, porque passou do prazo e pede monitoramento, não a
+//     tranquilidade do ⚪.
+function cuClassificar(r, ix){
+  ix = ix || cuIxAtual();
+  if (cuVencida(r, ix) || cuEhPid(r)) return 'cu';
+  if (cuSlaAlto(r))                   return 'cnu';
+  if (cuPrazo(r) >= 60)               return 'unc';
   return 'nn';
 }
 
 // O porquê daquela linha, em uma frase — é o que a tabela mostra na
 // coluna "Por quê", para ninguém ter de confiar no rótulo sozinho.
-function cuMotivo(r){
+function cuMotivo(r, ix){
+  ix = ix || cuIxAtual();
   var p = [];
-  if (cuVencida(r)) p.push('proposta vencida (PRAZO ' + cuPrazo(r) + ')');
-  else if (cuProxima(r)) p.push('próxima do vencimento (PRAZO ' + cuPrazo(r) + ')');
-  else p.push('PRAZO ' + (cuPrazo(r) || '—'));
+  if (cuVencida(r, ix)) p.push('no card ⏰ Vencidos');
+  var pz = cuPrazo(r);
+  p.push(cuProxima(r) ? ('PRAZO ' + pz + ' — próxima do vencimento')
+                      : ('PRAZO ' + (pz || '—')));
   p.push('SLA ' + cuSla(r) + (cuSlaAlto(r) ? ' (alto)' : ''));
   if (cuEhPid(r)) p.push('PID');
   return p.join(' · ');
@@ -77156,12 +77192,13 @@ function cuMotivo(r){
 // Contagem por classe sobre um conjunto de linhas do Radar
 // Conta só o universo de trabalho; "fora" diz quantas linhas ficaram
 // de fora, para a diferença com o total nunca ser um mistério.
-function cuContar(rows){
+function cuContar(rows, ix){
+  ix = ix || cuVencIdx();
   var o = { cu:0, cnu:0, unc:0, nn:0, total:0, fora:0, bruto:0 };
   (rows || []).forEach(function(r){
     o.bruto++;
     if (!cuNoUniverso(r)) { o.fora++; return; }
-    o[cuClassificar(r)]++; o.total++;
+    o[cuClassificar(r, ix)]++; o.total++;
   });
   return o;
 }
@@ -77369,9 +77406,11 @@ function scDesenharCU(rows){
     + '<div class="cd-t" style="margin:0 0 .25rem">🚦 Crítico × Urgente — onde o esforço tem de estar</div>'
     + '<div style="font-size:10.5px;color:var(--tx2);margin-bottom:.8rem">'
     + 'Lido de cima para baixo, a primeira regra que casar vale: '
-    + '<strong>proposta vencida</strong> (PRAZO ≥ 91) ou <strong>PID</strong> → 🔴 · '
-    + '<strong>SLA alto</strong> (≥ ' + CU_SLA_ALTO + ' dias) → 🟠 · '
-    + '<strong>proposta próxima</strong> (PRAZO 60–90) → 🟡 · o resto → ⚪. '
+    + 'no <strong>card ⏰ Vencidos</strong> ou <strong>PID</strong> → 🔴 · '
+    + '<strong>SLA alto</strong> (≥ ' + CU_SLA_ALTO + ' dias de SLA da RC) → 🟠 · '
+    + '<strong>PRAZO da OP ≥ 60</strong> (próxima do vencimento) → 🟡 · o resto → ⚪. '
+    + 'Proposta vencida sai do card ⏰ Vencidos, que já tem a regra alinhada — '
+    + 'o SLA da RC é outra coisa e não decide vencimento. '
     + 'Clique no <strong>+</strong> para ver as RCs.</div>'
     + '<div style="font-size:10.5px;color:var(--tx2);margin-bottom:.8rem;padding:.5rem .7rem;'
     + 'background:var(--cin);border-left:3px solid var(--azm);border-radius:4px">'
@@ -77450,6 +77489,7 @@ function scDesenhar(){
   var elT = document.getElementById('sc-topo');
   var elC = document.getElementById('sc-cards');
   if (!elT || !elC) return;
+  cuIxLimpar();
   var base = scBase(), rows = scRows(), total = rows.length;
   var lista = scStatusLista();
 
@@ -77717,6 +77757,7 @@ function scBaixarTudo(){
     'Gerado em': cpDataBR(cpHojeISO())
   }]), 'Filtro');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(scLinhasXls(rows)), 'Tudo');
+  cuIxLimpar();
   var cortesCU = cuEhAdlv() ? CU_CLASSES.map(function(c){
     return { t:c.t, f:function(r){ return cuNoUniverso(r) && cuClassificar(r) === c.k; } };
   }) : [];
