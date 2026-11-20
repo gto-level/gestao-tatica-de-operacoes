@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '19/11 11:40';
+var GTO_BUILD = '20/11 21:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -5359,6 +5359,37 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
           </div>
         </div>
 
+        <!-- 4b) ESFORÇO DO TIME — o trabalho entre uma conclusão e outra -->
+        <div class="cd" style="margin-bottom:1rem;border-top:3px solid var(--azm)">
+          <div class="cd-t" style="margin:0 0 .2rem">💪 Esforço do time — o caminho até a conclusão</div>
+          <div style="font-size:11px;color:var(--tx2);margin-bottom:.875rem">
+            O relatório de cima conta as <strong>saídas</strong>. Este conta o que foi preciso para
+            chegar nelas: cada movimentação de fila (fornecedor, requisitante, MDG, validação,
+            parecerista) com o <strong>motivo</strong> de cada uma. Usa o mesmo período escolhido
+            ali em cima.
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px" class="ce-split">
+            <div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:.625rem;padding-bottom:6px;border-bottom:2px solid #1A4A8A22">
+                <span style="font-size:12px;font-weight:800;color:#1A4A8A">🟦 ADLV</span>
+                <button class="btn btn-s" style="font-size:11px" onclick="ceEsforcoBaixar('adlv')" title="Baixa o relatório completo de esforço do período">⬇ Relatório de esforço</button>
+                <button class="btn btn-s" style="font-size:11px" onclick="ceEsforcoCopiar('adlv')" title="Copia o resumo para colar no Teams">📋 Copiar</button>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px" id="ce-esf-adlv-cards"></div>
+              <div id="ce-esf-adlv-nota" style="font-size:10.5px;color:var(--tx2);margin-top:.6rem;line-height:1.6"></div>
+            </div>
+            <div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:.625rem;padding-bottom:6px;border-bottom:2px solid #C07A1222">
+                <span style="font-size:12px;font-weight:800;color:#C07A12">🟧 FAST</span>
+                <button class="btn btn-s" style="font-size:11px" onclick="ceEsforcoBaixar('fast')" title="Baixa o relatório completo de esforço do período">⬇ Relatório de esforço</button>
+                <button class="btn btn-s" style="font-size:11px" onclick="ceEsforcoCopiar('fast')" title="Copia o resumo para colar no Teams">📋 Copiar</button>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px" id="ce-esf-fast-cards"></div>
+              <div id="ce-esf-fast-nota" style="font-size:10.5px;color:var(--tx2);margin-top:.6rem;line-height:1.6"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- RESUMO DO DIA (mapa_diario) — logo acima do gráfico Programado × Realizado, a pedido -->
         <div class="cd" style="margin-bottom:1rem">
           <div class="cd-t" style="margin:0 0 .875rem">📊 Resumo do dia</div>
@@ -7062,6 +7093,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         </div>
 
         <div id="sc-topo" style="margin-bottom:1rem"></div>
+        <div id="sc-cu" style="margin-bottom:1rem"></div>
         <div id="sc-saude" style="margin-bottom:1rem"></div>
         <div id="sc-cards" style="margin-bottom:1rem"></div>
         <div id="sc-detalhe"></div>
@@ -55803,6 +55835,22 @@ function q18Consultar(valor){
       ✓ <span id="acao-selecao-texto">—</span>
     </div>
 
+    <!-- Motivo da movimentação de fila — Fornecedor, Requisitante, MDG,
+         Validação Thiago e Parecerista. É o que transforma "mandei para o
+         fornecedor" em "pedi prorrogação": sem isso o esforço da equipe
+         entre uma conclusão e outra não aparece em relatório nenhum. -->
+    <div id="acao-fila-motivo-box" style="display:none;background:var(--azc);border:1px solid rgba(26,74,138,.25);border-radius:10px;padding:.875rem;margin-bottom:.75rem">
+      <div id="acao-fila-motivo-titulo" style="font-size:11px;font-weight:700;color:var(--azm);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.4px">🎯 Motivo da movimentação</div>
+      <div style="font-size:11px;font-weight:600;color:var(--tx2);margin-bottom:4px">
+        <span id="acao-fila-motivo-rotulo">O que foi pedido</span> <span style="color:var(--vm)">*</span></div>
+      <select id="acao-fila-motivo" style="width:100%;font-size:13px;padding:7px 10px;border:1.5px solid var(--azm);border-radius:8px;background:#fff">
+        <option value="">— selecione —</option>
+      </select>
+      <div style="font-size:10px;color:var(--tx2);margin-top:5px">
+        É por aqui que o Relatório de Esforço mostra o trabalho feito até o item ser concluído.</div>
+    </div>
+
+
     <!-- Data da solicitação + Data de envio, lado a lado (padrão do FAST) -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:.75rem">
       <div>
@@ -55972,6 +56020,16 @@ function q18Consultar(valor){
           O prazo depende de quantos ajustes o NM tem — escolha antes de confirmar.
         </div>
         <div id="gnv-acao-sla-opcoes" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div>
+      </div>
+      <!-- Motivo da movimentação — mesma lista do ADLV, pela mesma chave de
+           fila. É o que alimenta o Relatório de Esforço. -->
+      <div id="gnv-fila-motivo-box" style="display:none;background:var(--azc);border:1px solid rgba(26,74,138,.25);border-radius:10px;padding:.8rem .85rem;margin-bottom:1rem">
+        <div id="gnv-fila-motivo-titulo" style="font-size:11px;font-weight:700;color:var(--azm);margin-bottom:.45rem;text-transform:uppercase;letter-spacing:.4px">🎯 Motivo da movimentação</div>
+        <div style="font-size:11px;font-weight:600;color:var(--tx2);margin-bottom:4px">
+          <span id="gnv-fila-motivo-rotulo">O que foi pedido</span> <span style="color:var(--vm)">*</span></div>
+        <select id="gnv-fila-motivo" style="width:100%;font-size:13px;padding:7px 10px;border:1.5px solid var(--azm);border-radius:8px;background:#fff">
+          <option value="">— selecione —</option>
+        </select>
       </div>
     </div>
 
@@ -58759,7 +58817,11 @@ async function ceCarregarModulo(mod, desdeForcado){
     snap.forEach(d=>{ const x=d.data(); if(x && !x.anulada) acoes.push(x); });
   }catch(e){ console.warn('ce acoes '+mod+':', e); _ceSetStatus(mod, '⚠ Erro ao ler produção do '+_ceModLabel(mod)); return; }
   try{
-    const desde10 = _ceISOmenosDias(hoje, 12);
+    // A janela do fechamento acompanha a das ações. Eram 12 dias, e isso
+    // bastava para os Alertas (5 dias úteis) — mas o relatório de esforço
+    // olha a medição inteira, e com 12 dias o one a one de fim de ciclo
+    // sairia sem metade dos dias.
+    const desde10 = desdeAcoes;
     const snap2 = await db.collection('fechamento_dia').where('data','>=',desde10).get();
     snap2.forEach(d=>{ const x=d.data(); if(x) fech.push(x); });
   }catch(e){ console.warn('ce fech '+mod+':', e); }
@@ -59332,10 +59394,43 @@ function _gtoReportData(mod){
   return rows;
 }
 
-function ceDesfechoBaixar(mod){
+// Garante a base do módulo antes de montar qualquer relatório.
+//
+// Era o buraco do FAST: o relatório lia _ceCache[mod], que só é
+// preenchido quando o painel daquela frente carrega. No FAST isso
+// depende de uma autenticação à parte — então quem clicava em
+// Relatório antes de o FAST conectar recebia um arquivo vazio, sem
+// nenhuma pista do motivo. Agora a base é buscada na hora, e o que
+// impede é dito com todas as letras.
+async function _ceGarantirBase(mod){
+  var faixa = _ceDesfechoRange(mod);
+  if (!_ceCache[mod] || faixa.de < _ceCache[mod].desde) {
+    try { await ceCarregarModulo(mod, faixa.de); } catch (e) { console.warn('_ceGarantirBase:', e); }
+  }
+  if (_ceCache[mod]) return { ok:true };
+  if (mod === 'fast') {
+    return { ok:false, msg:'Não consegui ler a base do FAST. O FAST é outro projeto do '
+      + 'Firebase e pede a sua senha uma vez por sessão — clique em "Conectar FAST" '
+      + 'no painel do FAST e tente de novo.' };
+  }
+  return { ok:false, msg:'Não consegui ler a base do ' + String(mod).toUpperCase()
+    + ' — recarregue a página (F5) e tente de novo.' };
+}
+
+async function ceDesfechoBaixar(mod){
   try {
+    var base = await _ceGarantirBase(mod);
+    if (!base.ok) { alert(base.msg); return; }
     var rows = _gtoReportData(mod);
-    if (!rows.length) { alert('Nenhum desfecho no período selecionado — ajuste as datas e filtre de novo.'); return; }
+    if (!rows.length) {
+      var fx = _ceDesfechoRange(mod);
+      var nAcoes = ((_ceCache[mod] || {}).acoes || []).length;
+      alert('Nenhum desfecho entre ' + fmtDt(fx.de) + ' e ' + fmtDt(fx.ate) + ' no '
+        + String(mod).toUpperCase() + '.\n\nA base tem ' + nAcoes + ' ação(ões) carregada(s) '
+        + 'nesse período — desfecho é só Pedido, Republicação, XGL, Devolução e Nova Reserva. '
+        + 'Para ver o trabalho de movimentação de fila, use o Relatório de Esforço.');
+      return;
+    }
     var faixa = _ceDesfechoRange(mod);
     var de = rows.reduce(function(m,r){ return r.data < m ? r.data : m; }, rows[0].data);
     var ate = rows.reduce(function(m,r){ return r.data > m ? r.data : m; }, rows[0].data);
@@ -59883,7 +59978,1075 @@ root._gtoBuildWorkbook=buildWorkbook;
 })(typeof window!=="undefined"?window:globalThis);
 
 
-function ceDesfechoCopiar(mod){
+// ══════════════════════════════════════════════════════════════════
+// RELATÓRIO DE ESFORÇO DO TIME
+//
+// Pedido do André em 20/11: "neste relatório a gente consegue monitorar
+// todas as saídas... porém para chegar nas saídas a gente tem todo um
+// trabalho de movimentações de filas (fornecedor, requisitante, MDG...)
+// que requer muito esforço e nem sempre é notado".
+//
+// O relatório de desfechos conta a LINHA DE CHEGADA. Este conta o
+// caminho: cada vez que alguém empurrou um item para frente, para qual
+// fila, por quê, e quantos empurrões foram precisos até o item sair.
+//
+// A fonte é a mesma dos desfechos — producao_acoes, já carregada em
+// _ceCache — então os dois relatórios nunca podem divergir: o que é
+// conclusão aqui é exatamente o que aparece lá.
+// ══════════════════════════════════════════════════════════════════
+
+// Nome amigável da fila, igual nas duas frentes. O ADLV grava
+// "VALIDAÇÃO DO THIAGO" e o FAST, "PARADA FORNECEDOR" — no relatório
+// os dois viram o mesmo rótulo, senão o total se parte em dois.
+var ESF_FILA_NOME = {
+  fornecedor:  'Fornecedor',
+  requisitante:'Requisitante',
+  mdg:         'MDG',
+  thiago:      'Validação Thiago',
+  parecerista: 'Parecerista'
+};
+// Filas que existem mas não pedem motivo — ficam com o nome que vieram
+var ESF_SAIDA_FILA = ['AG. TRATAMENTO', 'AG. AÇÃO'];
+
+function esfFilaRotulo(fila){
+  var k = filaMotivoChave(fila);
+  if (k) return ESF_FILA_NOME[k];
+  var t = String(fila || '').trim();
+  if (!t) return '(sem fila registrada)';
+  // AG. TRATAMENTO / AG. AÇÃO: o item voltou para a nossa mão
+  if (ESF_SAIDA_FILA.indexOf(t.toUpperCase()) !== -1) return 'Voltou para a nossa mão';
+  return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+}
+
+// Uma linha por AÇÃO — movimentação ou conclusão.
+function ceEsforcoLinhas(mod){
+  var cache = _ceCache[mod];
+  if (!cache) return [];
+  var faixa = _ceDesfechoRange(mod);
+  var out = [];
+  (cache.acoes || []).forEach(function(a){
+    if (!a || !a.data) return;
+    if (a.data < faixa.de || a.data > faixa.ate) return;
+    var conclusao = String(a.conclusao || '').trim();
+    var ehConc = !!CE_DESFECHOS[conclusao];
+    var fila = String(a.tratamento || '').trim();
+    var p = String(a.rcChave || '').split('|');
+    out.push({
+      data: a.data,
+      rc: String(a.rc || p[0] || '').trim(),
+      item: String(a.itemRc || p[1] || '').trim(),
+      oport: String(p[2] || '').trim(),
+      chave: String(a.rcChave || a.rc || '').trim(),
+      quem: String(a.colab || '').trim() || '(sem nome)',
+      tipo: String(a.tipo || '').trim(),
+      ehConclusao: ehConc,
+      conclusao: ehConc ? CE_DESFECHOS[conclusao] : '',
+      fila: fila,
+      filaRotulo: ehConc ? ('Concluído → ' + CE_DESFECHOS[conclusao]) : esfFilaRotulo(fila),
+      pedeMotivo: !ehConc && !!filaMotivoChave(fila),
+      motivo: String(a.motivoFila || '').trim(),
+      motivoConclusao: String(a.motivo || '').trim(),
+      obs: String(a.obs || '').trim(),
+      chamadoMdg: String(a.chamado_mdg || '').trim(),
+      ts: String(a.ts || '')
+    });
+  });
+  out.sort(function(x, y){
+    return x.data.localeCompare(y.data) || String(x.rc).localeCompare(String(y.rc))
+        || String(x.ts).localeCompare(String(y.ts));
+  });
+  return out;
+}
+
+// Os números do período, já na forma em que o relatório e os cards leem.
+function ceEsforcoResumo(mod){
+  var ls = ceEsforcoLinhas(mod);
+  var r = { linhas:ls, total:ls.length, mov:0, conc:0, semMotivo:0, comMotivo:0,
+            rcs:{}, rcsConc:{}, porQuem:{}, porFila:{}, porMotivo:{}, porDia:{},
+            dias:0 };
+  ls.forEach(function(l){
+    if (l.rc) r.rcs[l.rc] = 1;
+    if (l.ehConclusao) {
+      r.conc++;
+      if (l.rc) r.rcsConc[l.rc + '|' + l.item] = 1;
+    } else {
+      r.mov++;
+      if (l.pedeMotivo) { if (l.motivo) r.comMotivo++; else r.semMotivo++; }
+    }
+    var q = r.porQuem[l.quem] || (r.porQuem[l.quem] = { mov:0, conc:0, rcs:{} });
+    if (l.ehConclusao) q.conc++; else q.mov++;
+    if (l.rc) q.rcs[l.rc] = 1;
+
+    if (!l.ehConclusao) {
+      var f = r.porFila[l.filaRotulo] || (r.porFila[l.filaRotulo] = { n:0, motivos:{} });
+      f.n++;
+      var m = l.motivo || (l.pedeMotivo ? '(sem motivo registrado)' : '—');
+      f.motivos[m] = (f.motivos[m] || 0) + 1;
+      if (l.pedeMotivo) {
+        var k = l.filaRotulo + ' · ' + (l.motivo || '(sem motivo registrado)');
+        r.porMotivo[k] = (r.porMotivo[k] || 0) + 1;
+      }
+    }
+    var d = r.porDia[l.data] || (r.porDia[l.data] = { mov:0, conc:0 });
+    if (l.ehConclusao) d.conc++; else d.mov++;
+  });
+  r.nRcs = Object.keys(r.rcs).length;
+  r.nRcsConc = Object.keys(r.rcsConc).length;
+  r.dias = Object.keys(r.porDia).length;
+  // o número que o André quer mostrar: quantos empurrões por item que saiu
+  r.porConclusao = r.conc ? (r.mov / r.conc) : 0;
+  return r;
+}
+
+// A jornada de cada item: todas as ações daquela RC+item no período, em
+// ordem. É o que mostra, item a item, o tanto de trabalho até a saída.
+function ceEsforcoJornadas(mod){
+  var ls = ceEsforcoLinhas(mod);
+  var por = {};
+  ls.forEach(function(l){
+    var k = (l.rc || '?') + '|' + (l.item || '');
+    (por[k] = por[k] || []).push(l);
+  });
+  return Object.keys(por).map(function(k){
+    var acoes = por[k];
+    var fim = null;
+    acoes.forEach(function(a){ if (a.ehConclusao) fim = a; });
+    var mov = acoes.filter(function(a){ return !a.ehConclusao; });
+    var caminho = mov.map(function(a){
+      return a.filaRotulo + (a.motivo ? ' (' + a.motivo + ')' : '');
+    });
+    var p = k.split('|');
+    return {
+      rc: p[0], item: p[1],
+      oport: (acoes[0] || {}).oport || '',
+      movimentacoes: mov.length,
+      acoes: acoes.length,
+      primeira: acoes[0] ? acoes[0].data : '',
+      ultima: acoes[acoes.length - 1] ? acoes[acoes.length - 1].data : '',
+      dias: _esfDiasEntre(acoes[0] ? acoes[0].data : '', acoes[acoes.length - 1] ? acoes[acoes.length - 1].data : ''),
+      concluido: !!fim,
+      desfecho: fim ? fim.conclusao : '',
+      quemConcluiu: fim ? fim.quem : '',
+      pessoas: Object.keys(acoes.reduce(function(o, a){ o[a.quem] = 1; return o; }, {})),
+      caminho: caminho.join(' → ')
+    };
+  }).sort(function(a, b){
+    return b.movimentacoes - a.movimentacoes || String(a.rc).localeCompare(String(b.rc));
+  });
+}
+function _esfDiasEntre(a, b){
+  if (!a || !b) return 0;
+  var pa = a.split('-'), pb = b.split('-');
+  var da = new Date(+pa[0], (+pa[1]) - 1, +pa[2]), db = new Date(+pb[0], (+pb[1]) - 1, +pb[2]);
+  return Math.max(0, Math.round((db - da) / 86400000));
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════
+// FOCO NOS VENCIDOS (ADLV)
+//
+// Pedido do André em 20/11: "preciso monitorar o esforço do time sobre
+// o card de itens vencidos no ADLV... preciso saber se eles estão
+// atuando em itens que não é crítico para fazer número procurando
+// apenas os itens fáceis".
+//
+// A pergunta não é "quantas ações a pessoa fez" — é "ela encostou no
+// que estava difícil?". Então a conta é de COBERTURA, não de volume:
+//
+//   · os vencidos de hoje (o card ⏰ Vencidos da Governança) são a
+//     lista de dever de casa;
+//   · cada um é dividido pelo ANALISTA que o Radar aponta;
+//   · vencido que não recebeu nenhuma ação no período está PARADO, e
+//     aparece com nome, RC e há quantos dias ninguém encosta.
+//
+// O sinal de alerta cruza as duas coisas: muita ação no período e
+// pouca cobertura dos próprios vencidos é exatamente o padrão de quem
+// está fazendo número no fácil. O relatório mostra o número; a
+// conversa é dele.
+// ══════════════════════════════════════════════════════════════════
+var FOCO_ALERTA_COBERTURA = 0.5;   // cobriu menos da metade dos seus vencidos
+var FOCO_ALERTA_ACOES     = 10;    // e ainda assim trabalhou bastante no período
+
+function _focoN(v){ return String(v == null ? '' : v).trim(); }
+function _focoNome(v){
+  try { return (typeof cpNormNome === 'function') ? cpNormNome(v) : String(v || '').trim().toUpperCase(); }
+  catch (e) { return String(v || '').trim().toUpperCase(); }
+}
+function _focoDias(de, ate){
+  if (!de || !ate) return null;
+  var a = de.split('-'), b = ate.split('-');
+  return Math.max(0, Math.round(
+    (new Date(+b[0], (+b[1]) - 1, +b[2]) - new Date(+a[0], (+a[1]) - 1, +a[2])) / 86400000));
+}
+
+function ceVencidosFoco(mod){
+  var out = { ok:false, motivo:'', total:0, tocados:0, parados:0, cobertura:0,
+              acoesVenc:0, acoesTotal:0, pctEsforco:0, porPessoa:[], lista:[] };
+  if (mod !== 'adlv') {
+    out.motivo = 'O card ⏰ Vencidos é da Governança do ADLV. No FAST a régua é outra, '
+      + 'e repetir aqui o número do ADLV seria inventar dado.';
+    return out;
+  }
+  var cache = _ceCache[mod];
+  if (!cache) { out.motivo = 'Base do ADLV não carregada.'; return out; }
+  var venc = [];
+  try { venc = _govPcLista('venc') || []; } catch (e) {}
+  if (!venc.length) {
+    out.motivo = 'O card ⏰ Vencidos está vazio ou o Radar do ADLV não está carregado '
+      + 'nesta sessão. Abra a Governança do ADLV e gere o relatório de novo.';
+    return out;
+  }
+
+  var faixa = _ceDesfechoRange(mod);
+  var hoje = _ceHojeLocal();
+  var linhas = ceEsforcoLinhas(mod);
+
+  // quem tocou cada item NO PERÍODO
+  var tocou = {};
+  linhas.forEach(function(l){
+    var k = _focoN(l.rc) + '|' + _focoN(l.item);
+    (tocou[k] = tocou[k] || { n:0, quem:{} }).n++;
+    tocou[k].quem[l.quem] = 1;
+    var kr = _focoN(l.rc);
+    (tocou[kr] = tocou[kr] || { n:0, quem:{} }).n++;
+    tocou[kr].quem[l.quem] = 1;
+  });
+  // a ÚLTIMA ação de cada item em toda a janela carregada (não só no
+  // período): é ela que diz há quantos dias ninguém encosta
+  var ultima = {};
+  (cache.acoes || []).forEach(function(a){
+    if (!a || !a.data) return;
+    var p = String(a.rcChave || '').split('|');
+    var rc = _focoN(a.rc || p[0]);
+    if (!rc) return;
+    var k = rc + '|' + _focoN(a.itemRc || p[1]);
+    if (!ultima[k] || a.data > ultima[k].data) ultima[k] = { data:a.data, quem:_focoN(a.colab) };
+    if (!ultima[rc] || a.data > ultima[rc].data) ultima[rc] = { data:a.data, quem:_focoN(a.colab) };
+  });
+
+  var pessoas = {};
+  var daPessoa = function(nome){
+    var k = _focoNome(nome) || '(SEM ANALISTA)';
+    return pessoas[k] || (pessoas[k] = { nome: _focoN(nome) || '(sem analista no Radar)',
+      meus:0, tocados:0, parados:0, acoesVenc:0, acoesOutros:0 });
+  };
+
+  venc.forEach(function(r){
+    var rc = _focoN(r.rc), item = _focoN(r.seq || r.item_rc);
+    var k = rc + '|' + item;
+    var t = tocou[k] || tocou[rc] || null;
+    var u = ultima[k] || ultima[rc] || null;
+    var p = daPessoa(r.analista === '#N/A' ? '' : r.analista);
+    p.meus++;
+    if (t) { p.tocados++; out.tocados++; }
+    else   { p.parados++; out.parados++; }
+    out.total++;
+    out.lista.push({
+      rc: rc, item: item, oport: _focoN(r.num_oport),
+      analista: _focoN(r.analista === '#N/A' ? '' : r.analista) || '(sem analista)',
+      fila: _focoN(r.fila), sla: Number(r.sla) || 0, prazo: Number(r.prazo_c) || 0,
+      validade: _focoN(r.validade),
+      tocado: !!t, acoesNoPeriodo: t ? t.n : 0,
+      quemTocou: t ? Object.keys(t.quem).join(' · ') : '',
+      ultimaAcao: u ? u.data : '', quemUltima: u ? u.quem : '',
+      diasSemAcao: u ? _focoDias(u.data, hoje) : null
+    });
+  });
+
+  // esforço: quanto de cada pessoa foi para item vencido
+  var ehVenc = {};
+  venc.forEach(function(r){
+    var rc = _focoN(r.rc);
+    ehVenc[rc + '|' + _focoN(r.seq || r.item_rc)] = 1;
+    ehVenc[rc] = ehVenc[rc] || 1;
+  });
+  linhas.forEach(function(l){
+    var p = daPessoa(l.quem);
+    var k = _focoN(l.rc) + '|' + _focoN(l.item);
+    if (ehVenc[k] || ehVenc[_focoN(l.rc)]) { p.acoesVenc++; out.acoesVenc++; }
+    else p.acoesOutros++;
+    out.acoesTotal++;
+  });
+
+  out.cobertura  = out.total ? out.tocados / out.total : 0;
+  out.pctEsforco = out.acoesTotal ? out.acoesVenc / out.acoesTotal : 0;
+  out.porPessoa = Object.keys(pessoas).map(function(k){
+    var p = pessoas[k];
+    p.acoes = p.acoesVenc + p.acoesOutros;
+    p.cobertura = p.meus ? p.tocados / p.meus : null;
+    p.pctVenc = p.acoes ? p.acoesVenc / p.acoes : 0;
+    // o sinal: trabalhou bastante e deixou os próprios vencidos parados
+    p.alerta = !!(p.meus && p.cobertura < FOCO_ALERTA_COBERTURA
+                  && p.acoes >= FOCO_ALERTA_ACOES);
+    return p;
+  }).sort(function(a, b){
+    if (a.alerta !== b.alerta) return a.alerta ? -1 : 1;
+    return (a.cobertura == null ? 2 : a.cobertura) - (b.cobertura == null ? 2 : b.cobertura)
+        || b.meus - a.meus;
+  });
+  // os parados primeiro, e dentro deles os mais antigos
+  out.lista.sort(function(a, b){
+    if (a.tocado !== b.tocado) return a.tocado ? 1 : -1;
+    return (b.diasSemAcao == null ? 9999 : b.diasSemAcao)
+         - (a.diasSemAcao == null ? 9999 : a.diasSemAcao)
+         || b.sla - a.sla;
+  });
+  out.ok = true;
+  out.faixa = faixa;
+  return out;
+}
+
+// ── o one a one: cada pessoa, dia a dia ───────────────────────────
+//
+// Pedido do André em 20/11: "posso usar este relatório para fazer o one
+// on one a cada final de medição... preciso do esforço individual de
+// cada analista, com os dados de aproveitamento... como por exemplo os
+// dias que ele ficou abaixo da meta".
+//
+// Dois números convivem aqui, e é importante que não se misturem:
+//
+//   PRODUÇÃO DO DIA  → vem do FECHAMENTO DO DIA, o mesmo número que os
+//                      Alertas de Performance usam. É esse que responde
+//                      pela meta. Dia sem fechamento NÃO é dia ruim: é
+//                      dia sem registro, e aparece assim.
+//   AÇÕES            → vêm de producao_acoes. Uma RC pode receber três
+//                      ações no mesmo dia; por isso o número é outro e
+//                      serve para contar ESFORÇO, não para cobrar meta.
+var ESF_META_PADRAO = 30;
+// A mesma ordem do card de desfechos, para o André ler os dois relatórios
+// sem ter de reencontrar as colunas.
+var ESF_DESFECHOS = ['Pedido', 'Republicação', 'XGL', 'Devolução', 'Nova Reserva'];
+
+// A meta de cada um. O cadastro da equipe manda; sem meta cadastrada
+// vale o combinado de 30. A planilha sempre diz qual das duas valeu.
+function esfMetaDe(mod, nome){
+  try {
+    if (typeof _ceTemMeta === 'function' && !_ceTemMeta(mod, nome))
+      return { meta: ESF_META_PADRAO, fonte: 'referência (sem meta individual neste módulo)' };
+    if (typeof _ceMetaInd === 'function') {
+      var m = +_ceMetaInd(mod, nome) || 0;
+      if (m > 0) return { meta: m, fonte: 'cadastro da equipe' };
+    }
+  } catch (e) {}
+  return { meta: ESF_META_PADRAO, fonte: 'padrão combinado (30)' };
+}
+
+function esfDiasDoPeriodo(de, ate){
+  var out = [], p = String(de).split('-');
+  var d = new Date(+p[0], (+p[1]) - 1, +p[2]);
+  var fim = String(ate);
+  for (var g = 0; g < 400; g++) {
+    var iso = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+            + '-' + String(d.getDate()).padStart(2, '0');
+    if (iso > fim) break;
+    out.push(iso);
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+
+function ceEsforcoPessoas(mod){
+  var cache = _ceCache[mod];
+  if (!cache) return [];
+  var faixa = _ceDesfechoRange(mod);
+  var dias = esfDiasDoPeriodo(faixa.de, faixa.ate);
+  var uteis = dias.filter(function(d){
+    try { return _fdiaEhDiaUtil(d); } catch (e) { return true; }
+  });
+
+  // fechamento do dia, por pessoa
+  var fech = {};
+  (cache.fech || []).forEach(function(f){
+    if (!f || !f.data || f.data < faixa.de || f.data > faixa.ate) return;
+    fech[String(f.colab || '').trim() + '|' + f.data] = {
+      total: +f.total || 0,
+      folga: (f.presenca === 'Folga' || f.presenca === 'Férias'),
+      presenca: String(f.presenca || '')
+    };
+  });
+
+  // ações do período, por pessoa
+  var acoes = {};
+  ceEsforcoLinhas(mod).forEach(function(l){
+    (acoes[l.quem] = acoes[l.quem] || []).push(l);
+  });
+
+  // quem entra na lista: a equipe do módulo mais quem apareceu nos
+  // registros. Pessoa que não fez nada no período TEM de aparecer —
+  // é justamente a conversa que o one a one precisa ter.
+  var nomes = {};
+  try { (_ceColabs(mod) || []).forEach(function(n){ if (n) nomes[n] = 1; }); } catch (e) {}
+  Object.keys(acoes).forEach(function(n){ if (n && n !== '(sem nome)') nomes[n] = 1; });
+  Object.keys(fech).forEach(function(k){ var n = k.split('|')[0]; if (n) nomes[n] = 1; });
+
+  return Object.keys(nomes).map(function(nome){
+    var m = esfMetaDe(mod, nome);
+    var ls = acoes[nome] || [];
+    var p = {
+      nome: nome, meta: m.meta, metaFonte: m.fonte,
+      diasUteis: uteis.length,
+      trabalhados: 0, folgas: 0, semRegistro: 0,
+      producao: 0, diasAbaixo: [], diasAcima: 0, melhor: null, pior: null,
+      mov: 0, conc: 0, acoes: ls.length, rcs: {}, filas: {}, motivos: {}, desfechos: {},
+      linhaDia: []
+    };
+    uteis.forEach(function(d){
+      var f = fech[nome + '|' + d];
+      var nAcoes = ls.filter(function(l){ return l.data === d; }).length;
+      var sit, prod = null;
+      if (f && f.folga) { p.folgas++; sit = 'Folga/Férias'; }
+      else if (f) {
+        prod = f.total; p.trabalhados++; p.producao += prod;
+        if (prod < p.meta) { p.diasAbaixo.push({ data:d, prod:prod, falta: p.meta - prod }); sit = 'Abaixo da meta'; }
+        else { p.diasAcima++; sit = 'Bateu a meta'; }
+        if (p.melhor === null || prod > p.melhor.prod) p.melhor = { data:d, prod:prod };
+        if (p.pior === null || prod < p.pior.prod) p.pior = { data:d, prod:prod };
+      } else { p.semRegistro++; sit = 'Sem fechamento'; }
+      p.linhaDia.push({ data:d, prod:prod, acoes:nAcoes, situacao:sit });
+    });
+    ls.forEach(function(l){
+      if (l.ehConclusao) { p.conc++; p.desfechos[l.conclusao] = (p.desfechos[l.conclusao] || 0) + 1; }
+      else {
+        p.mov++;
+        p.filas[l.filaRotulo] = (p.filas[l.filaRotulo] || 0) + 1;
+        if (l.pedeMotivo) {
+          var k = l.filaRotulo + ' · ' + (l.motivo || '(sem motivo registrado)');
+          p.motivos[k] = (p.motivos[k] || 0) + 1;
+        }
+      }
+      if (l.rc) p.rcs[l.rc] = 1;
+    });
+    p.nRcs = Object.keys(p.rcs).length;
+    p.metaPeriodo = p.meta * p.trabalhados;
+    p.aproveitamento = p.metaPeriodo ? (p.producao / p.metaPeriodo) : 0;
+    p.mediaDia = p.trabalhados ? (p.producao / p.trabalhados) : 0;
+    p.porConclusao = p.conc ? (p.mov / p.conc) : 0;
+    return p;
+  }).sort(function(a, b){
+    return b.aproveitamento - a.aproveitamento || b.producao - a.producao
+        || a.nome.localeCompare(b.nome);
+  });
+}
+
+function _esfTop(obj, n){
+  return Object.keys(obj).map(function(k){ return [k, obj[k]]; })
+    .sort(function(a, b){ return b[1] - a[1]; }).slice(0, n || 99)
+    .map(function(x){ return x[0] + ' (' + x[1] + ')'; }).join(' · ');
+}
+function _esfPct(v){ return String(Math.round(v * 1000) / 10).replace('.', ',') + '%'; }
+// quanto aquele desfecho pesou nas conclusões da pessoa
+function _esfPctConc(p, desfecho){
+  var n = p.desfechos[desfecho] || 0;
+  if (!p.conc) return '';
+  return n ? (_esfPct(n / p.conc) + ' das conclusões dela') : '—';
+}
+
+// ── os cards da tela ──────────────────────────────────────────────
+function _ceRenderEsforco(mod){
+  var el = document.getElementById('ce-esf-' + mod + '-cards');
+  var nota = document.getElementById('ce-esf-' + mod + '-nota');
+  if (!el) return;
+  if (!_ceCache[mod]) {
+    el.innerHTML = '';
+    if (nota) nota.textContent = 'Base do ' + _ceModLabel(mod) + ' ainda não carregada.';
+    return;
+  }
+  var r = ceEsforcoResumo(mod);
+  var cor = _ceModCor(mod);
+  // texto já pronto passa direto: cpNum('3.0') devolveria 3 e a média
+  // perderia a casa decimal justamente no número que ele quer mostrar
+  var card = function(v, t, c){
+    var txt = (typeof v === 'string') ? v : cpNum(v);
+    return '<div style="background:var(--cin);border:1px solid var(--brd);border-radius:9px;'
+      + 'padding:.6rem .5rem;text-align:center">'
+      + '<div style="font-size:18px;font-weight:800;color:' + (c || cor) + ';line-height:1">' + txt + '</div>'
+      + '<div style="font-size:9.5px;font-weight:700;color:var(--tx2);margin-top:3px;line-height:1.25">' + t + '</div></div>';
+  };
+  // o aproveitamento da equipe vem do fechamento do dia, não das ações —
+  // é o mesmo número dos Alertas de Performance
+  var eq = ceEsforcoPessoas(mod).reduce(function(o, p){
+    o.prod += p.producao; o.meta += p.metaPeriodo; o.ab += p.diasAbaixo.length; return o;
+  }, { prod:0, meta:0, ab:0 });
+  el.innerHTML = card(r.mov, 'Movimentações') + card(r.conc, 'Conclusões', 'var(--vd)')
+    + card(r.nRcs, 'RCs distintas')
+    + card(r.porConclusao ? r.porConclusao.toFixed(1).replace('.', ',') : '0',
+           'Movim. por conclusão')
+    + card(eq.meta ? _esfPct(eq.prod / eq.meta) : '—', 'Aproveit. (trabalhados)',
+           eq.meta && eq.prod / eq.meta >= 1 ? 'var(--vd)'
+             : (eq.meta && eq.prod / eq.meta >= 0.7 ? 'var(--am)' : 'var(--vm)'))
+    + card(eq.ab, 'Dias abaixo da meta', eq.ab ? 'var(--vm)' : 'var(--vd)')
+    + card(r.total, 'Ações no total')
+    // o foco no que é crítico: cobertura do card ⏰ Vencidos
+    + (function(){
+        var f = ceVencidosFoco(mod);
+        if (!f.ok) return '';
+        return card(f.tocados + '/' + f.total, 'Vencidos tocados',
+                 f.cobertura >= 0.8 ? 'var(--vd)' : (f.cobertura >= 0.5 ? 'var(--am)' : 'var(--vm)'))
+             + card(_esfPct(f.pctEsforco), 'do esforço em vencidos',
+                 f.pctEsforco >= 0.3 ? 'var(--vd)' : 'var(--am)');
+      })();
+  if (nota) {
+    var faixa = _ceDesfechoRange(mod);
+    var partes = ['Período ' + fmtDt(faixa.de) + ' a ' + fmtDt(faixa.ate) + '.'];
+    if (r.comMotivo + r.semMotivo) {
+      partes.push('<strong>' + cpNum(r.comMotivo) + '</strong> movimentação(ões) com motivo registrado'
+        + (r.semMotivo ? ' e <strong>' + cpNum(r.semMotivo) + '</strong> sem — as sem motivo são '
+            + 'anteriores ao campo obrigatório.' : '.'));
+    } else {
+      partes.push('Nenhuma movimentação de fila com motivo ainda — o campo passa a ser '
+        + 'preenchido a partir de agora, nas filas de fornecedor, requisitante, MDG, '
+        + 'validação e parecerista.');
+    }
+    // quem deixou os próprios vencidos parados enquanto trabalhava muito —
+    // é o nome que ele quer ver sem ter de abrir o arquivo
+    try {
+      var f = ceVencidosFoco(mod);
+      if (f.ok) {
+        partes.push('Card ⏰ Vencidos: <strong>' + cpNum(f.parados) + '</strong> de '
+          + cpNum(f.total) + ' sem nenhuma ação no período.');
+        var al = f.porPessoa.filter(function(p){ return p.alerta; });
+        if (al.length) {
+          partes.push('<span style="color:var(--vm);font-weight:700">⚠ ' + al.map(function(p){
+            return p.nome + ' (' + p.acoes + ' ações, cobriu ' + _esfPct(p.cobertura)
+              + ' dos ' + p.meus + ' vencidos dele)';
+          }).join(' · ') + '</span>');
+        }
+      }
+    } catch (e) {}
+    nota.innerHTML = partes.join(' ');
+  }
+}
+
+// ── copiar o resumo ───────────────────────────────────────────────
+async function ceEsforcoCopiar(mod){
+  var base = await _ceGarantirBase(mod);
+  if (!base.ok) { alert(base.msg); return; }
+  var r = ceEsforcoResumo(mod);
+  if (!r.total) { alert('Nenhuma ação no período selecionado.'); return; }
+  var faixa = _ceDesfechoRange(mod);
+  var t = ['ESFORÇO DO TIME — ' + String(mod).toUpperCase() + ' · '
+           + fmtDt(faixa.de) + ' a ' + fmtDt(faixa.ate), ''];
+  t.push(r.total + ' ações: ' + r.mov + ' movimentações de fila e ' + r.conc + ' conclusões.');
+  t.push(r.nRcs + ' RCs tocadas · ' + (r.porConclusao ? r.porConclusao.toFixed(1) : '0')
+    + ' movimentações para cada item concluído.');
+  var ordena = function(o){
+    return Object.keys(o).map(function(k){ return [k, o[k].n != null ? o[k].n : o[k]]; })
+      .sort(function(a, b){ return b[1] - a[1]; });
+  };
+  t.push('', 'Por fila:');
+  ordena(r.porFila).forEach(function(x){ t.push('  ' + x[0] + ': ' + x[1]); });
+  var mot = ordena(r.porMotivo);
+  if (mot.length) {
+    t.push('', 'Por motivo:');
+    mot.forEach(function(x){ t.push('  ' + x[0] + ': ' + x[1]); });
+  }
+  t.push('', 'Por analista (meta, aproveitamento e esforço):');
+  ceEsforcoPessoas(mod).forEach(function(p){
+    t.push('  ' + p.nome + ': ' + (p.trabalhados ? _esfPct(p.aproveitamento) : 'sem dia fechado')
+      + ' (' + p.producao + '/' + p.metaPeriodo + ') · ' + p.diasAbaixo.length
+      + ' dia(s) abaixo da meta · ' + p.mov + ' movim. · ' + p.conc + ' conclusões'
+      + (p.conc ? ' (' + ESF_DESFECHOS.filter(function(d){ return p.desfechos[d]; })
+            .map(function(d){ return d + ' ' + p.desfechos[d]; }).join(', ') + ')' : ''));
+  });
+  cpCopiaTexto(t.join('\n'), 'Resumo de esforço copiado.');
+}
+
+// ── o arquivo ─────────────────────────────────────────────────────
+async function ceEsforcoBaixar(mod){
+  try {
+    var base = await _ceGarantirBase(mod);
+    if (!base.ok) { alert(base.msg); return; }
+    var r = ceEsforcoResumo(mod);
+    if (!r.total) {
+      var fx0 = _ceDesfechoRange(mod);
+      alert('Nenhuma ação entre ' + fmtDt(fx0.de) + ' e ' + fmtDt(fx0.ate) + ' no '
+        + String(mod).toUpperCase() + ' — ajuste o período ali em cima e tente de novo.');
+      return;
+    }
+    await _gtoEnsureLibs();
+    var faixa = _ceDesfechoRange(mod);
+    var blob = await _esfGerarRelatorio(mod, r, ceEsforcoJornadas(mod), faixa);
+    var nome = 'Relatorio_Esforco_' + String(mod).toUpperCase() + '_'
+      + String(faixa.de).replace(/-/g, '') + '_a_' + String(faixa.ate).replace(/-/g, '') + '.xlsx';
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = nome;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+  } catch (e) {
+    alert('Não consegui gerar o relatório de esforço: ' + (e && e.message || e));
+  }
+}
+
+// O workbook. Mesma paleta do relatório de desfechos, para os dois
+// chegarem na caixa de entrada do Thiago com a mesma cara.
+var ESF_C = {
+  NAVY:'FF1F3864', BLUE:'FF2E5496', BLUE_L:'FFD9E1F2', GREY_L:'FFF2F2F2',
+  GREEN:'FF548235', GREEN_L:'FFE2EFDA', AMBER:'FFBF8F00', AMBER_L:'FFFFF2CC',
+  RED:'FFC00000', RED_L:'FFFBE4E4', WHITE:'FFFFFFFF', GREY_TXT:'FF595959',
+  BORDER:'FFBFBFBF'
+};
+function _esfSolid(argb){ return { type:'pattern', pattern:'solid', fgColor:{ argb:argb } }; }
+function _esfBorda(){
+  var b = { style:'thin', color:{ argb:ESF_C.BORDER } };
+  return { top:b, left:b, right:b, bottom:b };
+}
+function _esfTitulo(ws, texto, sub, nCols){
+  ws.mergeCells(1, 1, 1, nCols);
+  var c = ws.getCell(1, 1);
+  c.value = texto;
+  c.font = { name:'Calibri', size:15, bold:true, color:{ argb:ESF_C.WHITE } };
+  c.fill = _esfSolid(ESF_C.NAVY);
+  c.alignment = { horizontal:'left', vertical:'middle' };
+  ws.getRow(1).height = 28;
+  ws.mergeCells(2, 1, 2, nCols);
+  var s = ws.getCell(2, 1);
+  s.value = sub;
+  s.font = { name:'Calibri', size:10, italic:true, color:{ argb:ESF_C.GREY_TXT } };
+  s.alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+  ws.getRow(2).height = 30;
+}
+function _esfCabecalho(ws, linha, titulos, cor){
+  titulos.forEach(function(t, i){
+    var c = ws.getCell(linha, i + 1);
+    c.value = t;
+    c.font = { name:'Calibri', size:10, bold:true, color:{ argb:ESF_C.WHITE } };
+    c.fill = _esfSolid(cor || ESF_C.BLUE);
+    c.alignment = { horizontal:'center', vertical:'middle', wrapText:true };
+    c.border = _esfBorda();
+  });
+  ws.getRow(linha).height = 24;
+}
+function _esfLinha(ws, linha, valores, opts){
+  opts = opts || {};
+  valores.forEach(function(v, i){
+    var c = ws.getCell(linha, i + 1);
+    c.value = v;
+    c.font = { name:'Calibri', size:10, bold:!!opts.bold };
+    c.alignment = { horizontal: (i === 0 ? 'left' : (opts.centro === false ? 'left' : 'center')),
+                    vertical:'middle', wrapText:!!opts.wrap };
+    c.border = _esfBorda();
+    if (opts.fill) c.fill = _esfSolid(opts.fill);
+  });
+}
+
+async function _esfGerarRelatorio(mod, r, jornadas, faixa){
+  var ExcelJS = window.ExcelJS;
+  var pessoas = ceEsforcoPessoas(mod);
+  var somaEq = pessoas.reduce(function(o, p){
+    o.trab += p.trabalhados; o.prod += p.producao; o.meta += p.metaPeriodo;
+    o.ab += p.diasAbaixo.length; return o;
+  }, { trab:0, prod:0, meta:0, ab:0 });
+  var wb = new ExcelJS.Workbook();
+  wb.creator = 'GTO'; wb.created = new Date();
+  var MOD = String(mod).toUpperCase();
+  var periodo = 'Módulo: ' + MOD + '  ·  Período: ' + fmtDt(faixa.de) + ' a ' + fmtDt(faixa.ate)
+    + '  ·  ' + r.dias + ' dia(s) com registro  ·  Fonte: GTO (ações da produção)';
+
+  // ── 1. Resumo executivo ────────────────────────────────────────
+  var ws = wb.addWorksheet('Resumo Executivo', { views:[{ showGridLines:false }] });
+  ws.columns = [{ width:38 }, { width:16 }, { width:62 }];
+  _esfTitulo(ws, 'RELATÓRIO DE ESFORÇO DO TIME',
+    periodo + '  —  o trabalho de movimentação que antecede cada conclusão', 3);
+
+  var L = 4;
+  _esfCabecalho(ws, L, ['Indicador', 'Valor', 'O que significa'], ESF_C.NAVY); L++;
+  var ind = [
+    ['Ações registradas', r.total, 'Tudo que a equipe lançou no período — movimentações e conclusões'],
+    ['Movimentações de fila', r.mov, 'Cada vez que um item foi empurrado para fornecedor, requisitante, MDG, validação ou parecerista'],
+    ['Conclusões', r.conc, 'Itens que saíram: pedido, republicação, XGL, devolução ou nova reserva'],
+    ['RCs distintas tocadas', r.nRcs,
+     'Quantas RCs DIFERENTES receberam pelo menos uma ação — a mesma RC tocada 5 vezes conta 1'],
+    ['Itens concluídos', r.nRcsConc, 'RC + item distintos que chegaram a um desfecho'],
+    ['Movimentações por conclusão', r.conc ? Number(r.porConclusao.toFixed(2)) : 0,
+     'Quantos empurrões, em média, foram precisos para cada item sair'],
+    ['Movimentações com motivo', r.comMotivo, 'Movimentações em que o motivo foi registrado'],
+    ['Movimentações sem motivo', r.semMotivo, 'Lançadas antes de o motivo virar obrigatório — não dá para classificar'],
+    ['Ações por dia com registro', r.dias ? Number((r.total / r.dias).toFixed(1)) : 0,
+     'Volume médio de ações nos dias em que houve lançamento'],
+    ['Aproveitamento da equipe (itens trabalhados)',
+     somaEq.meta ? _esfPct(somaEq.prod / somaEq.meta) : '—',
+     'Itens TRABALHADOS no fechamento ÷ meta do período. O fechamento conta item movimentado '
+     + 'igual a item finalizado — para finalizados, veja Conclusões e a Taxa de conclusão'],
+    ['Taxa de conclusão', r.total ? _esfPct(r.conc / r.total) : '—',
+     'Das ações do período, quantas terminaram em desfecho — esta sim fala de item finalizado'],
+    ['Dias abaixo da meta (equipe)', somaEq.ab,
+     'Soma dos dias em que alguém fechou abaixo da própria meta — a lista datada está no One a One']
+  ];
+  ind.forEach(function(x, i){
+    _esfLinha(ws, L, x, { fill: i % 2 ? ESF_C.GREY_L : null, wrap:true });
+    ws.getCell(L, 1).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+    ws.getCell(L, 3).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+    ws.getCell(L, 2).font = { name:'Calibri', size:11, bold:true, color:{ argb:ESF_C.BLUE } };
+    L++;
+  });
+
+  L += 1;
+  ws.mergeCells(L, 1, L, 3);
+  var leitura = ws.getCell(L, 1);
+  leitura.value = r.conc
+    ? ('Leitura: para cada item concluído no período, a equipe fez em média '
+       + r.porConclusao.toFixed(1).replace('.', ',') + ' movimentação(ões) de fila. '
+       + 'Esse é o trabalho que não aparece no relatório de desfechos.')
+    : 'Leitura: nenhum item foi concluído no período — todo o volume registrado é movimentação.';
+  leitura.font = { name:'Calibri', size:11, bold:true, color:{ argb:ESF_C.NAVY } };
+  leitura.fill = _esfSolid(ESF_C.BLUE_L);
+  leitura.alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+  ws.getRow(L).height = 32;
+
+  // ── 2. Por fila e motivo ───────────────────────────────────────
+  var ws2 = wb.addWorksheet('Por Fila e Motivo', { views:[{ showGridLines:false }] });
+  ws2.columns = [{ width:30 }, { width:38 }, { width:12 }, { width:14 }];
+  _esfTitulo(ws2, 'Para onde o trabalho foi — e por quê',
+    'Cada movimentação de fila do período, agrupada pela fila de destino e pelo motivo escolhido na hora', 4);
+  var L2 = 4;
+  _esfCabecalho(ws2, L2, ['Fila de destino', 'Motivo', 'Qtde', '% das movim.'], ESF_C.BLUE); L2++;
+  var filas = Object.keys(r.porFila).sort(function(a, b){ return r.porFila[b].n - r.porFila[a].n; });
+  filas.forEach(function(f){
+    var bloco = r.porFila[f];
+    _esfLinha(ws2, L2, [f, '— total da fila —', bloco.n,
+      r.mov ? Number((bloco.n / r.mov * 100).toFixed(1)) + '%' : '0%'],
+      { bold:true, fill:ESF_C.BLUE_L });
+    L2++;
+    Object.keys(bloco.motivos).sort(function(a, b){ return bloco.motivos[b] - bloco.motivos[a]; })
+      .forEach(function(m){
+        _esfLinha(ws2, L2, ['', m, bloco.motivos[m],
+          r.mov ? Number((bloco.motivos[m] / r.mov * 100).toFixed(1)) + '%' : '0%'], { wrap:true });
+        ws2.getCell(L2, 2).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+        L2++;
+      });
+  });
+  _esfLinha(ws2, L2, ['TOTAL', '', r.mov, '100%'], { bold:true, fill:ESF_C.GREY_L });
+
+  // ── 3. HH da Equipe ────────────────────────────────────────────
+  // Antes se chamava "Por Analista". O André renomeou: o que esta aba
+  // mostra é o HH — as horas de trabalho da equipe no período — e não
+  // só uma lista de nomes.
+  var ws3 = wb.addWorksheet('HH da Equipe', { views:[{ showGridLines:false }] });
+  ws3.columns = [{ width:24 }, { width:9 }, { width:11 }, { width:9 }, { width:11 },
+                 { width:12 }, { width:11 }, { width:13 }, { width:11 }, { width:13 },
+                 { width:11 }, { width:10 }, { width:11 },
+                 { width:11 }, { width:12 }, { width:9 }, { width:12 }, { width:12 },
+                 { width:16 }, { width:13 }];
+  _esfTitulo(ws3, 'HH da Equipe — esforço e aproveitamento por analista',
+    'Produção do dia = o número do FECHAMENTO DO DIA, o mesmo dos Alertas de Performance — é ele que responde pela meta. '
+    + 'Movimentações e conclusões vêm das ações: a mesma RC pode receber várias no mesmo dia, por isso os números não são iguais. '
+    + 'ATENÇÃO ao que a meta mede: o fechamento soma os itens TRABALHADOS do dia (1ª Análise, Em Tratativa, Status B e Ag Parecer) — '
+    + 'item movimentado conta igual a item finalizado. Por isso o aproveitamento é de itens trabalhados, NÃO de itens finalizados; '
+    + 'quem responde por finalizados são as colunas de desfecho e a Taxa de conclusão (conclusões ÷ ações). '
+    + 'RCs distintas = quantas RCs diferentes a pessoa tocou (a mesma RC tocada 5 vezes conta 1).', 20);
+  var L3 = 4;
+  _esfCabecalho(ws3, L3, ['Analista', 'Meta/dia', 'Dias úteis', 'Trabalhados', 'Folga/Férias',
+                          'Sem fechamento', 'Trabalhados (prod.)', 'Meta do período',
+                          'Aproveit. (trabalhados)',
+                          'Dias abaixo', 'Média/dia', 'Movim.', 'Conclusões',
+                          '🛒 Pedido', '🔄 Republic.', '📦 XGL', '↩ Devolução', '🔖 N. Reserva',
+                          'Taxa de conclusão', 'RCs distintas'],
+                ESF_C.BLUE); L3++;
+  pessoas.forEach(function(p, i){
+    _esfLinha(ws3, L3, [p.nome, p.meta, p.diasUteis, p.trabalhados, p.folgas, p.semRegistro,
+      p.producao, p.metaPeriodo, p.trabalhados ? _esfPct(p.aproveitamento) : '—',
+      p.diasAbaixo.length, p.trabalhados ? Number(p.mediaDia.toFixed(1)) : '—',
+      p.mov, p.conc].concat(ESF_DESFECHOS.map(function(d){ return p.desfechos[d] || 0; }))
+      .concat([p.acoes ? _esfPct(p.conc / p.acoes) : '—', p.nRcs]),
+      { fill: i % 2 ? ESF_C.GREY_L : null });
+    // o aproveitamento é o número que ele vai olhar primeiro — ganha cor
+    var cel = ws3.getCell(L3, 9);
+    if (p.trabalhados) {
+      cel.fill = _esfSolid(p.aproveitamento >= 1 ? ESF_C.GREEN_L
+                         : (p.aproveitamento >= 0.7 ? ESF_C.AMBER_L : ESF_C.RED_L));
+      cel.font = { name:'Calibri', size:10, bold:true,
+                   color:{ argb: p.aproveitamento >= 1 ? ESF_C.GREEN
+                                : (p.aproveitamento >= 0.7 ? ESF_C.AMBER : ESF_C.RED) } };
+    }
+    if (p.diasAbaixo.length) ws3.getCell(L3, 10).font =
+      { name:'Calibri', size:10, bold:true, color:{ argb:ESF_C.RED } };
+    L3++;
+  });
+  var somaP = pessoas.reduce(function(o, p){
+    o.trab += p.trabalhados; o.prod += p.producao; o.meta += p.metaPeriodo;
+    o.ab += p.diasAbaixo.length; o.mov += p.mov; o.conc += p.conc;
+    ESF_DESFECHOS.forEach(function(d){ o.d[d] = (o.d[d] || 0) + (p.desfechos[d] || 0); });
+    return o;
+  }, { trab:0, prod:0, meta:0, ab:0, mov:0, conc:0, d:{} });
+  _esfLinha(ws3, L3, ['TOTAL DA EQUIPE', '', '', somaP.trab, '', '', somaP.prod, somaP.meta,
+    somaP.meta ? _esfPct(somaP.prod / somaP.meta) : '—', somaP.ab,
+    somaP.trab ? Number((somaP.prod / somaP.trab).toFixed(1)) : '—',
+    somaP.mov, somaP.conc].concat(ESF_DESFECHOS.map(function(d){ return somaP.d[d] || 0; }))
+    .concat([r.total ? _esfPct(somaP.conc / r.total) : '—', r.nRcs]),
+    { bold:true, fill:ESF_C.BLUE_L });
+  L3 += 2;
+  ws3.mergeCells(L3, 1, L3, 20);
+  var leg = ws3.getCell(L3, 1);
+  leg.value = 'Como ler: "Trabalhados" são os dias úteis com fechamento registrado e sem folga — '
+    + 'só esses entram na meta do período. "Sem fechamento" não é dia ruim, é dia sem registro, '
+    + 'e fica fora da conta. Aproveitamento = produção ÷ meta do período.';
+  leg.font = { name:'Calibri', size:10, italic:true, color:{ argb:ESF_C.GREY_TXT } };
+  leg.alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+  ws3.getRow(L3).height = 30;
+
+  // ── 3b. One a one ──────────────────────────────────────────────
+  // Uma página por pessoa, com tudo que a conversa de fim de medição
+  // pede: o que ela fez, o que deixou de fazer e em que dias.
+  var ws3b = wb.addWorksheet('One a One', { views:[{ showGridLines:false }] });
+  ws3b.columns = [{ width:30 }, { width:22 }, { width:70 }];
+  _esfTitulo(ws3b, 'One a one — um bloco por analista',
+    'Material para a conversa de fim de medição: meta, aproveitamento, os dias abaixo da meta com '
+    + 'a data e o quanto faltou, e o tipo de trabalho que a pessoa mais fez.', 3);
+  var L3b = 4;
+  pessoas.forEach(function(p){
+    ws3b.mergeCells(L3b, 1, L3b, 3);
+    var cab = ws3b.getCell(L3b, 1);
+    cab.value = p.nome + '   ·   meta ' + p.meta + '/dia (' + p.metaFonte + ')';
+    cab.font = { name:'Calibri', size:12, bold:true, color:{ argb:ESF_C.WHITE } };
+    cab.fill = _esfSolid(p.trabalhados && p.aproveitamento >= 1 ? ESF_C.GREEN
+                       : (p.trabalhados && p.aproveitamento >= 0.7 ? ESF_C.AMBER
+                       : (p.trabalhados ? ESF_C.RED : ESF_C.NAVY)));
+    cab.alignment = { horizontal:'left', vertical:'middle' };
+    ws3b.getRow(L3b).height = 22; L3b++;
+
+    var abaixo = p.diasAbaixo.map(function(d){
+      return fmtDt(d.data) + ' (' + d.prod + ', faltaram ' + d.falta + ')';
+    }).join(' · ');
+    var itens = [
+      ['Aproveitamento (itens trabalhados)',
+       p.trabalhados ? _esfPct(p.aproveitamento) : 'sem dia trabalhado',
+       p.trabalhados ? ('trabalhou ' + p.producao + ' de ' + p.metaPeriodo
+         + ' (' + p.meta + ' × ' + p.trabalhados + ' dias) — o fechamento conta item '
+         + 'movimentado igual a item finalizado') : 'nenhum dia com fechamento no período'],
+      ['Dias úteis no período', p.diasUteis,
+       p.trabalhados + ' trabalhado(s) · ' + p.folgas + ' de folga/férias · '
+       + p.semRegistro + ' sem fechamento'],
+      ['Dias abaixo da meta', p.diasAbaixo.length, abaixo || 'nenhum'],
+      ['Dias que bateu a meta', p.diasAcima,
+       p.melhor ? ('melhor dia: ' + fmtDt(p.melhor.data) + ' com ' + p.melhor.prod) : '—'],
+      ['Média por dia trabalhado', p.trabalhados ? Number(p.mediaDia.toFixed(1)) : '—',
+       p.pior ? ('pior dia: ' + fmtDt(p.pior.data) + ' com ' + p.pior.prod) : '—'],
+      ['Movimentações de fila', p.mov, _esfTop(p.filas, 6) || '—'],
+      ['Motivos mais usados', Object.keys(p.motivos).length, _esfTop(p.motivos, 6) || '—'],
+      ['Conclusões', p.conc, p.conc ? 'abertas por tipo nas linhas abaixo' : 'nenhum item saiu da mão dela no período'],
+      ['   🛒 Pedido', p.desfechos['Pedido'] || 0,
+       p.conc ? _esfPctConc(p, 'Pedido') : ''],
+      ['   🔄 Republicação', p.desfechos['Republicação'] || 0,
+       p.conc ? _esfPctConc(p, 'Republicação') : ''],
+      ['   📦 XGL', p.desfechos['XGL'] || 0, p.conc ? _esfPctConc(p, 'XGL') : ''],
+      ['   ↩ Devolução', p.desfechos['Devolução'] || 0,
+       p.conc ? _esfPctConc(p, 'Devolução') : ''],
+      ['   🔖 Nova Reserva', p.desfechos['Nova Reserva'] || 0,
+       p.conc ? _esfPctConc(p, 'Nova Reserva') : ''],
+      ['Taxa de conclusão', p.acoes ? _esfPct(p.conc / p.acoes) : '—',
+       'das ações dela no período, quantas terminaram em desfecho — é esta que fala de '
+       + 'item FINALIZADO, não o aproveitamento acima'],
+      ['Movimentações por conclusão', p.conc ? Number(p.porConclusao.toFixed(1)) : '—',
+       p.conc ? 'quantos empurrões, em média, até o item sair da mão dela' : 'nenhum item concluído no período'],
+      ['RCs distintas tocadas', p.nRcs, 'a mesma RC tocada várias vezes conta 1']
+    ];
+    itens.forEach(function(x, i){
+      _esfLinha(ws3b, L3b, x, { fill: i % 2 ? ESF_C.GREY_L : null, wrap:true });
+      ws3b.getCell(L3b, 1).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+      ws3b.getCell(L3b, 3).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+      L3b++;
+    });
+    L3b++;
+  });
+
+  // ── 3c. Dia a dia por analista ─────────────────────────────────
+  var ws3c = wb.addWorksheet('Dia a Dia por Analista', { views:[{ showGridLines:false }] });
+  ws3c.columns = [{ width:24 }, { width:13 }, { width:9 }, { width:12 }, { width:10 },
+                  { width:12 }, { width:13 }, { width:18 }];
+  _esfTitulo(ws3c, 'Dia a dia de cada analista',
+    'A linha de base do one a one: o que cada pessoa produziu em cada dia útil do período, '
+    + 'contra a meta dela. "Sem fechamento" fica fora da conta — é registro que faltou, não produção baixa.', 8);
+  var L3c = 4;
+  _esfCabecalho(ws3c, L3c, ['Analista', 'Data', 'Dia', 'Produção', 'Meta',
+                            'Diferença', 'Ações no dia', 'Situação'], ESF_C.BLUE); L3c++;
+  var DS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  pessoas.forEach(function(p){
+    p.linhaDia.forEach(function(d){
+      var dow = '';
+      try { var q = d.data.split('-'); dow = DS[new Date(+q[0], (+q[1]) - 1, +q[2]).getDay()]; } catch (e) {}
+      _esfLinha(ws3c, L3c, [p.nome, fmtDt(d.data), dow,
+        d.prod === null ? '—' : d.prod, p.meta,
+        d.prod === null ? '—' : (d.prod - p.meta), d.acoes, d.situacao]);
+      var c = ws3c.getCell(L3c, 8);
+      if (d.situacao === 'Abaixo da meta') { c.fill = _esfSolid(ESF_C.RED_L);
+        c.font = { name:'Calibri', size:10, bold:true, color:{ argb:ESF_C.RED } }; }
+      else if (d.situacao === 'Bateu a meta') c.fill = _esfSolid(ESF_C.GREEN_L);
+      else if (d.situacao === 'Folga/Férias') c.fill = _esfSolid(ESF_C.AMBER_L);
+      else c.fill = _esfSolid(ESF_C.GREY_L);
+      L3c++;
+    });
+  });
+  ws3c.autoFilter = { from:{ row:4, column:1 }, to:{ row:4, column:8 } };
+  ws3c.views = [{ state:'frozen', ySplit:4, showGridLines:false }];
+
+
+  // ── 3d. Crítico × Urgente ──────────────────────────────────────
+  // "preciso monitorar se a equipe está trabalhando no que é crítico e
+  // urgente". A classificação é a do ADLV (card Vencidos + PRAZO + PID)
+  // e vale para a situação de HOJE do item, não para a do dia da ação —
+  // o mapa de ontem não fica guardado. Está escrito na aba.
+  var cuOk = (mod === 'adlv') && (typeof cuVencIdx === 'function')
+          && (typeof _radarDados !== 'undefined') && (_radarDados || []).length > 0;
+  var ws3d = wb.addWorksheet('Crítico x Urgente', { views:[{ showGridLines:false }] });
+  ws3d.columns = [{ width:26 }, { width:13 }, { width:13 }, { width:13 }, { width:13 },
+                  { width:11 }, { width:16 }, { width:30 }];
+  if (!cuOk) {
+    _esfTitulo(ws3d, 'Crítico × Urgente — não deu para calcular',
+      mod === 'adlv'
+        ? 'A classificação precisa do Radar do ADLV carregado nesta sessão. Abra a Governança '
+          + 'do ADLV (que carrega o mapa do dia) e gere o relatório de novo.'
+        : 'A classificação é do ADLV. No FAST as regras são outras — lá existe o contador de '
+          + 'cobrança —, e repetir aqui o número do ADLV seria inventar dado.', 8);
+  } else {
+    var cuIx = cuVencIdx();
+    // a classe de cada RC+item da carteira de hoje
+    var classeDe = {};
+    (_radarDados || []).forEach(function(rr){
+      var rc = String(rr.rc || '').trim(); if (!rc) return;
+      var k = rc + '|' + String(rr.seq || rr.item_rc || '').trim();
+      if (!classeDe[k]) classeDe[k] = cuClassificar(rr, cuIx);
+      if (!classeDe[rc]) classeDe[rc] = classeDe[k];
+    });
+    var classeDaLinha = function(l){
+      return classeDe[l.rc + '|' + l.item] || classeDe[l.rc] || 'fora';
+    };
+    var carteira = cuContar(_radarDados || [], cuIx);
+
+    _esfTitulo(ws3d, 'Crítico × Urgente — a equipe está trabalhando no que pesa?',
+      'Cada ação do período foi classificada pela situação ATUAL do item na carteira '
+      + '(crítico = está no card ⏰ Vencidos · urgente = proposta vencida, PRAZO ≥ 91, ou PID). '
+      + 'Compare a coluna "% do esforço" com o "% da carteira" logo abaixo: se a carteira tem 10% de '
+      + 'crítico e urgente e o esforço também tem 10%, a equipe está no lugar certo.', 8);
+
+    var L3d = 4;
+    _esfCabecalho(ws3d, L3d, ['Classe', 'Ações', '% do esforço', 'RCs distintas',
+                              'Na carteira', '% da carteira', 'Diferença', 'O que fazer'],
+                  ESF_C.NAVY); L3d++;
+    var porClasse = {}, rcsClasse = {}, totalClass = 0;
+    r.linhas.forEach(function(l){
+      var c = classeDaLinha(l);
+      porClasse[c] = (porClasse[c] || 0) + 1;
+      (rcsClasse[c] = rcsClasse[c] || {})[l.rc] = 1;
+      totalClass++;
+    });
+    CU_CLASSES.forEach(function(c){
+      var n = porClasse[c.k] || 0;
+      var pctEsf = totalClass ? n / totalClass : 0;
+      var pctCar = carteira.total ? (carteira[c.k] || 0) / carteira.total : 0;
+      var dif = pctEsf - pctCar;
+      _esfLinha(ws3d, L3d, [c.ico + ' ' + c.t, n, _esfPct(pctEsf),
+        Object.keys(rcsClasse[c.k] || {}).length, carteira[c.k] || 0, _esfPct(pctCar),
+        (dif >= 0 ? '+' : '') + _esfPct(dif), c.acao], { wrap:true });
+      ws3d.getCell(L3d, 1).fill = _esfSolid(
+        c.k === 'cu' ? ESF_C.RED_L : (c.k === 'cnu' ? ESF_C.AMBER_L
+          : (c.k === 'unc' ? ESF_C.AMBER_L : ESF_C.GREY_L)));
+      ws3d.getCell(L3d, 8).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+      L3d++;
+    });
+    var fora = porClasse['fora'] || 0;
+    if (fora) {
+      _esfLinha(ws3d, L3d, ['(item não está na carteira de hoje)', fora,
+        _esfPct(totalClass ? fora / totalClass : 0),
+        Object.keys(rcsClasse['fora'] || {}).length, '—', '—', '—',
+        'Foi concluído ou saiu do mapa depois da ação — fica fora da comparação.'],
+        { fill:ESF_C.GREY_L, wrap:true });
+      ws3d.getCell(L3d, 8).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+      L3d++;
+    }
+    _esfLinha(ws3d, L3d, ['TOTAL', totalClass, '100%', r.nRcs, carteira.total, '100%', '', ''],
+      { bold:true, fill:ESF_C.BLUE_L });
+    L3d += 2;
+
+    // por analista
+    _esfCabecalho(ws3d, L3d, ['Analista', '🔴 Crít. e urg.', '🟠 Crít. não urg.',
+                              '🟡 Urg. não crít.', '⚪ Nem um nem outro', 'Fora da carteira',
+                              '% em crítico', 'Total de ações'], ESF_C.BLUE); L3d++;
+    pessoas.forEach(function(p, i){
+      var ls = r.linhas.filter(function(l){ return l.quem === p.nome; });
+      var c = { cu:0, cnu:0, unc:0, nn:0, fora:0 };
+      ls.forEach(function(l){ c[classeDaLinha(l)]++; });
+      var crit = c.cu + c.cnu;
+      _esfLinha(ws3d, L3d, [p.nome, c.cu, c.cnu, c.unc, c.nn, c.fora,
+        ls.length ? _esfPct(crit / ls.length) : '—', ls.length],
+        { fill: i % 2 ? ESF_C.GREY_L : null });
+      if (ls.length) {
+        var cel = ws3d.getCell(L3d, 7);
+        cel.font = { name:'Calibri', size:10, bold:true,
+          color:{ argb: (crit / ls.length) >= 0.5 ? ESF_C.GREEN : ESF_C.GREY_TXT } };
+      }
+      L3d++;
+    });
+    L3d += 1;
+    ws3d.mergeCells(L3d, 1, L3d, 8);
+    var nota = ws3d.getCell(L3d, 1);
+    nota.value = 'A classificação é a de HOJE: o mapa do dia de ontem não fica guardado, então um '
+      + 'item que era crítico na semana passada e já foi resolvido aparece pela situação atual. '
+      + 'Use esta aba para a tendência do período, não para auditar ação por ação.';
+    nota.font = { name:'Calibri', size:10, italic:true, color:{ argb:ESF_C.GREY_TXT } };
+    nota.alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+    ws3d.getRow(L3d).height = 30;
+  }
+
+  // ── 4. Jornada das RCs ─────────────────────────────────────────
+  var ws4 = wb.addWorksheet('Jornada das RCs', { views:[{ showGridLines:false }] });
+  ws4.columns = [{ width:13 }, { width:8 }, { width:16 }, { width:13 }, { width:11 },
+                 { width:11 }, { width:9 }, { width:14 }, { width:70 }];
+  _esfTitulo(ws4, 'O caminho de cada item',
+    'Item a item: quantas movimentações foram precisas, por quais filas passou e se chegou a um desfecho. '
+    + 'Os de mais movimentações vêm primeiro.', 9);
+  var L4 = 4;
+  _esfCabecalho(ws4, L4, ['RC', 'Item', 'Oportunidade', 'Movimentações', '1ª ação',
+                          'Última ação', 'Dias', 'Desfecho', 'Caminho percorrido'], ESF_C.BLUE); L4++;
+  jornadas.forEach(function(j, i){
+    _esfLinha(ws4, L4, [j.rc, j.item, j.oport, j.movimentacoes, fmtDt(j.primeira),
+      fmtDt(j.ultima), j.dias, j.concluido ? j.desfecho : 'em aberto', j.caminho || '—'],
+      { fill: i % 2 ? ESF_C.GREY_L : null, wrap:true });
+    ws4.getCell(L4, 9).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+    if (j.concluido) ws4.getCell(L4, 8).fill = _esfSolid(ESF_C.GREEN_L);
+    L4++;
+  });
+
+  // ── 5. Evolução diária ─────────────────────────────────────────
+  var ws5 = wb.addWorksheet('Evolução Diária', { views:[{ showGridLines:false }] });
+  ws5.columns = [{ width:14 }, { width:18 }, { width:14 }, { width:14 }];
+  _esfTitulo(ws5, 'Dia a dia', 'Movimentações e conclusões em cada dia do período', 4);
+  var L5 = 4;
+  _esfCabecalho(ws5, L5, ['Data', 'Movimentações', 'Conclusões', 'Total do dia'], ESF_C.BLUE); L5++;
+  Object.keys(r.porDia).sort().forEach(function(d, i){
+    var o = r.porDia[d];
+    _esfLinha(ws5, L5, [fmtDt(d), o.mov, o.conc, o.mov + o.conc],
+      { fill: i % 2 ? ESF_C.GREY_L : null });
+    L5++;
+  });
+  _esfLinha(ws5, L5, ['TOTAL', r.mov, r.conc, r.total], { bold:true, fill:ESF_C.BLUE_L });
+
+  // ── 6. Base de dados ───────────────────────────────────────────
+  var ws6 = wb.addWorksheet('Base de Dados', { views:[{ showGridLines:false }] });
+  ws6.columns = [{ width:12 }, { width:12 }, { width:8 }, { width:16 }, { width:20 },
+                 { width:24 }, { width:30 }, { width:16 }, { width:40 }];
+  _esfCabecalho(ws6, 1, ['Data', 'RC', 'Item', 'Oportunidade', 'Quem', 'Fila / Desfecho',
+                         'Motivo', 'Chamado MDG', 'Observação'], ESF_C.NAVY);
+  var L6 = 2;
+  r.linhas.forEach(function(l){
+    _esfLinha(ws6, L6, [fmtDt(l.data), l.rc, l.item, l.oport, l.quem, l.filaRotulo,
+      l.ehConclusao ? l.motivoConclusao : (l.motivo || (l.pedeMotivo ? '(sem motivo registrado)' : '')),
+      l.chamadoMdg, l.obs], { wrap:true });
+    ws6.getCell(L6, 9).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+    if (l.ehConclusao) ws6.getCell(L6, 6).fill = _esfSolid(ESF_C.GREEN_L);
+    L6++;
+  });
+  ws6.autoFilter = { from:{ row:1, column:1 }, to:{ row:1, column:9 } };
+  ws6.views = [{ state:'frozen', ySplit:1, showGridLines:false }];
+
+  var buf = await wb.xlsx.writeBuffer();
+  return new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
+async function ceDesfechoCopiar(mod){
+  var base = await _ceGarantirBase(mod);
+  if (!base.ok) { alert(base.msg); return; }
   var linhas = ceDesfechoLinhas(mod);
   if (!linhas.length) { alert('Nenhum desfecho no período selecionado.'); return; }
   var faixa = _ceDesfechoRange(mod);
@@ -59913,6 +61076,8 @@ async function ceDesfechoFiltrar(mod){
   _ceRenderDesfechos(mod);
 }
 function _ceRenderDesfechos(mod){
+  // o esforço segue o mesmo período e a mesma base — redesenha junto
+  try { _ceRenderEsforco(mod); } catch(e){ console.warn('_ceRenderEsforco:', e); }
   const tb=document.getElementById('ce-dfd-'+mod+'-tbody'); if(!tb) return;
   const cache=_ceCache[mod]; if(!cache){ tb.innerHTML=''; return; }
   const { de, ate }=_ceDesfechoRange(mod);
@@ -60773,6 +61938,7 @@ function prodAbrirModal(origem, tipo){
   document.getElementById('acao-selecao-atual').style.display = 'none';
   document.getElementById('acao-finalizado-box').style.display = 'none';
   _acaoMotivoBox('');
+  _acaoFilaMotivoBox('');
   const _cb0 = document.getElementById('acao-centro-box'); if(_cb0) _cb0.style.display = 'none';
   const _dc0 = document.getElementById('acao-dev-centro'); if(_dc0) _dc0.value = '';
   const _dm0 = document.getElementById('acao-dev-motivo'); if(_dm0) _dm0.value = '';
@@ -60880,6 +62046,9 @@ function acaoSelecionarTratamento(btn, tratamento){
   }
   try { _acaoPrazoPrevia(); } catch(e){}
 
+  // o motivo é da fila escolhida — some na conclusão, que tem o motivo dela
+  _acaoFilaMotivoBox(tratamento === 'Concluído' ? '' : tratamento);
+
   if(tratamento === 'Concluído'){
     // Avançar para estágio 2
     document.getElementById('acao-estagio-1').style.display = 'none';
@@ -60902,6 +62071,88 @@ function acaoSelecionarTratamento(btn, tratamento){
     if(_mdgBox) _mdgBox.style.display = _isMDG ? 'block' : 'none';
     if(!_isMDG && document.getElementById('acao-mdg-chamado')) document.getElementById('acao-mdg-chamado').value = '';
   }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MOTIVO DA MOVIMENTAÇÃO DE FILA
+//
+// Pedido do André em 20/11: "para chegar nas saídas a gente tem todo um
+// trabalho de movimentações de filas que requer muito esforço e nem
+// sempre é notado". Sem registrar POR QUE o item foi para cada fila, o
+// único número que sobra é o da conclusão — e aí 20 dias de cobrança
+// viram uma linha só.
+//
+// Uma lista por fila, obrigatória. A chave é o nome da fila normalizado
+// (sem acento, maiúscula), para a MESMA lista servir ao ADLV e ao FAST,
+// que chamam as mesmas filas por nomes diferentes ("FORNECEDOR" lá,
+// "PARADA FORNECEDOR" aqui).
+// ══════════════════════════════════════════════════════════════════
+var MOTIVOS_FILA = {
+  fornecedor: { rotulo:'O que foi pedido ao fornecedor', emoji:'🏭',
+                itens:['Solicitar Prorrogação','Solicitar Documentação','Solicitar Desconto'] },
+  requisitante:{ rotulo:'O que foi pedido ao requisitante', emoji:'👤',
+                itens:['Solicitação de nova reserva','Ajuste na RC'] },
+  mdg:         { rotulo:'O que foi pedido ao MDG', emoji:'🗂',
+                itens:['Novo ZIBE (PAI)','Novo ZERS (Filho)','Ajuste ZERS (Filho)'] },
+  thiago:      { rotulo:'O que foi enviado para validação', emoji:'✔️',
+                itens:['Validação de Docs'] },
+  parecerista: { rotulo:'O que foi pedido ao parecerista', emoji:'📝',
+                itens:['Envio de docs','Abertura de PATEC'] }
+};
+
+// Nome da fila → chave da lista. Fila que não está aqui não pede motivo
+// (Ag. Tratamento, Chamado CSP, 100% Reprovado): nessas o item não foi
+// pedido a ninguém, voltou para a nossa mão ou saiu do fluxo.
+function filaMotivoChave(fila){
+  var n = String(fila == null ? '' : fila).trim().toUpperCase()
+            .normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (!n) return '';
+  if (n.indexOf('FORNECEDOR') !== -1)   return 'fornecedor';
+  if (n.indexOf('REQUISITANTE') !== -1) return 'requisitante';
+  if (n.indexOf('MDG') === 0)           return 'mdg';
+  if (n.indexOf('THIAGO') !== -1)       return 'thiago';
+  if (n.indexOf('PARECERISTA') !== -1)  return 'parecerista';
+  return '';
+}
+function filaMotivoCfg(fila){ return MOTIVOS_FILA[filaMotivoChave(fila)] || null; }
+// A lista é fechada: motivo que não está nela não é motivo daquela fila.
+function filaMotivoValido(fila, motivo){
+  var cfg = filaMotivoCfg(fila);
+  if (!cfg) return true;
+  return cfg.itens.indexOf(String(motivo || '').trim()) !== -1;
+}
+
+// Preenche um <select> com a lista da fila. Devolve true se a fila pede
+// motivo. Lista de um item só já vem escolhida — clicar para confirmar o
+// óbvio só atrasa quem está tratando 40 RCs por dia.
+function filaMotivoPreencher(sel, fila, valorAtual){
+  if (!sel) return false;
+  var cfg = filaMotivoCfg(fila);
+  if (!cfg) { sel.innerHTML = '<option value="">— selecione —</option>'; sel.value = ''; return false; }
+  var atual = String(valorAtual || '').trim();
+  sel.innerHTML = '<option value="">— selecione —</option>'
+    + cfg.itens.map(function(m){
+        return '<option' + (m === atual ? ' selected' : '') + '>' + cpEsc(m) + '</option>';
+      }).join('');
+  if (!atual && cfg.itens.length === 1) sel.value = cfg.itens[0];
+  else sel.value = atual && cfg.itens.indexOf(atual) !== -1 ? atual : sel.value;
+  return true;
+}
+
+// A caixa do ADLV. Chamar com uma fila sem lista esconde e limpa.
+function _acaoFilaMotivoBox(fila){
+  var box = document.getElementById('acao-fila-motivo-box');
+  var sel = document.getElementById('acao-fila-motivo');
+  if (!box || !sel) return false;
+  var cfg = filaMotivoCfg(fila);
+  if (!cfg) { box.style.display = 'none'; sel.innerHTML = '<option value="">— selecione —</option>'; sel.value = ''; return false; }
+  filaMotivoPreencher(sel, fila, '');
+  var t = document.getElementById('acao-fila-motivo-titulo');
+  var r = document.getElementById('acao-fila-motivo-rotulo');
+  if (t) t.textContent = cfg.emoji + ' Motivo da movimentação';
+  if (r) r.textContent = cfg.rotulo;
+  box.style.display = 'block';
+  return true;
 }
 
 // A caixa do motivo serve aos dois fluxos que o exigem. Chamar com ''
@@ -61028,6 +62279,9 @@ function acaoVoltarEstagio1(){
   document.getElementById('acao-estagio-2').style.display = 'none';
   document.getElementById('acao-estagio-1').style.display = 'block';
   document.getElementById('acao-finalizado-box').style.display = 'none';
+  // voltou para a escolha da fila: o motivo da fila que estava marcada
+  // volta junto, senão o André refaz a escolha sem motivo nenhum
+  _acaoFilaMotivoBox(_prodCtx.tratamento === 'Concluído' ? '' : _prodCtx.tratamento);
   _acaoMotivoBox('');
   const _cbV = document.getElementById('acao-centro-box'); if(_cbV) _cbV.style.display = 'none';
   const _xglBoxV = document.getElementById('acao-xgl-nivel-box'); if(_xglBoxV) _xglBoxV.style.display = 'none';
@@ -61100,6 +62354,18 @@ async function prodConfirmarAcao(){
     if(!_pedidoNm){ errEl.textContent='Informe o NM do Pedido.'; errEl.style.display='block'; document.getElementById('acao-pedido-nm')?.focus(); return; }
     if(!_pedidoComentario){ errEl.textContent='Informe o comentário para a equipe de pedido.'; errEl.style.display='block'; document.getElementById('acao-pedido-comentario')?.focus(); return; }
   }
+  // Motivo da movimentação de fila — obrigatório nas filas que têm lista
+  const _fmBoxEl = document.getElementById('acao-fila-motivo-box');
+  const _fmVis   = _fmBoxEl && _fmBoxEl.style.display !== 'none';
+  const _filaMotivo = _fmVis ? (document.getElementById('acao-fila-motivo')?.value||'').trim() : '';
+  if(_fmVis && !_filaMotivo){
+    const _cfgFm = filaMotivoCfg(_prodCtx.tratamento);
+    errEl.textContent = 'Selecione o motivo da movimentação ('
+      + (_cfgFm ? _cfgFm.rotulo.toLowerCase() : 'o que foi pedido') + ').';
+    errEl.style.display = 'block';
+    document.getElementById('acao-fila-motivo')?.focus();
+    return;
+  }
   const _mdgBoxEl = document.getElementById('acao-mdg-box');
   const _mdgVis   = _mdgBoxEl && _mdgBoxEl.style.display !== 'none';
   const _mdgChamado = _mdgVis ? (document.getElementById('acao-mdg-chamado')?.value||'').trim() : '';
@@ -61133,6 +62399,9 @@ async function prodConfirmarAcao(){
     ...(_rcChavePre ? { rcChave: _rcChavePre, rc: _rcNumPre } : (_rcNumPre ? { rc: _rcNumPre } : {})),
     ...(_devCentro ? { centro: _devCentro } : {}),
     ...(_devVis && _devMotivo ? { motivo: _devMotivo } : {}),
+    // campo próprio: o motivo da FILA não é o motivo da conclusão, e
+    // misturar os dois estragaria o relatório de desfechos
+    ...(_filaMotivo ? { motivoFila: _filaMotivo } : {}),
     ...(_mdgVis && _mdgChamado ? { chamado_mdg: _mdgChamado } : {}),
     ...(_pedidoVis ? { pedido_negociacao: _pedidoNegociacao, pedido_fornecedor: _pedidoFornecedor, pedido_id_sap: _pedidoIdSap, pedido_nm: _pedidoNm, pedido_comentario: _pedidoComentario } : {}),
     ...(_statusMapaAcao ? { statusMapa: _statusMapaAcao } : {})
@@ -67910,6 +69179,7 @@ function gnvAcaoAbrir(chave, tipo){
   _gnvAcaoCtx.patecAtual = _gnvLinhaCalc(r).statusPatec || '';
   _gnvAcaoCtx.patecNovo  = '';
   _gnvAcaoPintarPatec();
+  _gnvFilaMotivoBox('');
 
   var tipoBadge = document.getElementById('gnv-acao-tipo-badge');
   if (tipoBadge) tipoBadge.textContent = (cfg.emoji ? cfg.emoji + ' ' : '') + cfg.label;
@@ -68146,6 +69416,7 @@ function gnvAcaoIrConclusao(){
   if (!_gnvAcaoCtx) return;
   _gnvAcaoCtx.etapa = 'conclusao';
   _gnvAcaoCtx.fila = '';
+  _gnvFilaMotivoBox('');   // a conclusão tem o motivo dela
   var box = document.getElementById('gnv-acao-conclusoes');
   if (box) {
     box.innerHTML = _GNV_CONCLUSOES.map(function(x){
@@ -68280,8 +69551,25 @@ function gnvAcaoSelFila(btn){
   document.querySelectorAll('#gnv-acao-filas .acao-sel-btn')
     .forEach(function(b){ b.classList.remove('selecionado'); });
   btn.classList.add('selecionado');
+  _gnvFilaMotivoBox(nova);
   _gnvAcaoPintarSla();
   _gnvAcaoPrevia();
+}
+
+// A caixa do motivo no FAST — mesma lista e mesma chave do ADLV
+function _gnvFilaMotivoBox(fila){
+  var box = document.getElementById('gnv-fila-motivo-box');
+  var sel = document.getElementById('gnv-fila-motivo');
+  if (!box || !sel) return false;
+  var cfg = (typeof filaMotivoCfg === 'function') ? filaMotivoCfg(fila) : null;
+  if (!cfg) { box.style.display = 'none'; sel.innerHTML = '<option value="">— selecione —</option>'; sel.value = ''; return false; }
+  filaMotivoPreencher(sel, fila, '');
+  var t = document.getElementById('gnv-fila-motivo-titulo');
+  var r = document.getElementById('gnv-fila-motivo-rotulo');
+  if (t) t.textContent = cfg.emoji + ' Motivo da movimentação';
+  if (r) r.textContent = cfg.rotulo;
+  box.style.display = 'block';
+  return true;
 }
 
 function gnvAcaoFechar(){
@@ -68352,6 +69640,21 @@ async function gnvAcaoConfirmar(){
     return;
   }
 
+  // Motivo da movimentação: obrigatório nas filas que têm lista
+  var _gFilaMotivo = '';
+  if (!ehConclusao) {
+    var _gmBox = document.getElementById('gnv-fila-motivo-box');
+    if (_gmBox && _gmBox.style.display !== 'none') {
+      _gFilaMotivo = String((document.getElementById('gnv-fila-motivo') || {}).value || '').trim();
+      if (!_gFilaMotivo) {
+        var _gCfg = filaMotivoCfg(_gnvAcaoCtx.fila);
+        mostrarErro('Selecione o motivo da movimentação ('
+          + (_gCfg ? _gCfg.rotulo.toLowerCase() : 'o que foi pedido') + ').');
+        return;
+      }
+    }
+  }
+
   var colab = _cobManualColab();
   if (!colab) { mostrarErro('Não identifiquei o colaborador logado — entre de novo para a ação contar na produção.'); return; }
 
@@ -68375,6 +69678,7 @@ async function gnvAcaoConfirmar(){
       tratamento: ehConclusao ? '' : fila,
       ...(!ehConclusao && slaDias ? { slaDias: slaDias } : {}),
       conclusao: ehConclusao ? _gnvAcaoCtx.conclusao : '',
+      ...(_gFilaMotivo ? { motivoFila: _gFilaMotivo } : {}),
       obs: obs,
       origem: 'gov_nova',
       ts: new Date().toISOString(),
@@ -75722,12 +77026,114 @@ async function unRecarregar(){
 //    mais novo. Quando os dois discordam, o rodapé desta aba diz isso
 //    em vez de deixar o André descobrir sozinho.
 // ══════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════
+// CRÍTICO × URGENTE  (ADLV)
+//
+// Classificação que o André mandou para a equipe em 20/11, para a
+// priorização do dia a dia. Duas perguntas, nessa ordem:
+//
+//   CRÍTICO? → o item está no card ⏰ Vencidos da Governança.
+//              Foi a régua que ele escolheu para "SLA alto" no ADLV.
+//   URGENTE? → proposta VENCIDA (PRAZO ≥ 91 dias) ou item PID.
+//
+//   proposta PRÓXIMA do vencimento = PRAZO entre 60 e 90 dias.
+//
+// O cruzamento das duas dá as quatro caixas da mensagem dele. Toda
+// linha da carteira cai em exatamente uma — não existe item sem
+// classificação, senão a conta não fecha com o total.
+//
+// Duas coisas que ele definiu e que valem estar escritas aqui:
+//   · "com cobrança" NÃO entra: o contador de cobrança só existe no
+//     FAST, e esta classificação é só do ADLV;
+//   · "Parada" NÃO entra: ficou só o PID.
+// ══════════════════════════════════════════════════════════════════
+var CU_CLASSES = [
+  { k:'cu',  t:'Crítico e urgente',      ico:'🔴', cor:'var(--vm)',  fundo:'var(--vmc)',
+    regra:'está no card ⏰ Vencidos E (proposta vencida ou PID)',
+    acao:'Prioridade máxima: atuar imediatamente para regularizar e evitar impacto na operação.' },
+  { k:'cnu', t:'Crítico, não urgente',   ico:'🟠', cor:'#E87722',    fundo:'#FDEDE3',
+    regra:'está no card ⏰ Vencidos, mas a proposta ainda não venceu e não é PID',
+    acao:'Antecipar o tratamento, acompanhar de perto e atuar antes de virar urgente.' },
+  { k:'unc', t:'Urgente, não crítico',   ico:'🟡', cor:'var(--am)',  fundo:'var(--amc)',
+    regra:'não está no card Vencidos, mas a proposta venceu, está a 60–90 dias ou é PID',
+    acao:'Manter o monitoramento e tratar dentro do prazo, para a proposta não vencer.' },
+  { k:'nn',  t:'Nem crítico, nem urgente', ico:'⚪', cor:'var(--tx2)', fundo:'var(--cin)',
+    regra:'não está no card Vencidos, PRAZO até 59 dias e não é PID',
+    acao:'Podem ficar para um segundo momento, sem culpa — depois dos de maior risco.' }
+];
+function cuClasse(k){
+  for (var i = 0; i < CU_CLASSES.length; i++) if (CU_CLASSES[i].k === k) return CU_CLASSES[i];
+  return CU_CLASSES[CU_CLASSES.length - 1];
+}
+// A classificação é do ADLV. No FAST as regras são outras (lá existe o
+// contador de cobrança), e inventar número para o FAST seria pior do
+// que não mostrar.
+function cuEhAdlv(){
+  try { return String(_moduloAtivo || '').indexOf('fast') !== 0; } catch (e) { return true; }
+}
+
+// Índice do card ⏰ Vencidos por RC + item — é ele que diz quem é crítico
+function cuVencIdx(){
+  var ix = {};
+  try {
+    (_govPcLista('venc') || []).forEach(function(r){
+      var rc = String(r.rc || '').trim(); if (!rc) return;
+      ix[rc + '|' + String(r.seq || r.item_rc || '').trim()] = 1;
+      ix[rc] = ix[rc] || 1;   // fallback pela RC, para o item escrito diferente
+    });
+  } catch (e) {}
+  return ix;
+}
+function cuEhCritico(r, ix){
+  var rc = String(r.rc || '').trim();
+  if (!rc) return false;
+  var k = rc + '|' + String(r.seq || r.item_rc || '').trim();
+  return !!(ix[k] || ix[rc]);
+}
+function cuEhPid(r){ return String(r.pid || '').trim() !== ''; }
+function cuPrazo(r){ return Number(r.prazo_c || 0); }
+function cuVencida(r){ return cuPrazo(r) >= 91; }
+function cuProxima(r){ var v = cuPrazo(r); return v >= 60 && v <= 90; }
+
+function cuClassificar(r, ix){
+  ix = ix || cuVencIdx();
+  var critico = cuEhCritico(r, ix);
+  var urgente = cuVencida(r) || cuEhPid(r);
+  if (critico && urgente) return 'cu';
+  if (critico) return 'cnu';
+  if (urgente || cuProxima(r)) return 'unc';
+  return 'nn';
+}
+// O porquê daquela linha, em uma frase — é o que a tabela mostra na
+// coluna "Por quê", para ninguém ter de confiar no rótulo sozinho.
+function cuMotivo(r, ix){
+  var p = [];
+  if (cuEhCritico(r, ix)) p.push('no card Vencidos');
+  if (cuVencida(r)) p.push('proposta vencida (' + cuPrazo(r) + ' dias)');
+  else if (cuProxima(r)) p.push('próxima do vencimento (' + cuPrazo(r) + ' dias)');
+  else p.push('prazo ' + (cuPrazo(r) || '—') + ' dias');
+  if (cuEhPid(r)) p.push('PID');
+  return p.join(' · ');
+}
+
+// Contagem por classe sobre um conjunto de linhas do Radar
+function cuContar(rows, ix){
+  ix = ix || cuVencIdx();
+  var o = { cu:0, cnu:0, unc:0, nn:0, total:0 };
+  (rows || []).forEach(function(r){ o[cuClassificar(r, ix)]++; o.total++; });
+  return o;
+}
+
 var SC_MAX = 400;              // linhas desenhadas; o XLSX leva todas
 var SC_SEM_STATUS = '(sem status no mapa)';
 var _scSel = null;             // null = a carteira inteira
 var _scPend = null;            // a marcação dentro do dropdown, ainda não aplicada
 var _scAberto = '';            // chave do card aberto
 var _scChart = null;
+// índice do card Vencidos, recalculado a cada desenho — serve às colunas
+// de Crítico × Urgente sem refazer a conta linha a linha
+var _scCuIx = null;
 
 function scEsc(v){ return (typeof cpEsc === 'function') ? cpEsc(v) : String(v == null ? '' : v); }
 function scNum(v){ return (typeof cpNum === 'function') ? cpNum(v) : String(v); }
@@ -75803,6 +77209,13 @@ function scCorte(k){
   for (var j = 0; j < SC_SAUDE.length; j++) if (SC_SAUDE[j].k === k) return SC_SAUDE[j];
   if (k === 'tudo') return { k:'tudo', t:'Carteira filtrada', cor:'var(--azm)',
                              f:function(){ return true; } };
+  // as quatro caixas do Crítico × Urgente
+  if (String(k).indexOf('cu:') === 0) {
+    var cl = cuClasse(String(k).slice(3));
+    var ixv = cuVencIdx();
+    return { k:k, t:cl.ico + ' ' + cl.t, ico:cl.ico, cor:cl.cor,
+             f:function(r){ return cuClassificar(r, ixv) === cl.k; } };
+  }
   // os cards dos status mais pesados do recorte — o nome vai na chave,
   // para o "+" deles abrir a lista como qualquer outro card
   if (String(k).indexOf('st:') === 0) {
@@ -75828,6 +77241,11 @@ var SC_DET_COLS = [
   { t:'Analista',       v:function(r){ return (r.analista === '#N/A') ? '' : r.analista; } },
   { t:'Fila',           v:function(r){ return r.fila; } },
   { t:'Status do Mapa', v:function(r){ return scStatusDe(r); } },
+  { t:'Crítico × Urgente', v:function(r){
+      var c = cuClasse(cuClassificar(r, _scCuIx || (_scCuIx = cuVencIdx())));
+      return c.ico + ' ' + c.t; } },
+  { t:'Por quê',        v:function(r){
+      return cuMotivo(r, _scCuIx || (_scCuIx = cuVencIdx())); } },
   { t:'Segmento',       v:function(r){ return r.seguimento; } },
   { t:'PATEC Obrig.',   v:function(r){ return r.patec_obrig; } },
   { t:'Urgência',       v:function(r){ return r.urgencia; } },
@@ -75878,6 +77296,49 @@ function scCardHTML(c, n, total){
     + scNum(n) + '</div>'
     + '<div style="font-size:9.5px;color:var(--tx2);margin-top:3px">' + pct + '% do filtro</div>'
     + '</div>';
+}
+
+// ── crítico × urgente ─────────────────────────────────────────────
+function scDesenharCU(rows){
+  var el = document.getElementById('sc-cu');
+  if (!el) return;
+  if (!cuEhAdlv()) {
+    el.innerHTML = '<div class="cd"><div class="cd-t" style="margin:0 0 .25rem">'
+      + '🚦 Crítico × Urgente</div><div style="font-size:11px;color:var(--tx2)">'
+      + 'A classificação é do ADLV. No FAST as regras são outras — lá existe o contador '
+      + 'de cobrança —, e mostrar o número do ADLV aqui seria inventar dado.</div></div>';
+    return;
+  }
+  var ix = cuVencIdx();
+  var n = cuContar(rows, ix);
+  var total = rows.length;
+  var cards = CU_CLASSES.map(function(c){
+    var q = n[c.k] || 0;
+    var pct = total ? Math.round(q / total * 100) : 0;
+    return '<div style="position:relative;border:1.5px solid ' + c.cor + ';border-radius:10px;'
+      + 'padding:.8rem .75rem;background:' + c.fundo
+      + (_scAberto === 'cu:' + c.k ? ';box-shadow:0 0 0 2px var(--azm)' : '') + '">'
+      + scMais('cu:' + c.k)
+      + '<div style="font-size:11.5px;font-weight:800;color:' + c.cor + ';line-height:1.25;'
+      + 'padding-right:26px">' + c.ico + ' ' + scEsc(c.t) + '</div>'
+      + '<div style="font-size:24px;font-weight:800;color:' + c.cor + ';line-height:1.1;'
+      + 'margin-top:4px">' + scNum(q)
+      + ' <span style="font-size:13px;font-weight:700">(' + pct + '%)</span></div>'
+      + '<div style="font-size:10px;color:var(--tx2);margin-top:5px;line-height:1.4">'
+      + '<strong>Regra:</strong> ' + scEsc(c.regra) + '</div>'
+      + '<div style="font-size:10px;color:var(--tx);margin-top:4px;line-height:1.4">'
+      + scEsc(c.acao) + '</div></div>';
+  }).join('');
+  el.innerHTML = '<div class="cd">'
+    + '<div class="cd-t" style="margin:0 0 .25rem">🚦 Crítico × Urgente — onde o esforço tem de estar</div>'
+    + '<div style="font-size:10.5px;color:var(--tx2);margin-bottom:.8rem">'
+    + '<strong>Crítico</strong> = o item está no card ⏰ Vencidos da Governança. '
+    + '<strong>Urgente</strong> = proposta vencida (PRAZO ≥ 91 dias) ou PID. '
+    + 'Proposta <strong>próxima</strong> do vencimento = PRAZO de 60 a 90 dias. '
+    + 'Cada item da carteira cai em uma caixa só, e as quatro somam o total do filtro. '
+    + 'Clique no <strong>+</strong> para ver as RCs.</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">'
+    + cards + '</div></div>';
 }
 
 // ── a rosca ───────────────────────────────────────────────────────
@@ -75947,6 +77408,7 @@ function scDesenhar(){
   var elC = document.getElementById('sc-cards');
   if (!elT || !elC) return;
   var base = scBase(), rows = scRows(), total = rows.length;
+  _scCuIx = cuVencIdx();
   var lista = scStatusLista();
 
   // cabeçalho: de que mapa saiu isto
@@ -76024,6 +77486,7 @@ function scDesenhar(){
       })()
     + '</div></div>';
 
+  scDesenharCU(rows);
   scDesenharRosca(rows);
 
   // os cards do Radar Estratégico, recortados
@@ -76212,7 +77675,11 @@ function scBaixarTudo(){
     'Gerado em': cpDataBR(cpHojeISO())
   }]), 'Filtro');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(scLinhasXls(rows)), 'Tudo');
-  SC_SAUDE.concat(SC_CARDS).forEach(function(c){
+  var cuIx = cuVencIdx();
+  var cortesCU = cuEhAdlv() ? CU_CLASSES.map(function(c){
+    return { t:c.t, f:function(r){ return cuClassificar(r, cuIx) === c.k; } };
+  }) : [];
+  cortesCU.concat(SC_SAUDE).concat(SC_CARDS).forEach(function(c){
     var itens = rows.filter(c.f);
     if (!itens.length) return;
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(scLinhasXls(itens)), scNomeAba(c.t));
