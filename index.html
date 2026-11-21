@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '21/11 20:50';
+var GTO_BUILD = '21/11 22:45';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -60100,6 +60100,8 @@ function ceEsforcoLinhas(mod){
       // reserva" e "sai da fila" ficam de fora da meta — a última o
       // próprio modal avisa que "não conta na produção".
       contaMeta: ESF_TIPOS_META.indexOf(String(a.tipo || '').trim()) !== -1,
+      // a prioridade gravada no momento do lançamento, quando houver
+      critUrg: String(a.critUrg || '').trim(),
       conclusao: ehConc ? CE_DESFECHOS[conclusao] : '',
       fila: fila,
       filaRotulo: ehConc ? ('Concluído → ' + CE_DESFECHOS[conclusao]) : esfFilaRotulo(fila),
@@ -60387,7 +60389,7 @@ var ESF_TIPOS_META = ['primeira_analise', 'em_tratativa', 'status_b', 'ag_parece
 function esfMetaDe(mod, nome){
   try {
     if (typeof _ceTemMeta === 'function' && !_ceTemMeta(mod, nome))
-      return { meta: ESF_META_PADRAO, fonte: 'referência (sem meta individual neste módulo)' };
+      return { meta: ESF_META_PADRAO, fonte: ESF_META_REF };
     if (typeof _ceMetaInd === 'function') {
       var m = +_ceMetaInd(mod, nome) || 0;
       if (m > 0) return { meta: m, fonte: 'cadastro da equipe' };
@@ -60480,6 +60482,52 @@ function esfDiasDoPeriodo(de, ate){
     d.setDate(d.getDate() + 1);
   }
   return out;
+}
+
+// Dias abaixo / acima da meta DA EQUIPE — não a soma das pessoas.
+// Pedido do André em 21/11: "este eu preciso saber o resultado da equipe:
+// se nos dias apurados for 20 dias, 5 ficou abaixo e 15 ficou acima".
+// Então a conta é por DIA do calendário: no dia, a equipe somada bateu a
+// meta somada de quem estava trabalhando? Abaixo + Acima = dias apurados.
+// Dia em que todo mundo estava de folga/férias não é apurado.
+//
+// Quem NÃO tem meta individual no módulo (o líder, ou quem não tem meta
+// naquela frente) entra com a PRODUÇÃO e não entra com a META. André,
+// 21/11: "eu não tenho meta individual, porém eu contribuo com a meta da
+// equipe — tudo que eu for fazendo precisa ser contabilizado; apenas a
+// meta individual que não tem". Se a meta de referência dele entrasse,
+// 30/dia derrubariam o dia da equipe sozinhos.
+var ESF_META_REF = 'referência (sem meta individual neste módulo)';
+function esfMetaEquipe(p){ return p.metaFonte === ESF_META_REF ? 0 : (+p.meta || 0); }
+// a mesma regra, para o período inteiro: a produção dele soma, a meta não
+function esfMetaPeriodoEquipe(p){
+  return p.metaFonte === ESF_META_REF ? 0 : (+p.metaPeriodo || 0);
+}
+function esfDiasEquipe(pessoas){
+  var porDia = {};
+  (pessoas || []).forEach(function(p){
+    var metaDia = esfMetaEquipe(p);
+    (p.linhaDia || []).forEach(function(d){
+      if (d.prod === null || d.prod === undefined) return;   // folga/férias não cobra
+      var o = porDia[d.data] || (porDia[d.data] = { data:d.data, prod:0, meta:0, gente:0 });
+      o.prod += (+d.prod || 0); o.meta += metaDia; if (metaDia) o.gente++;
+    });
+  });
+  // dia em que ninguém com meta foi cobrado (todo mundo de folga) não é
+  // dia apurado — não pode cair em "abaixo" por falta de régua
+  var dias = Object.keys(porDia).sort().map(function(k){ return porDia[k]; })
+    .filter(function(o){ return o.meta > 0; })
+    .map(function(o){
+      o.bateu = o.prod >= o.meta;
+      o.falta = Math.max(0, o.meta - o.prod);
+      return o;
+    });
+  return {
+    dias: dias,
+    total: dias.length,
+    abaixo: dias.filter(function(d){ return !d.bateu; }),
+    acima: dias.filter(function(d){ return d.bateu; })
+  };
 }
 
 function ceEsforcoPessoas(mod){
@@ -60644,9 +60692,14 @@ function _ceRenderEsforco(mod){
   };
   // o aproveitamento da equipe vem do fechamento do dia, não das ações —
   // é o mesmo número dos Alertas de Performance
-  var eq = ceEsforcoPessoas(mod).reduce(function(o, p){
-    o.prod += p.producao; o.meta += p.metaPeriodo; o.ab += p.diasAbaixo.length; return o;
+  var _esfPes = ceEsforcoPessoas(mod);
+  var eq = _esfPes.reduce(function(o, p){
+    o.prod += p.producao; o.meta += esfMetaPeriodoEquipe(p);
+    o.ab += p.diasAbaixo.length; return o;
   }, { prod:0, meta:0, ab:0 });
+  // o card fala do resultado da EQUIPE no dia, igual ao Resumo Executivo
+  // do relatório: abaixo + acima = dias apurados
+  var eqD = esfDiasEquipe(_esfPes);
   el.innerHTML = card(r.mov, 'Movimentações') + card(r.conc, 'Conclusões', 'var(--vd)')
     + card(r.nRcs, 'RCs distintas')
     + card(r.porConclusao ? r.porConclusao.toFixed(1).replace('.', ',') : '0',
@@ -60654,7 +60707,8 @@ function _ceRenderEsforco(mod){
     + card(eq.meta ? _esfPct(eq.prod / eq.meta) : '—', 'Aproveit. (trabalhados)',
            eq.meta && eq.prod / eq.meta >= 1 ? 'var(--vd)'
              : (eq.meta && eq.prod / eq.meta >= 0.7 ? 'var(--am)' : 'var(--vm)'))
-    + card(eq.ab, 'Dias abaixo da meta', eq.ab ? 'var(--vm)' : 'var(--vd)')
+    + card(eqD.abaixo.length + '/' + eqD.total, 'Dias abaixo (equipe)',
+           eqD.abaixo.length ? 'var(--vm)' : 'var(--vd)')
     + card(r.total, 'Ações no total')
     // o foco no que é crítico: cobertura do card ⏰ Vencidos
     + (function(){
@@ -60816,11 +60870,13 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   var ExcelJS = window.ExcelJS;
   var pessoas = ceEsforcoPessoas(mod);
   var somaEq = pessoas.reduce(function(o, p){
-    o.trab += p.trabalhados; o.prod += p.producao; o.meta += p.metaPeriodo;
-    o.ab += p.diasAbaixo.length; o.uteis = Math.max(o.uteis, p.diasUteis || 0);
+    o.trab += p.trabalhados; o.prod += p.producao; o.meta += esfMetaPeriodoEquipe(p);
+    o.ab += p.diasAbaixo.length; o.acima += p.diasAcima || 0;
+    o.uteis = Math.max(o.uteis, p.diasUteis || 0);
     o.fech += p.fechTotal || 0;
     return o;
-  }, { trab:0, prod:0, meta:0, ab:0, uteis:0, fech:0 });
+  }, { trab:0, prod:0, meta:0, ab:0, acima:0, uteis:0, fech:0 });
+  var eqDias = esfDiasEquipe(pessoas);
   var wb = new ExcelJS.Workbook();
   wb.creator = 'GTO'; wb.created = new Date();
   var MOD = String(mod).toUpperCase();
@@ -60836,16 +60892,20 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   var L = 4;
   _esfCabecalho(ws, L, ['Indicador', 'Valor', 'O que significa'], ESF_C.NAVY); L++;
   var ind = [
-    ['Ações registradas', r.total, 'Tudo que a equipe lançou no período — movimentações e conclusões'],
-    ['Movimentações de fila', r.mov, 'Cada vez que um item foi empurrado para fornecedor, requisitante, MDG, validação ou parecerista'],
+    // "Ações registradas precisa ser o mesmo número do analisado (prod.)"
+    // — André, 21/11. Então aqui entra o mesmo número da HH da Equipe:
+    // as ações dos tipos que valem meta, igual ao velocímetro.
+    ['Ações registradas', somaEq.prod,
+     'O mesmo número de Analisados (prod.) da HH da Equipe — as ações lançadas nos tipos '
+     + 'que valem meta, na regra do velocímetro'],
     ['Conclusões', r.conc, 'Itens que saíram: pedido, republicação, XGL, devolução ou nova reserva'],
     ['RCs distintas tocadas', r.nRcs,
      'Quantas RCs DIFERENTES receberam pelo menos uma ação — a mesma RC tocada 5 vezes conta 1'],
-    ['Itens concluídos', r.nRcsConc, 'RC + item distintos que chegaram a um desfecho'],
     ['Movimentações por conclusão', r.conc ? Number(r.porConclusao.toFixed(2)) : 0,
      'Quantos empurrões, em média, foram precisos para cada item sair'],
     ['Movimentações com motivo', r.comMotivo, 'Movimentações em que o motivo foi registrado'],
-    ['Movimentações sem motivo', r.semMotivo, 'Lançadas antes de o motivo virar obrigatório — não dá para classificar'],
+    ['Movimentações sem motivo', r.semMotivo,
+     'Lançadas antes de o motivo virar obrigatório — não dá para classificar'],
     ['Ações por dia com registro', r.dias ? Number((r.total / r.dias).toFixed(1)) : 0,
      'Volume médio de ações nos dias em que houve lançamento'],
     ['Aproveit. Meta (Analisados) da equipe',
@@ -60854,23 +60914,12 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
      + 'Dia útil sem ação nenhuma entra na conta como zero'],
     ['Taxa de conclusão', r.total ? _esfPct(r.conc / r.total) : '—',
      'Das ações do período, quantas terminaram em desfecho — esta sim fala de item finalizado'],
-    // A diferença entre as duas contagens tem de ficar à vista: é ela
-    // que diz se o fechamento está refletindo o que foi lançado. A trava
-    // de "fechar o dia antes de lançar" já cobre o dia passado em aberto;
-    // o que sobra é ação lançada DEPOIS de fechar o dia, tipo que não
-    // conta meta (Outros, saiu da fila) e quem é isento da trava.
-    ['Conferência: Analisados × fechamento do dia',
-     somaEq.prod + ' × ' + somaEq.fech + ' (diferença ' + (somaEq.prod - somaEq.fech) + ')',
-     'Analisados sai das AÇÕES (é o que este relatório usa). O número do fechamento do dia é o '
-     + 'que alimenta o velocímetro e os Alertas de Performance. Diferença grande = ação lançada '
-     + 'depois de fechar o dia, ou dia trabalhado sem fechamento'],
-    // NÃO é um número de dias do calendário: é a soma por pessoa. Com 6
-    // pessoas, pode passar dos dias do período sem erro nenhum — e foi
-    // exatamente o que confundiu o André em 21/11.
-    ['Dias-pessoa abaixo da meta',
-     somaEq.ab + ' de ' + somaEq.trab + ' dias trabalhados',
-     'Somando as pessoas, não o calendário: cada analista pode contribuir com até '
-     + somaEq.uteis + ' dia(s). A lista datada, por pessoa, está no One a One']
+    ['Dias abaixo da meta', eqDias.abaixo.length,
+     'Resultado da EQUIPE, dia a dia: dos ' + eqDias.total + ' dia(s) apurados, em quantos a '
+     + 'produção somada ficou abaixo da meta somada de quem estava trabalhando'],
+    ['Dias acima da meta', eqDias.acima.length,
+     'Os outros dias apurados — a equipe bateu a meta do dia. Abaixo + Acima = '
+     + eqDias.total + ' dia(s). O resultado individual, com data, está no One a One']
   ];
   ind.forEach(function(x, i){
     _esfLinha(ws, L, x, { fill: i % 2 ? ESF_C.GREY_L : null, wrap:true });
@@ -60928,6 +60977,11 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
                  { width:10 }, { width:11 },
                  { width:11 }, { width:12 }, { width:9 }, { width:12 }, { width:12 },
                  { width:13 }, { width:13 }];
+  // André, 21/11: "pode ocultar as colunas da foto 2" — Movim. (13) e
+  // Fora da meta (21). Ficam escondidas, não apagadas: são elas que
+  // fecham a conta MOVIM. + CONCLUSÕES = ANALISADOS + FORA DA META,
+  // e basta reexibir no Excel para conferir.
+  [13, 21].forEach(function(c){ ws3.getColumn(c).hidden = true; });
   _esfTitulo(ws3, 'HH da Equipe — esforço e aproveitamento por analista',
     'ANALISADOS (prod.) = as AÇÕES lançadas no modal, na MESMA regra do velocímetro: cada vez '
     + 'que um item anda (saiu do fornecedor e foi para o MDG, por exemplo) conta 1, e conclusão '
@@ -60951,7 +61005,10 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
                 ESF_C.BLUE); L3++;
   var COL_APROV = 11, COL_ABAIXO = 9;
   pessoas.forEach(function(p, i){
-    _esfLinha(ws3, L3, [p.nome, p.diasUteis, p.trabalhados, p.folgas, p.semRegistro,
+    // quem não tem meta individual: a produção soma para a equipe, a meta
+    // é só referência — por isso o nome avisa e o TOTAL não leva essa meta
+    _esfLinha(ws3, L3, [p.nome + (p.metaFonte === ESF_META_REF ? ' (sem meta individual)' : ''),
+      p.diasUteis, p.trabalhados, p.folgas, p.semRegistro,
       p.meta, p.metaPeriodo, p.diasMeta ? Number(p.mediaDia.toFixed(1)) : '—',
       p.diasAbaixo.length, p.producao,
       p.metaPeriodo ? _esfPct(p.aproveitamento) : '—',
@@ -60972,7 +61029,7 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     L3++;
   });
   var somaP = pessoas.reduce(function(o, p){
-    o.trab += p.trabalhados; o.prod += p.producao; o.meta += p.metaPeriodo;
+    o.trab += p.trabalhados; o.prod += p.producao; o.meta += esfMetaPeriodoEquipe(p);
     o.diasMeta += p.diasMeta;
     o.ab += p.diasAbaixo.length; o.mov += p.mov; o.conc += p.conc;
     o.fora += p.foraMeta;
@@ -60994,7 +61051,11 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     + 'então Média/dia ÷ Meta/dia dá o aproveitamento. Dia útil sem nenhuma ação conta como dia '
     + 'abaixo da meta — não some da conta. "Dias Trabalhados" e "Sem fechamento" falam só do '
     + 'registro do fechamento, e não mexem em Analisados. Ação lançada em sábado, domingo ou '
-    + 'feriado entra em Analisados, mas não cria dia cobrado — a meta é dos dias úteis.';
+    + 'feriado entra em Analisados, mas não cria dia cobrado — a meta é dos dias úteis. '
+    + 'Quem está marcado como "(sem meta individual)" contribui com a produção da equipe '
+    + 'normalmente: os Analisados dele entram no TOTAL, só a meta dele não — a Meta/dia '
+    + 'que aparece na linha é referência pessoal, por isso o TOTAL da Meta do período não é '
+    + 'a soma da coluna.';
   leg.font = { name:'Calibri', size:10, italic:true, color:{ argb:ESF_C.GREY_TXT } };
   leg.alignment = { horizontal:'left', vertical:'middle', wrapText:true };
   ws3.getRow(L3).height = 30;
@@ -61133,9 +61194,15 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
       if (!classeDe[k]) classeDe[k] = cuClassificar(rr);
       if (!classeDe[rc]) classeDe[rc] = classeDe[k];
     });
+    // 1º a classe GRAVADA na ação (vale para item que já saiu da carteira),
+    // 2º a situação de hoje, 3º fora. É o que faz o passado parar de cair
+    // todo em "fora da carteira de trabalho" daqui para a frente.
     var classeDaLinha = function(l){
+      if (l.critUrg && CU_CLASSES.some(function(c){ return c.k === l.critUrg; }))
+        return l.critUrg;
       return classeDe[l.rc + '|' + l.item] || classeDe[l.rc] || 'fora';
     };
+    var nGravada = r.linhas.filter(function(l){ return !!l.critUrg; }).length;
     var carteira = cuContar(universo);
 
     _esfTitulo(ws3d, 'Crítico × Urgente — a equipe está trabalhando no que pesa?',
@@ -61178,8 +61245,10 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
       _esfLinha(ws3d, L3d, ['(fora da carteira de trabalho)', fora,
         _esfPct(totalClass ? fora / totalClass : 0),
         Object.keys(rcsClasse['fora'] || {}).length, '—', '—', '—',
-        'Item já concluído, ou que está em outro status do mapa (abertura, aguardando o PATEC '
-        + 'fechar). Trabalho feito, mas fora desta comparação.'],
+        'Item que já saiu da carteira (concluído) ou que está em outro status do mapa, e cuja '
+        + 'ação foi lançada ANTES de o dashboard passar a gravar a prioridade. Para essas não dá '
+        + 'para recuperar como o item estava — da ação de hoje em diante, a classe fica gravada '
+        + 'no lançamento e a linha encolhe sozinha.'],
         { fill:ESF_C.GREY_L, wrap:true });
       ws3d.getCell(L3d, 8).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
       L3d++;
@@ -61215,9 +61284,11 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     L3d += 1;
     ws3d.mergeCells(L3d, 1, L3d, 8);
     var nota = ws3d.getCell(L3d, 1);
-    nota.value = 'A classificação é a de HOJE: o mapa do dia de ontem não fica guardado, então um '
-      + 'item que era crítico na semana passada e já foi resolvido aparece pela situação atual. '
-      + 'Use esta aba para a tendência do período, não para auditar ação por ação.';
+    nota.value = 'De onde vem a classe de cada ação: ' + nGravada + ' de ' + r.linhas.length
+      + ' ação(ões) já têm a prioridade GRAVADA no momento do lançamento — essas são exatas, '
+      + 'mesmo para item já concluído. O resto é classificado pela situação de HOJE do item, e '
+      + 'por isso item que saiu da carteira cai em "fora da carteira de trabalho". '
+      + 'A gravação começou em 21/11; quanto mais o tempo passa, menor fica essa linha.';
     nota.font = { name:'Calibri', size:10, italic:true, color:{ argb:ESF_C.GREY_TXT } };
     nota.alignment = { horizontal:'left', vertical:'middle', wrapText:true };
     ws3d.getRow(L3d).height = 30;
@@ -62636,6 +62707,15 @@ async function prodConfirmarAcao(){
     // campo próprio: o motivo da FILA não é o motivo da conclusão, e
     // misturar os dois estragaria o relatório de desfechos
     ...(_filaMotivo ? { motivoFila: _filaMotivo } : {}),
+    // a prioridade do item NO MOMENTO da ação — depois de concluído ele
+    // sai da carteira e essa informação não existe mais em lugar nenhum
+    ...((function(){
+      try {
+        var c = (typeof cuClasseDaRc === 'function')
+              ? cuClasseDaRc(_rcNumPre, (_rcChavePre || '').split('|')[1]) : '';
+        return c ? { critUrg: c } : {};
+      } catch (e) { return {}; }
+    })()),
     ...(_mdgVis && _mdgChamado ? { chamado_mdg: _mdgChamado } : {}),
     ...(_pedidoVis ? { pedido_negociacao: _pedidoNegociacao, pedido_fornecedor: _pedidoFornecedor, pedido_id_sap: _pedidoIdSap, pedido_nm: _pedidoNm, pedido_comentario: _pedidoComentario } : {}),
     ...(_statusMapaAcao ? { statusMapa: _statusMapaAcao } : {})
@@ -77408,6 +77488,30 @@ function cuMotivo(r, ix){
   p.push('SLA ' + cuSla(r) + (cuSlaAlto(r) ? ' (alto)' : ''));
   if (cuEhPid(r)) p.push('PID');
   return p.join(' · ');
+}
+
+// A classe de uma RC + item HOJE, pelo Radar carregado. É o que a ação
+// guarda no momento do lançamento: depois que o item é concluído ele sai
+// da carteira, e nunca mais dá para saber como ele estava. Gravar no ato
+// é a única forma de o relatório de esforço classificar o passado.
+function cuClasseDaRc(rc, seq){
+  try {
+    if (!cuEhAdlv()) return '';
+    var base = (typeof _radarDados !== 'undefined' && _radarDados) ? _radarDados : [];
+    if (!base.length) return '';
+    var a1 = String(rc || '').trim(), b1 = String(seq || '').trim();
+    if (!a1) return '';
+    var r = null;
+    for (var i = 0; i < base.length; i++) {
+      var x = base[i];
+      if (String(x.rc || '').trim() !== a1) continue;
+      if (!b1 || String(x.seq || x.item_rc || '').trim() === b1) { r = x; break; }
+      if (!r) r = x;                      // a RC serve de reserva
+    }
+    if (!r) return '';
+    if (!cuNoUniverso(r)) return '';      // fora da carteira de trabalho
+    return cuClassificar(r, cuIxAtual());
+  } catch (e) { return ''; }
 }
 
 // Contagem por classe sobre um conjunto de linhas do Radar
