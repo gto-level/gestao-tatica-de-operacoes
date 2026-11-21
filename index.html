@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '22/11 00:05';
+var GTO_BUILD = '22/11 00:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -61213,14 +61213,28 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
       if (!classeRadar[rc]) classeRadar[rc] = classeRadar[k];
       if (!statusRadar[rc]) statusRadar[rc] = String(rr.analista_auto || '').trim();
     });
-    // 1º a classe GRAVADA na ação — essa vale até para item já concluído;
-    // 2º a situação de hoje do item, esteja ele em que status estiver no
-    // Radar; 3º "fora" só quando o item não está em lugar nenhum do Radar
-    // e a ação é anterior à gravação.
+    // A classe gravada em QUALQUER ação do item serve para as outras ações
+    // do mesmo item: se a movimentação de segunda gravou 🔴, a conclusão
+    // de sexta herda esse 🔴 mesmo que o item já tenha saído do Radar.
+    var cuValida = function(k){
+      return !!k && CU_CLASSES.some(function(c){ return c.k === k; });
+    };
+    var gravPorItem = {};
+    r.linhas.slice().sort(function(a, b){
+      return String(a.data).localeCompare(String(b.data));
+    }).forEach(function(l){
+      if (!cuValida(l.critUrg)) return;
+      gravPorItem[l.rc + '|' + l.item] = l.critUrg;
+      gravPorItem[l.rc] = l.critUrg;
+    });
+    // 1º a classe GRAVADA na própria ação; 2º a gravada em outra ação do
+    // mesmo item no período; 3º a situação de hoje do item, esteja ele em
+    // que status estiver no Radar; 4º "fora" só quando o item não está em
+    // lugar nenhum do Radar e nenhuma ação dele trouxe a classe.
     var classeDaLinha = function(l){
-      if (l.critUrg && CU_CLASSES.some(function(c){ return c.k === l.critUrg; }))
-        return l.critUrg;
-      return classeDe[l.rc + '|' + l.item] || classeDe[l.rc]
+      if (cuValida(l.critUrg)) return l.critUrg;
+      return gravPorItem[l.rc + '|' + l.item] || gravPorItem[l.rc]
+          || classeDe[l.rc + '|' + l.item] || classeDe[l.rc]
           || classeRadar[l.rc + '|' + l.item] || classeRadar[l.rc] || 'fora';
     };
     var nGravada = r.linhas.filter(function(l){ return !!l.critUrg; }).length;
@@ -61274,6 +61288,81 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
       carteira.total, '100%', '', ''],
       { bold:true, fill:ESF_C.BLUE_L });
     L3d += 2;
+
+    // ── os itens que SAÍRAM no período ───────────────────────────
+    // André, 21/11: "agora preciso que faça a mesma análise para os itens
+    // que foram concluídos dentro do período analisado". A tabela de cima
+    // é o ESFORÇO (ações); esta é o RESULTADO (itens que saíram), e a
+    // leitura que interessa é se o que saiu era o que pesava.
+    var conclusoes = r.linhas.filter(function(l){ return l.ehConclusao; });
+    ws3d.mergeCells(L3d, 1, L3d, 8);
+    var tC = ws3d.getCell(L3d, 1);
+    tC.value = 'CONCLUÍDOS NO PERÍODO — em que classe estavam os ' + conclusoes.length
+      + ' item(ns) que saíram';
+    tC.font = { name:'Calibri', size:12, bold:true, color:{ argb:ESF_C.WHITE } };
+    tC.fill = _esfSolid(ESF_C.NAVY);
+    tC.alignment = { horizontal:'left', vertical:'middle' };
+    ws3d.getRow(L3d).height = 20; L3d++;
+    ws3d.mergeCells(L3d, 1, L3d, 8);
+    var sC = ws3d.getCell(L3d, 1);
+    sC.value = 'A tabela de cima conta AÇÕES (o esforço). Esta conta ITENS QUE SAÍRAM (o '
+      + 'resultado), pela classe que o item tinha — a gravada no lançamento quando existe, '
+      + 'senão a situação de hoje. "Movim. até sair" são as ações de fila que o item recebeu '
+      + 'no período antes de ser concluído: é o preço de cada saída em cada classe.';
+    sC.font = { name:'Calibri', size:9.5, italic:true, color:{ argb:ESF_C.GREY_TXT } };
+    sC.alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+    ws3d.getRow(L3d).height = 26; L3d++;
+    _esfCabecalho(ws3d, L3d, ['Classe', 'Conclusões', '% das conclusões', 'RCs distintas',
+                              'Movim. até sair', 'Movim. por conclusão', 'Na carteira hoje',
+                              'Desfechos'], ESF_C.NAVY); L3d++;
+    // movimentações (ações que não são conclusão) por item, para o preço
+    var movPorItem = {};
+    r.linhas.forEach(function(l){
+      if (l.ehConclusao) return;
+      var k = l.rc + '|' + l.item;
+      movPorItem[k] = (movPorItem[k] || 0) + 1;
+    });
+    var totC = conclusoes.length;
+    CU_CLASSES.forEach(function(c){
+      var ls = conclusoes.filter(function(l){ return classeDaLinha(l) === c.k; });
+      var rcs = {}, mov = 0, desf = {};
+      ls.forEach(function(l){
+        rcs[l.rc] = 1;
+        mov += movPorItem[l.rc + '|' + l.item] || 0;
+        if (l.conclusao) desf[l.conclusao] = (desf[l.conclusao] || 0) + 1;
+      });
+      _esfLinha(ws3d, L3d, [c.ico + ' ' + c.t, ls.length,
+        _esfPct(totC ? ls.length / totC : 0), Object.keys(rcs).length, mov,
+        ls.length ? Number((mov / ls.length).toFixed(1)) : 0,
+        carteira[c.k] || 0, _esfTop(desf, 3) || '—'], { wrap:true });
+      ws3d.getCell(L3d, 1).fill = _esfSolid(
+        c.k === 'cu' ? ESF_C.RED_L : (c.k === 'cnu' ? ESF_C.AMBER_L
+          : (c.k === 'unc' ? ESF_C.AMBER_L : ESF_C.GREY_L)));
+      ws3d.getCell(L3d, 8).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+      L3d++;
+    });
+    var semClasseC = conclusoes.filter(function(l){ return classeDaLinha(l) === 'fora'; }).length;
+    var movTot = conclusoes.reduce(function(a, l){
+      return a + (movPorItem[l.rc + '|' + l.item] || 0); }, 0);
+    _esfLinha(ws3d, L3d, ['TOTAL', totC - semClasseC, '100%',
+      Object.keys(conclusoes.reduce(function(o, l){
+        if (classeDaLinha(l) !== 'fora') o[l.rc] = 1; return o; }, {})).length,
+      movTot, totC ? Number((movTot / totC).toFixed(1)) : 0, carteira.total, ''],
+      { bold:true, fill:ESF_C.BLUE_L });
+    L3d++;
+    if (semClasseC) {
+      ws3d.mergeCells(L3d, 1, L3d, 8);
+      var nC = ws3d.getCell(L3d, 1);
+      nC.value = semClasseC + ' conclusão(ões) ficaram fora desta tabela: o item já não está no '
+        + 'Radar e nenhuma ação dele no período trouxe a classe gravada. Daqui para frente toda '
+        + 'ação nasce com a classe, então a conclusão herda a classe da movimentação que a '
+        + 'antecedeu, mesmo que o item já tenha saído.';
+      nC.font = { name:'Calibri', size:9.5, italic:true, color:{ argb:ESF_C.GREY_TXT } };
+      nC.alignment = { horizontal:'left', vertical:'middle', wrapText:true };
+      ws3d.getRow(L3d).height = 24;
+      L3d++;
+    }
+    L3d += 1;
 
     // por analista
     _esfCabecalho(ws3d, L3d, ['Analista', '🔴 Crít. e urg.', '🟠 Crít. não urg.',
