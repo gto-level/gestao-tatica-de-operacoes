@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '21/11 23:20';
+var GTO_BUILD = '22/11 00:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -46819,6 +46819,7 @@ function nrConcluir(chave){
   const _rcBadge=document.getElementById('acao-rc-badge'); if(_rcBadge) _rcBadge.style.display='block';
   const _rcNum=document.getElementById('acao-rc-numero'); if(_rcNum) _rcNum.textContent=(r.rc||'')+(r.item?(' · Item '+r.item):'');
   const _idasBadge=document.getElementById('acao-idas-badge'); if(_idasBadge) _idasBadge.style.display='none';
+  try{ _acaoCuBadge(); }catch(e){}   // aqui a chave só existe depois de abrir
   const m=_nrDados[chave]||{};
   // mesma regra das outras aberturas: nasce hoje, com a gravada à mão
   _acaoEnvioPadrao(m.envio || '');
@@ -55785,6 +55786,10 @@ function q18Consultar(valor){
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:1.25rem;flex-wrap:wrap">
       <div id="acao-tipo-badge" style="display:inline-flex;align-items:center;gap:6px;padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;background:var(--azc);color:var(--azm)">—</div>
       <div id="acao-idas-badge" style="display:none;align-items:center;gap:6px;padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700;background:var(--amc);color:var(--am)">🛒 Idas ao Mercado: <span id="acao-idas-val">0</span></div>
+      <!-- Crítico × Urgente do item, na hora de lançar. É este valor que
+           fica GRAVADO na ação: depois que o item sai da carteira não há
+           como saber em que classe ele estava. -->
+      <div id="acao-cu-badge" style="display:none;align-items:center;gap:6px;padding:5px 14px;border-radius:20px;font-size:12px;font-weight:700" title="Classe do item agora, pela régua Crítico × Urgente">—</div>
     </div>
 
     <!-- ESTÁGIO 1: Status Tratamento -->
@@ -61208,20 +61213,15 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
       if (!classeRadar[rc]) classeRadar[rc] = classeRadar[k];
       if (!statusRadar[rc]) statusRadar[rc] = String(rr.analista_auto || '').trim();
     });
-    // 1º a classe GRAVADA na ação (vale para item que já saiu da carteira),
-    // 2º a situação de hoje, 3º outro status do mapa, 4º fora do Radar.
+    // 1º a classe GRAVADA na ação — essa vale até para item já concluído;
+    // 2º a situação de hoje do item, esteja ele em que status estiver no
+    // Radar; 3º "fora" só quando o item não está em lugar nenhum do Radar
+    // e a ação é anterior à gravação.
     var classeDaLinha = function(l){
       if (l.critUrg && CU_CLASSES.some(function(c){ return c.k === l.critUrg; }))
         return l.critUrg;
-      var c = classeDe[l.rc + '|' + l.item] || classeDe[l.rc];
-      if (c) return c;
-      if (classeRadar[l.rc + '|' + l.item] || classeRadar[l.rc]) return 'outro';
-      return 'fora';
-    };
-    // a classe de hoje de quem está em outro status: serve para mostrar,
-    // em bloco à parte, se esse esforço também foi para o que pesa
-    var classeOutro = function(l){
-      return classeRadar[l.rc + '|' + l.item] || classeRadar[l.rc] || '';
+      return classeDe[l.rc + '|' + l.item] || classeDe[l.rc]
+          || classeRadar[l.rc + '|' + l.item] || classeRadar[l.rc] || 'fora';
     };
     var nGravada = r.linhas.filter(function(l){ return !!l.critUrg; }).length;
     var carteira = cuContar(universo);
@@ -61245,7 +61245,7 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
       var c = classeDaLinha(l);
       porClasse[c] = (porClasse[c] || 0) + 1;
       (rcsClasse[c] = rcsClasse[c] || {})[l.rc] = 1;
-      totalClass++;
+      if (c !== 'fora') totalClass++;    // o % é entre as ações COM classe
     });
     CU_CLASSES.forEach(function(c){
       var n = porClasse[c.k] || 0;
@@ -61261,67 +61261,35 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
       ws3d.getCell(L3d, 8).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
       L3d++;
     });
-    var outro = porClasse['outro'] || 0;
-    if (outro) {
-      _esfLinha(ws3d, L3d, ['Hoje em outro status do mapa', outro,
-        _esfPct(totalClass ? outro / totalClass : 0),
-        Object.keys(rcsClasse['outro'] || {}).length, '—', '—', '—',
-        'A ação foi feita quando o item ainda era carteira de trabalho; hoje ele está em outro '
-        + 'status do mapa (abertura, aguardando o PATEC fechar...). Não entra na comparação com '
-        + 'a carteira porque o item não está mais nela — mas o Radar ainda tem o SLA e o prazo '
-        + 'dele, então o bloco logo abaixo mostra em que classe esse esforço caiu.'],
-        { fill:ESF_C.GREY_L, wrap:true });
-      ws3d.getCell(L3d, 8).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
-      L3d++;
-    }
-    var fora = porClasse['fora'] || 0;
-    if (fora) {
-      _esfLinha(ws3d, L3d, ['Já saiu do Radar (concluído)', fora,
-        _esfPct(totalClass ? fora / totalClass : 0),
-        Object.keys(rcsClasse['fora'] || {}).length, '—', '—', '—',
-        'O item não está mais em nenhuma linha do Radar e a ação é anterior à gravação da '
-        + 'prioridade. Esse é o único caso sem recuperação: o mapa de ontem não fica guardado '
-        + 'item a item, e a data de conclusão diz quando o item saiu, não como ele estava. '
-        + 'Da ação de hoje em diante a classe é gravada no lançamento e esta linha encolhe sozinha.'],
-        { fill:ESF_C.GREY_L, wrap:true });
-      ws3d.getCell(L3d, 8).alignment = { horizontal:'left', vertical:'middle', wrapText:true };
-      L3d++;
-    }
-    _esfLinha(ws3d, L3d, ['TOTAL', totalClass, '100%', r.nRcs, carteira.total, '100%', '', ''],
+    // A tabela tem as QUATRO classes e mais nada — foi o que o André
+    // pediu em 21/11 ("preciso que fique igual à foto 1"). O que não tem
+    // classe não vira linha: é ação antiga de item que já saiu do Radar,
+    // e isso aparece como uma nota embaixo, não como categoria.
+    var semClasse = porClasse['fora'] || 0;
+    _esfLinha(ws3d, L3d, ['TOTAL', totalClass, '100%',
+      Object.keys(rcsClasse['cu'] || {}).concat(
+        Object.keys(rcsClasse['cnu'] || {}), Object.keys(rcsClasse['unc'] || {}),
+        Object.keys(rcsClasse['nn'] || {})).filter(function(v, i, a){
+          return a.indexOf(v) === i; }).length,
+      carteira.total, '100%', '', ''],
       { bold:true, fill:ESF_C.BLUE_L });
     L3d += 2;
-
-    // o esforço que foi para item que hoje está em outro status: dá para
-    // classificar, e é o que responde "eles pegaram no que pesa ou não?"
-    if (outro) {
-      _esfCabecalho(ws3d, L3d, ['Das ações em "outro status do mapa", em que classe o item está hoje',
-                                'Ações', '% dessas ações', '', '', '', '', ''], ESF_C.BLUE); L3d++;
-      var lsOutro = r.linhas.filter(function(l){ return classeDaLinha(l) === 'outro'; });
-      CU_CLASSES.forEach(function(c){
-        var n = lsOutro.filter(function(l){ return classeOutro(l) === c.k; }).length;
-        _esfLinha(ws3d, L3d, [c.ico + ' ' + c.t, n,
-          _esfPct(lsOutro.length ? n / lsOutro.length : 0), '', '', '', '', ''],
-          { wrap:true });
-        L3d++;
-      });
-      L3d += 1;
-    }
 
     // por analista
     _esfCabecalho(ws3d, L3d, ['Analista', '🔴 Crít. e urg.', '🟠 Crít. não urg.',
                               '🟡 Urg. não crít.', '⚪ Nem um nem outro',
-                              'Fora da carteira hoje', '% em crítico',
+                              'Sem classe', '% em crítico',
                               'Total de ações'], ESF_C.BLUE); L3d++;
     pessoas.forEach(function(p, i){
       var ls = r.linhas.filter(function(l){ return l.quem === p.nome; });
-      var c = { cu:0, cnu:0, unc:0, nn:0, outro:0, fora:0 };
+      var c = { cu:0, cnu:0, unc:0, nn:0, fora:0 };
       ls.forEach(function(l){ c[classeDaLinha(l)]++; });
       var crit = c.cu + c.cnu;
       // o % é sobre as ações DENTRO da carteira de trabalho — senão
       // quem mexeu muito em item de abertura apareceria com % baixo
       // por um motivo que não é o que se quer medir
       var dentro = c.cu + c.cnu + c.unc + c.nn;
-      _esfLinha(ws3d, L3d, [p.nome, c.cu, c.cnu, c.unc, c.nn, c.outro + c.fora,
+      _esfLinha(ws3d, L3d, [p.nome, c.cu, c.cnu, c.unc, c.nn, c.fora,
         dentro ? _esfPct(crit / dentro) : '—', ls.length],
         { fill: i % 2 ? ESF_C.GREY_L : null });
       if (dentro) {
@@ -61335,13 +61303,16 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     ws3d.mergeCells(L3d, 1, L3d, 8);
     var nota = ws3d.getCell(L3d, 1);
     nota.value = 'De onde vem a classe de cada ação, nesta ordem: (1) a prioridade GRAVADA no '
-      + 'lançamento — ' + nGravada + ' de ' + r.linhas.length + ' ação(ões) já têm, e essas são '
-      + 'exatas mesmo para item concluído; (2) a situação de HOJE do item, quando ele ainda está '
-      + 'na carteira de trabalho; (3) "Hoje em outro status do mapa" — o item saiu da carteira '
-      + 'mas continua no Radar, então o bloco do meio mostra a classe dele; (4) "Já saiu do '
-      + 'Radar" — o item foi concluído e não há de onde tirar a classe. '
-      + 'A gravação começou em 21/11: cada medição nova nasce com mais ações na regra (1), e as '
-      + 'linhas (3) e (4) encolhem sozinhas.';
+      + 'lançamento, que o modal mostra na hora de registrar a movimentação — ' + nGravada
+      + ' de ' + r.linhas.length + ' ação(ões) já têm, e essas são exatas mesmo depois de o item '
+      + 'ser concluído; (2) a situação de HOJE do item, em qualquer status do Radar.'
+      + (semClasse
+          ? ' Ficaram de fora desta aba ' + semClasse + ' ação(ões) em '
+            + Object.keys(rcsClasse['fora'] || {}).length + ' RC(s): o item já saiu do Radar e a '
+            + 'ação é anterior à gravação, então não há de onde tirar a classe — o mapa de ontem '
+            + 'não fica guardado item a item. Esse número cai a cada medição, porque daqui para '
+            + 'frente toda ação nasce com a classe gravada.'
+          : ' Todas as ações do período têm classe.');
     nota.font = { name:'Calibri', size:10, italic:true, color:{ argb:ESF_C.GREY_TXT } };
     nota.alignment = { horizontal:'left', vertical:'middle', wrapText:true };
     ws3d.getRow(L3d).height = 30;
@@ -62323,6 +62294,7 @@ function prodAbrirModal(origem, tipo){
   // A data de envio nasce HOJE; a gravada fica como atalho embaixo
   const _finEl = document.getElementById('acao-data-finalizado');
   if(_finEl) _finEl.value = '';
+  _acaoCuBadge();
   const _gdRc = (_prodCtx.rcChave && _govDados[_prodCtx.rcChave])
     ? _govDados[_prodCtx.rcChave] : {};
   _acaoEnvioPadrao(_gdRc.envio || '');
@@ -62330,7 +62302,40 @@ function prodAbrirModal(origem, tipo){
   document.getElementById('modal-acao-rc').style.display = 'flex';
 }
 
+// O selo Crítico × Urgente no alto do modal. André, 21/11: "precisamos
+// criar uma forma que, ao registrar a movimentação, o dash mostre em qual
+// das 4 classes ele pertence". É a mesma classe que vai gravada na ação —
+// quem lança vê a prioridade do item ANTES de decidir o que fazer com ele.
+function _acaoCuBadge(){
+  var el = document.getElementById('acao-cu-badge');
+  if (!el) return;
+  el.style.display = 'none';
+  try {
+    if (typeof cuEhAdlv !== 'function' || !cuEhAdlv()) return;
+    var chave = (_prodCtx.rcChaves || [_prodCtx.rcChave] || []).filter(Boolean)[0] || '';
+    var rc = chave ? chave.split('|')[0] : (_prodCtx.rcBusca || '');
+    if (!rc) return;
+    var k = cuClasseDaRc(rc, (chave || '').split('|')[1]);
+    if (!k) return;
+    var c = cuClasse(k);
+    var pq = '';
+    try {
+      var linha = (_radarDados || []).find(function(x){
+        return String(x.rc || '').trim() === String(rc).trim(); });
+      if (linha) pq = cuMotivo(linha);
+    } catch (e) {}
+    el.innerHTML = c.ico + ' ' + cpEsc(c.t);
+    el.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:5px 14px;'
+      + 'border-radius:20px;font-size:12px;font-weight:700;background:' + c.fundo
+      + ';color:' + c.cor + ';border:1px solid ' + c.cor;
+    el.title = 'Crítico × Urgente — ' + c.t + (pq ? ' · ' + pq : '')
+      + '. Esta classe fica gravada na ação.';
+  } catch (e) {}
+}
+
 function prodFecharModal(){
+  var _cuB = document.getElementById('acao-cu-badge');
+  if (_cuB) _cuB.style.display = 'none';
   document.getElementById('modal-acao-rc').style.display = 'none';
   const _rcBadge = document.getElementById('acao-rc-badge');
   if(_rcBadge) _rcBadge.style.display = 'none';
@@ -77562,7 +77567,11 @@ function cuClasseDaRc(rc, seq){
       if (!r) r = x;                      // a RC serve de reserva
     }
     if (!r) return '';
-    if (!cuNoUniverso(r)) return '';      // fora da carteira de trabalho
+    // Classifica QUALQUER item que esteja no Radar, não só a carteira de
+    // trabalho. André, 21/11: "o item saiu da carteira, mas antes de sair,
+    // em qual classe ele pertencia?" — é no momento da ação que dá para
+    // responder, então aqui não se filtra por status. A comparação com a
+    // carteira (coluna "Na carteira") continua só nos três status.
     return cuClassificar(r, cuIxAtual());
   } catch (e) { return ''; }
 }
