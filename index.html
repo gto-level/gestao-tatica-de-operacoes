@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '21/11 18:20';
+var GTO_BUILD = '21/11 19:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -60095,6 +60095,10 @@ function ceEsforcoLinhas(mod){
       quem: String(a.colab || '').trim() || '(sem nome)',
       tipo: String(a.tipo || '').trim(),
       ehConclusao: ehConc,
+      // o próprio dashboard diz que "sai da fila — volta para Ag.
+      // Tratamento" NÃO conta na produção. Então ela fica no histórico
+      // e no detalhe, mas fora da conta de Analisados.
+      naoConta: String(a.tipo || '').trim() === 'saida_fila',
       conclusao: ehConc ? CE_DESFECHOS[conclusao] : '',
       fila: fila,
       filaRotulo: ehConc ? ('Concluído → ' + CE_DESFECHOS[conclusao]) : esfFilaRotulo(fila),
@@ -60515,33 +60519,46 @@ function ceEsforcoPessoas(mod){
       diasUteis: uteis.length,
       trabalhados: 0, folgas: 0, semRegistro: 0,
       producao: 0, diasAbaixo: [], diasAcima: 0, melhor: null, pior: null,
-      folgasFech: 0, folgasJor: 0,
+      folgasFech: 0, folgasJor: 0, fechTotal: 0, naoContam: 0,
       mov: 0, conc: 0, acoes: ls.length, rcs: {}, filas: {}, motivos: {}, desfechos: {},
       linhaDia: []
     };
     uteis.forEach(function(d){
       var f = fech[nome + '|' + d];
-      var nAcoes = ls.filter(function(l){ return l.data === d; }).length;
-      var sit, prod = null;
-      // basta UMA das duas fontes dizer que a pessoa estava fora
+      // ANALISADOS do dia = as ações lançadas no modal. Decisão do André
+      // em 21/11: "toda ação já é computada no modal de lançamento; o
+      // fechamento do dia serve apenas para comprovar que o funcionário
+      // trabalhou". Então quem conta é o lançamento, não o fechamento —
+      // e um item que saiu do fornecedor e foi para o MDG conta 1.
+      var nAcoes = ls.filter(function(l){
+        return l.data === d && !l.naoConta; }).length;
+      if (f) { p.trabalhados++; p.fechTotal += (+f.total || 0); }   // prova de presença
+      // Folga e férias descontam o dia da meta — de qualquer das duas
+      // fontes. A exceção é a pessoa ter lançado ação assim mesmo: aí
+      // ela trabalhou, e o dia volta a ser cobrado.
       var jor = esfJornadaFora(nome, d);
-      if (jor && !(f && !f.folga && f.total)) {
-        // a Jornada manda, a menos que a pessoa tenha fechado o dia com
-        // produção — aí ela trabalhou, e o que vale é o que foi feito
-        p.folgas++; p.folgasJor++;
-        sit = (jor === 'ferias' ? 'Férias (Jornada)' : 'Folga (Jornada)');
+      var fora = jor || (f && f.folga);
+      if (fora && !nAcoes) {
+        if (f) p.trabalhados--;
+        p.folgas++;
+        if (jor) { p.folgasJor++; } else { p.folgasFech++; }
+        p.linhaDia.push({ data:d, prod:null, acoes:0, fechou:!!f,
+          situacao: (jor === 'ferias' || (f && f.presenca === 'Férias'))
+            ? ('Férias' + (jor ? ' (Jornada)' : '')) : ('Folga' + (jor ? ' (Jornada)' : '')) });
+        return;
       }
-      else if (f && f.folga) { p.folgas++; p.folgasFech++; sit = 'Folga/Férias'; }
-      else if (f) {
-        prod = f.total; p.trabalhados++; p.producao += prod;
-        if (prod < p.meta) { p.diasAbaixo.push({ data:d, prod:prod, falta: p.meta - prod }); sit = 'Abaixo da meta'; }
-        else { p.diasAcima++; sit = 'Bateu a meta'; }
-        if (p.melhor === null || prod > p.melhor.prod) p.melhor = { data:d, prod:prod };
-        if (p.pior === null || prod < p.pior.prod) p.pior = { data:d, prod:prod };
-      } else { p.semRegistro++; sit = 'Sem fechamento'; }
-      p.linhaDia.push({ data:d, prod:prod, acoes:nAcoes, situacao:sit });
+      if (!f) p.semRegistro++;         // dia cobrado, mas sem fechamento
+      var sit;
+      if (nAcoes < p.meta) {
+        p.diasAbaixo.push({ data:d, prod:nAcoes, falta: p.meta - nAcoes });
+        sit = 'Abaixo da meta';
+      } else { p.diasAcima++; sit = 'Bateu a meta'; }
+      if (p.melhor === null || nAcoes > p.melhor.prod) p.melhor = { data:d, prod:nAcoes };
+      if (p.pior === null || nAcoes < p.pior.prod) p.pior = { data:d, prod:nAcoes };
+      p.linhaDia.push({ data:d, prod:nAcoes, acoes:nAcoes, fechou:!!f, situacao:sit });
     });
     ls.forEach(function(l){
+      if (l.naoConta) { p.naoContam++; return; }   // "sai da fila"
       if (l.ehConclusao) { p.conc++; p.desfechos[l.conclusao] = (p.desfechos[l.conclusao] || 0) + 1; }
       else {
         p.mov++;
@@ -60553,6 +60570,11 @@ function ceEsforcoPessoas(mod){
       }
       if (l.rc) p.rcs[l.rc] = 1;
     });
+    // ANALISADOS = tudo que foi lançado e conta, sem exceção de dia. Com
+    // isso vale sempre a identidade Analisados = Movim. + Conclusões, que
+    // é o que o André pediu em 21/11. Ação em sábado entra aqui, mas não
+    // cria dia cobrado — a meta é dos dias úteis.
+    p.producao = p.mov + p.conc;
     p.nRcs = Object.keys(p.rcs).length;
     // A meta do período é cobrada em TODO dia útil, e só folga ou férias
     // descontam. Dia sem fechamento NÃO desconta — foi a regra que o
@@ -60563,9 +60585,10 @@ function ceEsforcoPessoas(mod){
     p.diasMeta = Math.max(0, p.diasUteis - p.folgas);
     p.metaPeriodo = p.meta * p.diasMeta;
     p.aproveitamento = p.metaPeriodo ? (p.producao / p.metaPeriodo) : 0;
-    // a média continua sobre os dias em que houve fechamento: é o ritmo
-    // da pessoa quando ela registra, e não se mistura com a cobrança
-    p.mediaDia = p.trabalhados ? (p.producao / p.trabalhados) : 0;
+    // a média é sobre os MESMOS dias que a meta cobra — assim
+    // Média/dia × dias cobrados = Analisados, e Aproveitamento =
+    // Média/dia ÷ Meta/dia. Nenhum número da linha briga com o outro.
+    p.mediaDia = p.diasMeta ? (p.producao / p.diasMeta) : 0;
     p.porConclusao = p.conc ? (p.mov / p.conc) : 0;
     return p;
   }).sort(function(a, b){
@@ -60790,8 +60813,9 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   var somaEq = pessoas.reduce(function(o, p){
     o.trab += p.trabalhados; o.prod += p.producao; o.meta += p.metaPeriodo;
     o.ab += p.diasAbaixo.length; o.uteis = Math.max(o.uteis, p.diasUteis || 0);
+    o.fech += p.fechTotal || 0;
     return o;
-  }, { trab:0, prod:0, meta:0, ab:0, uteis:0 });
+  }, { trab:0, prod:0, meta:0, ab:0, uteis:0, fech:0 });
   var wb = new ExcelJS.Workbook();
   wb.creator = 'GTO'; wb.created = new Date();
   var MOD = String(mod).toUpperCase();
@@ -60821,8 +60845,8 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
      'Volume médio de ações nos dias em que houve lançamento'],
     ['Aproveit. Meta (Analisados) da equipe',
      somaEq.meta ? _esfPct(somaEq.prod / somaEq.meta) : '—',
-     'Itens ANALISADOS no fechamento ÷ meta do período (meta/dia × dias úteis, descontando só '
-     + 'folga e férias). Dia sem fechamento continua cobrado'],
+     'Ações lançadas ÷ meta do período (meta/dia × dias úteis, descontando só folga e férias). '
+     + 'Dia útil sem ação nenhuma entra na conta como zero'],
     ['Taxa de conclusão', r.total ? _esfPct(r.conc / r.total) : '—',
      'Das ações do período, quantas terminaram em desfecho — esta sim fala de item finalizado'],
     // A diferença entre as duas contagens tem de ficar à vista: é ela
@@ -60830,11 +60854,11 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     // de "fechar o dia antes de lançar" já cobre o dia passado em aberto;
     // o que sobra é ação lançada DEPOIS de fechar o dia, tipo que não
     // conta meta (Outros, saiu da fila) e quem é isento da trava.
-    ['Conferência: Analisados × Ações',
-     somaEq.prod + ' × ' + r.total + ' (diferença ' + (r.total - somaEq.prod) + ')',
-     'Analisados vem do fechamento; Ações vem dos lançamentos. Diferença grande = ação '
-     + 'lançada depois de fechar o dia, tipo fora da meta (Outros, saiu da fila) ou dia '
-     + 'de quem não tem a trava de fechamento'],
+    ['Conferência: Analisados × fechamento do dia',
+     somaEq.prod + ' × ' + somaEq.fech + ' (diferença ' + (somaEq.prod - somaEq.fech) + ')',
+     'Analisados sai das AÇÕES (é o que este relatório usa). O número do fechamento do dia é o '
+     + 'que alimenta o velocímetro e os Alertas de Performance. Diferença grande = ação lançada '
+     + 'depois de fechar o dia, ou dia trabalhado sem fechamento'],
     // NÃO é um número de dias do calendário: é a soma por pessoa. Com 6
     // pessoas, pode passar dos dias do período sem erro nenhum — e foi
     // exatamente o que confundiu o André em 21/11.
@@ -60900,17 +60924,16 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
                  { width:11 }, { width:12 }, { width:9 }, { width:12 }, { width:12 },
                  { width:13 }];
   _esfTitulo(ws3, 'HH da Equipe — esforço e aproveitamento por analista',
-    'META DO PERÍODO = Meta/dia × (Dias úteis − Folga/Férias). Só folga e férias descontam; '
-    + 'dia sem fechamento NÃO desconta, e por isso derruba o aproveitamento — é cobrança de registro. '
-    + 'FOLGA/FÉRIAS vem de duas fontes e basta uma delas: a Presença do fechamento do dia e a '
-    + 'Gestão de Jornada (férias e folgas programadas). Assim, quem tirou folga e não lançou o dia '
-    + 'não é cobrado por um registro que faltou. '
-    + 'ANALISADOS (prod.) = o total do FECHAMENTO DO DIA, o mesmo número dos Alertas de Performance: '
-    + 'ele soma os itens analisados no dia (1ª Análise, Em Tratativa, Status B e Ag Parecer), e item '
-    + 'movimentado conta igual a item finalizado. '
-    + 'MOVIM. e CONCLUSÕES abrem O QUE foi feito, e vêm de outra fonte (as ações): a mesma RC pode '
-    + 'receber várias ações no mesmo dia e dia sem fechamento continua tendo ação, por isso '
-    + 'Movim. + Conclusões não fecha com Analisados. '
+    'ANALISADOS (prod.) = as AÇÕES lançadas no modal. Cada vez que um item anda — saiu do '
+    + 'fornecedor e foi para o MDG, por exemplo — conta 1, e conclusão também é ação. '
+    + 'Por isso ANALISADOS = MOVIM. + CONCLUSÕES, sempre: as três colunas saem da mesma fonte. '
+    + 'Fica de fora só "sai da fila — volta para Ag. Tratamento", que o próprio dashboard marca '
+    + 'como "não conta na produção". '
+    + 'META DO PERÍODO = Meta/dia × (Dias úteis − Folga/Férias): só folga e férias descontam. '
+    + 'FOLGA/FÉRIAS vem de duas fontes e basta uma delas — a Presença do fechamento do dia e a '
+    + 'Gestão de Jornada (férias e folgas programadas). '
+    + 'DIAS TRABALHADOS é outra coisa: são os dias em que a pessoa FECHOU o dia. O fechamento aqui '
+    + 'serve de prova de trabalho, não de contagem — por isso ele não entra em Analisados. '
     + 'RCs distintas = quantas RCs diferentes a pessoa tocou (a mesma RC tocada 5 vezes conta 1).', 20);
   var L3 = 4;
   _esfCabecalho(ws3, L3, ['Analista', 'Dias úteis', 'Dias Trabalhados', 'Folga/Férias',
@@ -60923,7 +60946,7 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   var COL_APROV = 11, COL_ABAIXO = 9;
   pessoas.forEach(function(p, i){
     _esfLinha(ws3, L3, [p.nome, p.diasUteis, p.trabalhados, p.folgas, p.semRegistro,
-      p.meta, p.metaPeriodo, p.trabalhados ? Number(p.mediaDia.toFixed(1)) : '—',
+      p.meta, p.metaPeriodo, p.diasMeta ? Number(p.mediaDia.toFixed(1)) : '—',
       p.diasAbaixo.length, p.producao,
       p.metaPeriodo ? _esfPct(p.aproveitamento) : '—',
       p.acoes ? _esfPct(p.conc / p.acoes) : '—',
@@ -60944,12 +60967,13 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   });
   var somaP = pessoas.reduce(function(o, p){
     o.trab += p.trabalhados; o.prod += p.producao; o.meta += p.metaPeriodo;
+    o.diasMeta += p.diasMeta;
     o.ab += p.diasAbaixo.length; o.mov += p.mov; o.conc += p.conc;
     ESF_DESFECHOS.forEach(function(d){ o.d[d] = (o.d[d] || 0) + (p.desfechos[d] || 0); });
     return o;
-  }, { trab:0, prod:0, meta:0, ab:0, mov:0, conc:0, d:{} });
+  }, { trab:0, prod:0, meta:0, ab:0, mov:0, conc:0, diasMeta:0, d:{} });
   _esfLinha(ws3, L3, ['TOTAL DA EQUIPE', '', somaP.trab, '', '', '', somaP.meta,
-    somaP.trab ? Number((somaP.prod / somaP.trab).toFixed(1)) : '—',
+    somaP.diasMeta ? Number((somaP.prod / somaP.diasMeta).toFixed(1)) : '—',
     somaP.ab, somaP.prod,
     somaP.meta ? _esfPct(somaP.prod / somaP.meta) : '—',
     r.total ? _esfPct(somaP.conc / r.total) : '—',
@@ -60959,10 +60983,11 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   ws3.mergeCells(L3, 1, L3, 20);
   var leg = ws3.getCell(L3, 1);
   leg.value = 'Como ler: a Meta do período desconta só Folga/Férias — 30/dia em 19 dias úteis '
-    + 'com 1 folga dá 540, e não 570. "Dias Trabalhados" são os dias com fechamento registrado e '
-    + 'sem folga, e servem para a Média/dia (o ritmo de quem registra). "Sem fechamento" continua '
-    + 'sendo cobrado na meta: dia sem registro puxa o aproveitamento para baixo. '
-    + 'Aproveit. Meta (Analisados) = Analisados ÷ Meta do período.';
+    + 'com 1 folga dá 540, e não 570. Média/dia = Analisados ÷ dias cobrados (os mesmos da meta), '
+    + 'então Média/dia ÷ Meta/dia dá o aproveitamento. Dia útil sem nenhuma ação conta como dia '
+    + 'abaixo da meta — não some da conta. "Dias Trabalhados" e "Sem fechamento" falam só do '
+    + 'registro do fechamento, e não mexem em Analisados. Ação lançada em sábado, domingo ou '
+    + 'feriado entra em Analisados, mas não cria dia cobrado — a meta é dos dias úteis.';
   leg.font = { name:'Calibri', size:10, italic:true, color:{ argb:ESF_C.GREY_TXT } };
   leg.alignment = { horizontal:'left', vertical:'middle', wrapText:true };
   ws3.getRow(L3).height = 30;
@@ -60999,13 +61024,13 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
          + (p.semRegistro ? ' — ' + p.semRegistro + ' dia(s) sem fechamento continuam cobrados'
                           : '')) : 'nenhum dia útil cobrado no período'],
       ['Dias úteis no período', p.diasUteis,
-       p.trabalhados + ' com fechamento · ' + p.folgas + ' de folga/férias ('
+       p.diasMeta + ' cobrado(s) · ' + p.folgas + ' de folga/férias ('
        + p.folgasFech + ' pelo fechamento, ' + p.folgasJor + ' pela Jornada) · '
-       + p.semRegistro + ' sem fechamento (continuam na meta)'],
+       + p.trabalhados + ' com o dia fechado · ' + p.semRegistro + ' sem fechamento'],
       ['Dias abaixo da meta', p.diasAbaixo.length, abaixo || 'nenhum'],
       ['Dias que bateu a meta', p.diasAcima,
        p.melhor ? ('melhor dia: ' + fmtDt(p.melhor.data) + ' com ' + p.melhor.prod) : '—'],
-      ['Média por dia trabalhado', p.trabalhados ? Number(p.mediaDia.toFixed(1)) : '—',
+      ['Média por dia cobrado', p.diasMeta ? Number(p.mediaDia.toFixed(1)) : '—',
        p.pior ? ('pior dia: ' + fmtDt(p.pior.data) + ' com ' + p.pior.prod) : '—'],
       ['Movimentações de fila', p.mov, _esfTop(p.filas, 6) || '—'],
       ['Motivos mais usados', Object.keys(p.motivos).length, _esfTop(p.motivos, 6) || '—'],
@@ -61038,13 +61063,14 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   // ── 3c. Dia a dia por analista ─────────────────────────────────
   var ws3c = wb.addWorksheet('Dia a Dia por Analista', { views:[{ showGridLines:false }] });
   ws3c.columns = [{ width:24 }, { width:13 }, { width:9 }, { width:12 }, { width:10 },
-                  { width:12 }, { width:13 }, { width:18 }];
+                  { width:12 }, { width:14 }, { width:18 }];
   _esfTitulo(ws3c, 'Dia a dia de cada analista',
-    'A linha de base do one a one: o que cada pessoa produziu em cada dia útil do período, '
-    + 'contra a meta dela. "Sem fechamento" fica fora da conta — é registro que faltou, não produção baixa.', 8);
+    'A linha de base do one a one: quantas ações cada pessoa lançou em cada dia útil do período, '
+    + 'contra a meta dela. Dia útil sem ação nenhuma conta como zero e entra em Dias abaixo. '
+    + '"Fechou o dia" é só o registro do fechamento — não muda a contagem de Analisados.', 8);
   var L3c = 4;
-  _esfCabecalho(ws3c, L3c, ['Analista', 'Data', 'Dia', 'Produção', 'Meta',
-                            'Diferença', 'Ações no dia', 'Situação'], ESF_C.BLUE); L3c++;
+  _esfCabecalho(ws3c, L3c, ['Analista', 'Data', 'Dia', 'Analisados', 'Meta',
+                            'Diferença', 'Fechou o dia', 'Situação'], ESF_C.BLUE); L3c++;
   var DS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   pessoas.forEach(function(p){
     p.linhaDia.forEach(function(d){
@@ -61052,7 +61078,8 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
       try { var q = d.data.split('-'); dow = DS[new Date(+q[0], (+q[1]) - 1, +q[2]).getDay()]; } catch (e) {}
       _esfLinha(ws3c, L3c, [p.nome, fmtDt(d.data), dow,
         d.prod === null ? '—' : d.prod, p.meta,
-        d.prod === null ? '—' : (d.prod - p.meta), d.acoes, d.situacao]);
+        d.prod === null ? '—' : (d.prod - p.meta),
+        d.fechou ? 'sim' : 'não', d.situacao]);
       var c = ws3c.getCell(L3c, 8);
       if (d.situacao === 'Abaixo da meta') { c.fill = _esfSolid(ESF_C.RED_L);
         c.font = { name:'Calibri', size:10, bold:true, color:{ argb:ESF_C.RED } }; }
