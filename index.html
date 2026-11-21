@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '21/11 01:10';
+var GTO_BUILD = '21/11 18:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -60387,6 +60387,78 @@ function esfMetaDe(mod, nome){
   return { meta: ESF_META_PADRAO, fonte: 'padrão combinado (30)' };
 }
 
+// ── folga e férias também vêm da Gestão de Jornada ───────────────
+//
+// Pedido do André em 21/11. O fechamento do dia só sabe de folga quando
+// a pessoa FECHA o dia marcando "Folga"/"Férias" — quem tirou folga e
+// não lançou nada caía em "sem fechamento" e levava a meta cheia, o que
+// é punir por um registro que faltou, não por trabalho que faltou.
+//
+// A Jornada tem férias e folgas programadas por colaborador e data, da
+// base do PATEC (ADLV + FAST). As duas fontes valem: basta uma delas
+// dizer que a pessoa estava fora para o dia sair da meta.
+var _esfJor = { pronto:false, lendo:false, set:{}, n:0, erro:'' };
+
+function _esfJorChave(nome, data){ return _focoNome(nome) + '|' + data; }
+
+// Espalha cada ausência (férias é intervalo, folga é um dia) em dias
+function _esfJorIndexar(ausencias){
+  var set = {}, n = 0;
+  (ausencias || []).forEach(function(a){
+    if (!a || !a.ini || !a.fim) return;
+    var d = a.ini, guarda = 0;
+    while (d <= a.fim && guarda++ < 400) {
+      set[_esfJorChave(a.colab, d)] = a.tipo || 'folga';
+      n++;
+      d = jgeAdd(d, 1);
+    }
+  });
+  return { set:set, n:n };
+}
+
+async function esfJornadaCarregar(){
+  if (_esfJor.pronto || _esfJor.lendo) return _esfJor;
+  _esfJor.lendo = true;
+  try {
+    // se a tela de Jornada já leu tudo, aproveita e não busca de novo
+    if (typeof _jgeDados !== 'undefined' && _jgeDados && typeof jgeAusencias === 'function') {
+      var ix0 = _esfJorIndexar(jgeAusencias());
+      _esfJor.set = ix0.set; _esfJor.n = ix0.n; _esfJor.pronto = true;
+      return _esfJor;
+    }
+    // senão lê só a fonte do PATEC — é a jornada da equipe, um doc só
+    if (typeof jgeLerFonte === 'function') {
+      var r = await jgeLerFonte({ chave:'adlv', nome:'PATEC (ADLV + FAST)',
+                                  ico:'🏛️', tipo:'patec' });
+      var l = [];
+      (r.ferias || []).forEach(function(f){
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(f.saida || '')) return;
+        var fim = jgeAdd(f.retorno || jorRetorno(f.saida, f.dias), -1);
+        l.push({ tipo:'ferias', colab:f.colab, ini:f.saida,
+                 fim:(fim < f.saida ? f.saida : fim) });
+      });
+      (r.folgas || []).forEach(function(f){
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(f.data || '')) return;
+        l.push({ tipo:'folga', colab:f.colab, ini:f.data, fim:f.data });
+      });
+      var ix = _esfJorIndexar(l);
+      _esfJor.set = ix.set; _esfJor.n = ix.n;
+    }
+    _esfJor.pronto = true;
+  } catch (e) {
+    _esfJor.erro = (e && (e.message || e.code)) || 'não consegui ler a Jornada';
+    _esfJor.pronto = true;   // não trava o relatório por causa disso
+  } finally {
+    _esfJor.lendo = false;
+  }
+  return _esfJor;
+}
+
+// 'ferias' | 'folga' | '' — o que a Jornada diz sobre aquele dia
+function esfJornadaFora(nome, data){
+  return _esfJor.set[_esfJorChave(nome, data)] || '';
+}
+
 function esfDiasDoPeriodo(de, ate){
   var out = [], p = String(de).split('-');
   var d = new Date(+p[0], (+p[1]) - 1, +p[2]);
@@ -60443,6 +60515,7 @@ function ceEsforcoPessoas(mod){
       diasUteis: uteis.length,
       trabalhados: 0, folgas: 0, semRegistro: 0,
       producao: 0, diasAbaixo: [], diasAcima: 0, melhor: null, pior: null,
+      folgasFech: 0, folgasJor: 0,
       mov: 0, conc: 0, acoes: ls.length, rcs: {}, filas: {}, motivos: {}, desfechos: {},
       linhaDia: []
     };
@@ -60450,7 +60523,15 @@ function ceEsforcoPessoas(mod){
       var f = fech[nome + '|' + d];
       var nAcoes = ls.filter(function(l){ return l.data === d; }).length;
       var sit, prod = null;
-      if (f && f.folga) { p.folgas++; sit = 'Folga/Férias'; }
+      // basta UMA das duas fontes dizer que a pessoa estava fora
+      var jor = esfJornadaFora(nome, d);
+      if (jor && !(f && !f.folga && f.total)) {
+        // a Jornada manda, a menos que a pessoa tenha fechado o dia com
+        // produção — aí ela trabalhou, e o que vale é o que foi feito
+        p.folgas++; p.folgasJor++;
+        sit = (jor === 'ferias' ? 'Férias (Jornada)' : 'Folga (Jornada)');
+      }
+      else if (f && f.folga) { p.folgas++; p.folgasFech++; sit = 'Folga/Férias'; }
       else if (f) {
         prod = f.total; p.trabalhados++; p.producao += prod;
         if (prod < p.meta) { p.diasAbaixo.push({ data:d, prod:prod, falta: p.meta - prod }); sit = 'Abaixo da meta'; }
@@ -60473,8 +60554,17 @@ function ceEsforcoPessoas(mod){
       if (l.rc) p.rcs[l.rc] = 1;
     });
     p.nRcs = Object.keys(p.rcs).length;
-    p.metaPeriodo = p.meta * p.trabalhados;
+    // A meta do período é cobrada em TODO dia útil, e só folga ou férias
+    // descontam. Dia sem fechamento NÃO desconta — foi a regra que o
+    // André fechou em 21/11: "se não tiver preenchido a coluna de férias
+    // e folga, a conta permanece com a meta integral". Antes eu descontava
+    // os dias sem fechamento, e isso premiava justamente quem não
+    // registrava o dia.
+    p.diasMeta = Math.max(0, p.diasUteis - p.folgas);
+    p.metaPeriodo = p.meta * p.diasMeta;
     p.aproveitamento = p.metaPeriodo ? (p.producao / p.metaPeriodo) : 0;
+    // a média continua sobre os dias em que houve fechamento: é o ritmo
+    // da pessoa quando ela registra, e não se mistura com a cobrança
     p.mediaDia = p.trabalhados ? (p.producao / p.trabalhados) : 0;
     p.porConclusao = p.conc ? (p.mov / p.conc) : 0;
     return p;
@@ -60506,6 +60596,12 @@ function _ceRenderEsforco(mod){
     el.innerHTML = '';
     if (nota) nota.textContent = 'Base do ' + _ceModLabel(mod) + ' ainda não carregada.';
     return;
+  }
+  // a Jornada entra na conta de folga/férias; lê uma vez e redesenha
+  if (!_esfJor.pronto && !_esfJor.lendo) {
+    esfJornadaCarregar().then(function(){
+      try { _ceRenderEsforco(mod); } catch (e) {}
+    });
   }
   var r = ceEsforcoResumo(mod);
   var cor = _ceModCor(mod);
@@ -60577,6 +60673,7 @@ function _ceRenderEsforco(mod){
 async function ceEsforcoCopiar(mod){
   var base = await _ceGarantirBase(mod);
   if (!base.ok) { alert(base.msg); return; }
+  await esfJornadaCarregar();
   var r = ceEsforcoResumo(mod);
   if (!r.total) { alert('Nenhuma ação no período selecionado.'); return; }
   var faixa = _ceDesfechoRange(mod);
@@ -60598,7 +60695,7 @@ async function ceEsforcoCopiar(mod){
   }
   t.push('', 'Por analista (meta, aproveitamento e esforço):');
   ceEsforcoPessoas(mod).forEach(function(p){
-    t.push('  ' + p.nome + ': ' + (p.trabalhados ? _esfPct(p.aproveitamento) : 'sem dia fechado')
+    t.push('  ' + p.nome + ': ' + (p.metaPeriodo ? _esfPct(p.aproveitamento) : 'sem meta no período')
       + ' (' + p.producao + '/' + p.metaPeriodo + ') · ' + p.diasAbaixo.length
       + ' dia(s) abaixo da meta · ' + p.mov + ' movim. · ' + p.conc + ' conclusões'
       + (p.conc ? ' (' + ESF_DESFECHOS.filter(function(d){ return p.desfechos[d]; })
@@ -60612,6 +60709,7 @@ async function ceEsforcoBaixar(mod){
   try {
     var base = await _ceGarantirBase(mod);
     if (!base.ok) { alert(base.msg); return; }
+    await esfJornadaCarregar();   // folga/férias também vêm da Jornada
     var r = ceEsforcoResumo(mod);
     if (!r.total) {
       var fx0 = _ceDesfechoRange(mod);
@@ -60691,8 +60789,9 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   var pessoas = ceEsforcoPessoas(mod);
   var somaEq = pessoas.reduce(function(o, p){
     o.trab += p.trabalhados; o.prod += p.producao; o.meta += p.metaPeriodo;
-    o.ab += p.diasAbaixo.length; return o;
-  }, { trab:0, prod:0, meta:0, ab:0 });
+    o.ab += p.diasAbaixo.length; o.uteis = Math.max(o.uteis, p.diasUteis || 0);
+    return o;
+  }, { trab:0, prod:0, meta:0, ab:0, uteis:0 });
   var wb = new ExcelJS.Workbook();
   wb.creator = 'GTO'; wb.created = new Date();
   var MOD = String(mod).toUpperCase();
@@ -60720,14 +60819,29 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     ['Movimentações sem motivo', r.semMotivo, 'Lançadas antes de o motivo virar obrigatório — não dá para classificar'],
     ['Ações por dia com registro', r.dias ? Number((r.total / r.dias).toFixed(1)) : 0,
      'Volume médio de ações nos dias em que houve lançamento'],
-    ['Aproveitamento da equipe (itens trabalhados)',
+    ['Aproveit. Meta (Analisados) da equipe',
      somaEq.meta ? _esfPct(somaEq.prod / somaEq.meta) : '—',
-     'Itens TRABALHADOS no fechamento ÷ meta do período. O fechamento conta item movimentado '
-     + 'igual a item finalizado — para finalizados, veja Conclusões e a Taxa de conclusão'],
+     'Itens ANALISADOS no fechamento ÷ meta do período (meta/dia × dias úteis, descontando só '
+     + 'folga e férias). Dia sem fechamento continua cobrado'],
     ['Taxa de conclusão', r.total ? _esfPct(r.conc / r.total) : '—',
      'Das ações do período, quantas terminaram em desfecho — esta sim fala de item finalizado'],
-    ['Dias abaixo da meta (equipe)', somaEq.ab,
-     'Soma dos dias em que alguém fechou abaixo da própria meta — a lista datada está no One a One']
+    // A diferença entre as duas contagens tem de ficar à vista: é ela
+    // que diz se o fechamento está refletindo o que foi lançado. A trava
+    // de "fechar o dia antes de lançar" já cobre o dia passado em aberto;
+    // o que sobra é ação lançada DEPOIS de fechar o dia, tipo que não
+    // conta meta (Outros, saiu da fila) e quem é isento da trava.
+    ['Conferência: Analisados × Ações',
+     somaEq.prod + ' × ' + r.total + ' (diferença ' + (r.total - somaEq.prod) + ')',
+     'Analisados vem do fechamento; Ações vem dos lançamentos. Diferença grande = ação '
+     + 'lançada depois de fechar o dia, tipo fora da meta (Outros, saiu da fila) ou dia '
+     + 'de quem não tem a trava de fechamento'],
+    // NÃO é um número de dias do calendário: é a soma por pessoa. Com 6
+    // pessoas, pode passar dos dias do período sem erro nenhum — e foi
+    // exatamente o que confundiu o André em 21/11.
+    ['Dias-pessoa abaixo da meta',
+     somaEq.ab + ' de ' + somaEq.trab + ' dias trabalhados',
+     'Somando as pessoas, não o calendário: cada analista pode contribuir com até '
+     + somaEq.uteis + ' dia(s). A lista datada, por pessoa, está no One a One']
   ];
   ind.forEach(function(x, i){
     _esfLinha(ws, L, x, { fill: i % 2 ? ESF_C.GREY_L : null, wrap:true });
@@ -60779,43 +60893,52 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   // mostra é o HH — as horas de trabalho da equipe no período — e não
   // só uma lista de nomes.
   var ws3 = wb.addWorksheet('HH da Equipe', { views:[{ showGridLines:false }] });
-  ws3.columns = [{ width:24 }, { width:9 }, { width:11 }, { width:9 }, { width:11 },
-                 { width:12 }, { width:11 }, { width:13 }, { width:11 }, { width:13 },
-                 { width:11 }, { width:10 }, { width:11 },
+  ws3.columns = [{ width:24 }, { width:9 }, { width:13 }, { width:11 }, { width:13 },
+                 { width:9 }, { width:13 }, { width:10 }, { width:11 }, { width:14 },
+                 { width:20 }, { width:16 },
+                 { width:10 }, { width:11 },
                  { width:11 }, { width:12 }, { width:9 }, { width:12 }, { width:12 },
-                 { width:16 }, { width:13 }];
+                 { width:13 }];
   _esfTitulo(ws3, 'HH da Equipe — esforço e aproveitamento por analista',
-    'Produção do dia = o número do FECHAMENTO DO DIA, o mesmo dos Alertas de Performance — é ele que responde pela meta. '
-    + 'Movimentações e conclusões vêm das ações: a mesma RC pode receber várias no mesmo dia, por isso os números não são iguais. '
-    + 'ATENÇÃO ao que a meta mede: o fechamento soma os itens TRABALHADOS do dia (1ª Análise, Em Tratativa, Status B e Ag Parecer) — '
-    + 'item movimentado conta igual a item finalizado. Por isso o aproveitamento é de itens trabalhados, NÃO de itens finalizados; '
-    + 'quem responde por finalizados são as colunas de desfecho e a Taxa de conclusão (conclusões ÷ ações). '
+    'META DO PERÍODO = Meta/dia × (Dias úteis − Folga/Férias). Só folga e férias descontam; '
+    + 'dia sem fechamento NÃO desconta, e por isso derruba o aproveitamento — é cobrança de registro. '
+    + 'FOLGA/FÉRIAS vem de duas fontes e basta uma delas: a Presença do fechamento do dia e a '
+    + 'Gestão de Jornada (férias e folgas programadas). Assim, quem tirou folga e não lançou o dia '
+    + 'não é cobrado por um registro que faltou. '
+    + 'ANALISADOS (prod.) = o total do FECHAMENTO DO DIA, o mesmo número dos Alertas de Performance: '
+    + 'ele soma os itens analisados no dia (1ª Análise, Em Tratativa, Status B e Ag Parecer), e item '
+    + 'movimentado conta igual a item finalizado. '
+    + 'MOVIM. e CONCLUSÕES abrem O QUE foi feito, e vêm de outra fonte (as ações): a mesma RC pode '
+    + 'receber várias ações no mesmo dia e dia sem fechamento continua tendo ação, por isso '
+    + 'Movim. + Conclusões não fecha com Analisados. '
     + 'RCs distintas = quantas RCs diferentes a pessoa tocou (a mesma RC tocada 5 vezes conta 1).', 20);
   var L3 = 4;
-  _esfCabecalho(ws3, L3, ['Analista', 'Meta/dia', 'Dias úteis', 'Trabalhados', 'Folga/Férias',
-                          'Sem fechamento', 'Trabalhados (prod.)', 'Meta do período',
-                          'Aproveit. (trabalhados)',
-                          'Dias abaixo', 'Média/dia', 'Movim.', 'Conclusões',
+  _esfCabecalho(ws3, L3, ['Analista', 'Dias úteis', 'Dias Trabalhados', 'Folga/Férias',
+                          'Sem fechamento', 'Meta/dia', 'Meta do período', 'Média/dia',
+                          'Dias abaixo', 'Analisados (prod.)', 'Aproveit. Meta (Analisados)',
+                          'Taxa de conclusão', 'Movim.', 'Conclusões',
                           '🛒 Pedido', '🔄 Republic.', '📦 XGL', '↩ Devolução', '🔖 N. Reserva',
-                          'Taxa de conclusão', 'RCs distintas'],
+                          'RCs distintas'],
                 ESF_C.BLUE); L3++;
+  var COL_APROV = 11, COL_ABAIXO = 9;
   pessoas.forEach(function(p, i){
-    _esfLinha(ws3, L3, [p.nome, p.meta, p.diasUteis, p.trabalhados, p.folgas, p.semRegistro,
-      p.producao, p.metaPeriodo, p.trabalhados ? _esfPct(p.aproveitamento) : '—',
-      p.diasAbaixo.length, p.trabalhados ? Number(p.mediaDia.toFixed(1)) : '—',
+    _esfLinha(ws3, L3, [p.nome, p.diasUteis, p.trabalhados, p.folgas, p.semRegistro,
+      p.meta, p.metaPeriodo, p.trabalhados ? Number(p.mediaDia.toFixed(1)) : '—',
+      p.diasAbaixo.length, p.producao,
+      p.metaPeriodo ? _esfPct(p.aproveitamento) : '—',
+      p.acoes ? _esfPct(p.conc / p.acoes) : '—',
       p.mov, p.conc].concat(ESF_DESFECHOS.map(function(d){ return p.desfechos[d] || 0; }))
-      .concat([p.acoes ? _esfPct(p.conc / p.acoes) : '—', p.nRcs]),
-      { fill: i % 2 ? ESF_C.GREY_L : null });
+      .concat([p.nRcs]), { fill: i % 2 ? ESF_C.GREY_L : null });
     // o aproveitamento é o número que ele vai olhar primeiro — ganha cor
-    var cel = ws3.getCell(L3, 9);
-    if (p.trabalhados) {
+    var cel = ws3.getCell(L3, COL_APROV);
+    if (p.metaPeriodo) {
       cel.fill = _esfSolid(p.aproveitamento >= 1 ? ESF_C.GREEN_L
                          : (p.aproveitamento >= 0.7 ? ESF_C.AMBER_L : ESF_C.RED_L));
       cel.font = { name:'Calibri', size:10, bold:true,
                    color:{ argb: p.aproveitamento >= 1 ? ESF_C.GREEN
                                 : (p.aproveitamento >= 0.7 ? ESF_C.AMBER : ESF_C.RED) } };
     }
-    if (p.diasAbaixo.length) ws3.getCell(L3, 10).font =
+    if (p.diasAbaixo.length) ws3.getCell(L3, COL_ABAIXO).font =
       { name:'Calibri', size:10, bold:true, color:{ argb:ESF_C.RED } };
     L3++;
   });
@@ -60825,18 +60948,21 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     ESF_DESFECHOS.forEach(function(d){ o.d[d] = (o.d[d] || 0) + (p.desfechos[d] || 0); });
     return o;
   }, { trab:0, prod:0, meta:0, ab:0, mov:0, conc:0, d:{} });
-  _esfLinha(ws3, L3, ['TOTAL DA EQUIPE', '', '', somaP.trab, '', '', somaP.prod, somaP.meta,
-    somaP.meta ? _esfPct(somaP.prod / somaP.meta) : '—', somaP.ab,
+  _esfLinha(ws3, L3, ['TOTAL DA EQUIPE', '', somaP.trab, '', '', '', somaP.meta,
     somaP.trab ? Number((somaP.prod / somaP.trab).toFixed(1)) : '—',
+    somaP.ab, somaP.prod,
+    somaP.meta ? _esfPct(somaP.prod / somaP.meta) : '—',
+    r.total ? _esfPct(somaP.conc / r.total) : '—',
     somaP.mov, somaP.conc].concat(ESF_DESFECHOS.map(function(d){ return somaP.d[d] || 0; }))
-    .concat([r.total ? _esfPct(somaP.conc / r.total) : '—', r.nRcs]),
-    { bold:true, fill:ESF_C.BLUE_L });
+    .concat([r.nRcs]), { bold:true, fill:ESF_C.BLUE_L });
   L3 += 2;
   ws3.mergeCells(L3, 1, L3, 20);
   var leg = ws3.getCell(L3, 1);
-  leg.value = 'Como ler: "Trabalhados" são os dias úteis com fechamento registrado e sem folga — '
-    + 'só esses entram na meta do período. "Sem fechamento" não é dia ruim, é dia sem registro, '
-    + 'e fica fora da conta. Aproveitamento = produção ÷ meta do período.';
+  leg.value = 'Como ler: a Meta do período desconta só Folga/Férias — 30/dia em 19 dias úteis '
+    + 'com 1 folga dá 540, e não 570. "Dias Trabalhados" são os dias com fechamento registrado e '
+    + 'sem folga, e servem para a Média/dia (o ritmo de quem registra). "Sem fechamento" continua '
+    + 'sendo cobrado na meta: dia sem registro puxa o aproveitamento para baixo. '
+    + 'Aproveit. Meta (Analisados) = Analisados ÷ Meta do período.';
   leg.font = { name:'Calibri', size:10, italic:true, color:{ argb:ESF_C.GREY_TXT } };
   leg.alignment = { horizontal:'left', vertical:'middle', wrapText:true };
   ws3.getRow(L3).height = 30;
@@ -60855,9 +60981,9 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     var cab = ws3b.getCell(L3b, 1);
     cab.value = p.nome + '   ·   meta ' + p.meta + '/dia (' + p.metaFonte + ')';
     cab.font = { name:'Calibri', size:12, bold:true, color:{ argb:ESF_C.WHITE } };
-    cab.fill = _esfSolid(p.trabalhados && p.aproveitamento >= 1 ? ESF_C.GREEN
-                       : (p.trabalhados && p.aproveitamento >= 0.7 ? ESF_C.AMBER
-                       : (p.trabalhados ? ESF_C.RED : ESF_C.NAVY)));
+    cab.fill = _esfSolid(p.metaPeriodo && p.aproveitamento >= 1 ? ESF_C.GREEN
+                       : (p.metaPeriodo && p.aproveitamento >= 0.7 ? ESF_C.AMBER
+                       : (p.metaPeriodo ? ESF_C.RED : ESF_C.NAVY)));
     cab.alignment = { horizontal:'left', vertical:'middle' };
     ws3b.getRow(L3b).height = 22; L3b++;
 
@@ -60865,14 +60991,17 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
       return fmtDt(d.data) + ' (' + d.prod + ', faltaram ' + d.falta + ')';
     }).join(' · ');
     var itens = [
-      ['Aproveitamento (itens trabalhados)',
-       p.trabalhados ? _esfPct(p.aproveitamento) : 'sem dia trabalhado',
-       p.trabalhados ? ('trabalhou ' + p.producao + ' de ' + p.metaPeriodo
-         + ' (' + p.meta + ' × ' + p.trabalhados + ' dias) — o fechamento conta item '
-         + 'movimentado igual a item finalizado') : 'nenhum dia com fechamento no período'],
+      ['Aproveit. Meta (Analisados)',
+       p.metaPeriodo ? _esfPct(p.aproveitamento) : 'sem meta no período',
+       p.metaPeriodo ? ('analisou ' + p.producao + ' de ' + p.metaPeriodo
+         + ' (' + p.meta + '/dia × ' + p.diasMeta + ' dia(s) cobrados'
+         + (p.folgas ? ', já descontando ' + p.folgas + ' de folga/férias' : '') + ')'
+         + (p.semRegistro ? ' — ' + p.semRegistro + ' dia(s) sem fechamento continuam cobrados'
+                          : '')) : 'nenhum dia útil cobrado no período'],
       ['Dias úteis no período', p.diasUteis,
-       p.trabalhados + ' trabalhado(s) · ' + p.folgas + ' de folga/férias · '
-       + p.semRegistro + ' sem fechamento'],
+       p.trabalhados + ' com fechamento · ' + p.folgas + ' de folga/férias ('
+       + p.folgasFech + ' pelo fechamento, ' + p.folgasJor + ' pela Jornada) · '
+       + p.semRegistro + ' sem fechamento (continuam na meta)'],
       ['Dias abaixo da meta', p.diasAbaixo.length, abaixo || 'nenhum'],
       ['Dias que bateu a meta', p.diasAcima,
        p.melhor ? ('melhor dia: ' + fmtDt(p.melhor.data) + ' com ' + p.melhor.prod) : '—'],
