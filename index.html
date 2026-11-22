@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '22/11 00:40';
+var GTO_BUILD = '22/11 11:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1250,6 +1250,41 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
             <strong>data de negociação</strong> preenchida na Governança.
           </div>
           <div id="gv-ctrl-neg"></div>
+        </div>
+
+        <!-- 22/11: o mesmo controle para o que não é distribuído.
+             Rejeite e Status B não saem da distribuição do MAPA: o dono
+             é quem emitiu o pedido. O resto da leitura é igual — carga,
+             tratado, em aberto e fora do prazo, por comprador. -->
+        <div class="cd">
+          <div class="cd-t">🏭 Controle do rejeite — fornecedor</div>
+          <div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.8rem">
+            Os pedidos rejeitados pelo fornecedor que estão na base <strong>hoje</strong>, por
+            quem emitiu o pedido. Conta como tratado o pedido que já tem
+            <strong>conclusão registrada</strong> na tela de Rejeite. <strong>Vencidos</strong> é
+            o que está sem conclusão e já passou do prazo.
+          </div>
+          <div id="gv-ctrl-rejforn"></div>
+        </div>
+
+        <div class="cd">
+          <div class="cd-t">👤 Controle do rejeite — supervisor</div>
+          <div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.8rem">
+            As RCs rejeitadas pelo supervisor que estão na base <strong>hoje</strong>, por
+            comprador. Mesma régua: tratado é o que tem conclusão registrada; vencido é o que
+            está sem conclusão e passou do prazo.
+          </div>
+          <div id="gv-ctrl-rejsup"></div>
+        </div>
+
+        <div class="cd">
+          <div class="cd-t">📋 Controle do Status B</div>
+          <div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.8rem">
+            Os itens em Status B da última BU, por quem emitiu o pedido. Conta como tratado o
+            item que já tem <strong>conclusão</strong> escolhida no card. Vencido é o que está
+            sem conclusão e parado há mais dias que o prazo.
+          </div>
+          <div id="gv-ctrl-statusb"></div>
         </div>
 
         <div class="cd">
@@ -15060,11 +15095,18 @@ async function acpAvaliar(data){
       });
     };
     marca(o.emissao.itens); marca(o.neg.itens);
-    o.pendentes = o.emissao.itens.filter(function(i){ return i.precisa && !i.justificado; }).length
-                + o.neg.itens.filter(function(i){ return i.precisa && !i.justificado; }).length;
-    o.aJustificar = o.emissao.itens.filter(function(i){ return i.precisa; }).length
-                  + o.neg.itens.filter(function(i){ return i.precisa; }).length;
+    // 22/11: o que o dia cobra do item deixou de ser o select de motivo
+    // e passou a ser o COMENTÁRIO DO CARD de emissão — "sempre, para
+    // todo não emitido". O motivo continua existindo, agora opcional.
+    var semCom = function(i){
+      try { return !String((emiDe(i.chave) || {}).comentario || '').trim(); }
+      catch (e) { return true; }
+    };
+    o.pendentes = o.emissao.itens.filter(function(i){ return i.precisa && semCom(i); }).length;
+    o.aJustificar = o.emissao.itens.filter(function(i){ return i.precisa; }).length;
     o.justificados = o.aJustificar - o.pendentes;
+    o.motivoDia = g.motivoDia || '';
+    o.detalheDia = g.detalheDia || '';
     // o fechamento do dia: onde trabalhou, folga e se já fechou
     o.local = g.local || '';
     o.folga = !!g.folga;
@@ -15180,10 +15222,10 @@ async function acpDesenhar(){
       + 'gap:12px;margin-bottom:1rem">'
       + monCard('DISTRIBUÍDO', cpNum(t.distribuidos), cpNum(r.lista.length) + ' comprador(es)')
       + monCard('FEITO', cpNum(t.feitos), t.pct + '% do distribuído', 'var(--vd)', 'var(--vdc)')
-      + monCard('PRECISA JUSTIFICAR', cpNum(t.aJustificar),
-          cpNum(t.justificados = t.aJustificar - t.pendentes) + ' já justificados',
+      + monCard('ITENS A COMENTAR', cpNum(t.aJustificar),
+          cpNum(t.justificados = t.aJustificar - t.pendentes) + ' já comentados',
           t.aJustificar ? 'var(--am)' : 'var(--tx2)', t.aJustificar ? 'var(--amc)' : 'var(--cin)')
-      + monCard('SEM JUSTIFICATIVA', cpNum(t.pendentes), 'ninguém explicou ainda',
+      + monCard('SEM COMENTÁRIO', cpNum(t.pendentes), 'item não emitido e sem explicação',
           t.pendentes ? 'var(--vm)' : 'var(--vd)', t.pendentes ? 'var(--vmc)' : 'var(--vdc)')
       + monCard('FECHARAM O DIA', cpNum(t.fecharam) + '/' + cpNum(r.lista.length),
           (t.semLocal ? cpNum(t.semLocal) + ' sem informar o local' : 'todos informaram'),
@@ -15202,8 +15244,10 @@ async function acpDesenhar(){
       +   '<th style="text-align:right" title="Não aparece na medição">Sem registro</th>'
       +   '<th>Abrir PATEC</th>'
       +   '<th style="text-align:right">Negociação</th>'
-      +   '<th style="text-align:right">A justificar</th>'
-      +   '<th style="text-align:right">Sem justificativa</th>'
+      +   '<th style="text-align:right" title="Itens não emitidos — todos precisam de comentário no card">A comentar</th>'
+      +   '<th style="text-align:right">Sem comentário</th>'
+      +   '<th title="Pedidos emitidos, abertura de PATEC e negociação">Bateu o dia?</th>'
+      +   '<th>Justificativa do dia</th>'
       + '</tr></thead><tbody>';
     r.lista.forEach(function(p){
       var ruim = p.pendentes > 0;
@@ -15229,6 +15273,23 @@ async function acpDesenhar(){
         + '<td style="text-align:right">' + cpNum(p.aJustificar) + '</td>'
         + '<td style="text-align:right;font-weight:700;color:'
         +   (p.pendentes ? 'var(--vm)' : 'var(--vd)') + '">' + cpNum(p.pendentes) + '</td>'
+        + (function(){
+            var rg = fdpRegua(p);
+            if (p.folga) return '<td style="font-size:10.5px;color:var(--tx2)">folga</td>'
+                              + '<td style="font-size:10.5px;color:var(--tx2)">—</td>';
+            return '<td style="font-size:10.5px;font-weight:700;color:'
+                 +   (rg.bateu ? 'var(--vd)' : 'var(--am)') + '">'
+                 +   (rg.bateu ? 'bateu'
+                        : 'faltou ' + cpEsc(rg.falhas.map(function(x){ return x.rot; }).join(', ')))
+                 + '</td>'
+                 + '<td style="font-size:10.5px">'
+                 +   (p.motivoDia
+                        ? '<strong>' + cpEsc(p.motivoDia) + '</strong>'
+                          + (p.detalheDia ? ' — ' + cpEsc(p.detalheDia) : '')
+                        : (rg.bateu ? '<span style="color:var(--tx2)">não precisa</span>'
+                                    : '<span style="color:var(--vm)">falta justificar</span>'))
+                 + '</td>';
+          })()
         + '</tr>';
     });
     h += '</tbody></table></div>';
@@ -15271,8 +15332,25 @@ function acpBlocoPessoa(p, r){
     +   '<span style="font-size:11.5px;font-weight:500;color:'
     +     (p.pendentes ? 'var(--vm)' : 'var(--vd)') + '">'
     +     cpNum(p.feitos) + ' de ' + cpNum(p.distribuidos) + ' feitos'
-    +     (p.pendentes ? ' · ' + cpNum(p.pendentes) + ' sem justificativa' : ' · nada pendente')
-    +   '</span></div>';
+    +     (p.pendentes ? ' · ' + cpNum(p.pendentes) + ' sem comentário' : ' · nada pendente')
+    +   '</span></div>'
+    + (function(){
+        if (p.folga) return '';
+        var rg = fdpRegua(p);
+        return '<div style="font-size:11px;line-height:1.7;margin-bottom:.6rem;color:'
+          + (rg.bateu ? 'var(--vd)' : 'var(--am)') + '">'
+          + (rg.bateu
+              ? '✓ Bateu o que o dia cobrava: '
+                + rg.itens.map(function(x){
+                    return cpEsc(x.rot) + ' ' + cpNum(x.feito) + '/' + cpNum(x.meta); }).join(' · ')
+              : '⚠ Faltou ' + cpEsc(rg.falhas.map(function(x){
+                    return x.rot + ' (' + cpNum(x.feito) + ' de ' + cpNum(x.meta) + ')'; }).join(' e '))
+                + (p.motivoDia
+                    ? ' — <strong>' + cpEsc(p.motivoDia) + '</strong>'
+                      + (p.detalheDia ? ': ' + cpEsc(p.detalheDia) : '')
+                    : ' — <span style="color:var(--vm)">sem justificativa do dia</span>'))
+          + '</div>';
+      })();
 
   // ── Abrir PATEC: o que ele declara ──
   if (p.abrir.distribuidos) {
@@ -15338,7 +15416,9 @@ function acpBlocoPessoa(p, r){
     pend.forEach(function(i, idx) {
       var est = i.fila && ACP_NEG.indexOf(i.fila) !== -1 ? 'sem data de negociação'
               : (i.status === 'memorizado' ? 'memorizado' : 'não está na medição');
-      h += '<tr' + (i.justificado ? '' : ' style="background:var(--vmc)"') + '>'
+      var okItem = (ACP_EMISSAO.indexOf(i.fila) !== -1)
+                     ? !!fdpComentarioDoCard(i.chave) : !!i.justificado;
+      h += '<tr' + (okItem ? '' : ' style="background:var(--vmc)"') + '>'
         + '<td style="font-weight:700;color:var(--az)">' + cpEsc(i.rc) + '</td>'
         + '<td>' + cpEsc(i.seq) + '</td>'
         + '<td>' + cpEsc(i.op || '—') + '</td>'
@@ -15349,21 +15429,34 @@ function acpBlocoPessoa(p, r){
               ? '<select onchange="acpSalvarJust(\'' + cpEsc(p.nome) + '\', \'' + cpEsc(i.chave)
                 + '\', \'m\', this.value)" style="font-size:10.5px;padding:3px 6px;'
                 + 'border-radius:5px;border:1px solid '
-                + (i.motivo ? 'var(--vd)' : 'var(--vm)') + '">'
-                + '<option value="">— escolha o motivo —</option>'
+                + (i.motivo ? 'var(--vd)' : 'var(--brd)') + '">'
+                + '<option value="">— motivo (opcional) —</option>'
                 + ACP_MOTIVOS.map(function(m){
                     return '<option value="' + cpEsc(m) + '"'
                       + (i.motivo === m ? ' selected' : '') + '>' + cpEsc(m) + '</option>'; }).join('')
                 + '</select>'
               : cpEsc(i.motivo || '—')) + '</td>'
-        + '<td>'
-        +   (podeEditar
-              ? '<input type="text" value="' + cpEsc(i.comentario) + '" placeholder="opcional"'
-                + ' onchange="acpSalvarJust(\'' + cpEsc(p.nome) + '\', \'' + cpEsc(i.chave)
-                + '\', \'c\', this.value)"'
-                + ' style="width:200px;font-size:10.5px;padding:3px 6px;border-radius:5px;'
-                + 'border:1px solid var(--brd)">'
-              : cpEsc(i.comentario || '—')) + '</td>'
+        + (function(){
+            // No item de EMISSÃO o comentário é o do card — a mesma
+            // caixa que o fechamento mostra, gravando no mesmo lugar.
+            // Na negociação não existe card, então vale o daqui.
+            var daEmissao = ACP_EMISSAO.indexOf(i.fila) !== -1;
+            var val = daEmissao ? fdpComentarioDoCard(i.chave) : (i.comentario || '');
+            var obrig = daEmissao && !val;
+            return '<td>'
+              + (podeEditar
+                  ? '<input type="text" value="' + cpEsc(val) + '" placeholder="'
+                    + (daEmissao ? 'por que não saiu?' : 'opcional') + '"'
+                    + ' onchange="' + (daEmissao
+                        ? 'fdpSalvarComentario(\'' + cpEsc(i.chave) + '\', this.value)'
+                        : 'acpSalvarJust(\'' + cpEsc(p.nome) + '\', \'' + cpEsc(i.chave)
+                          + '\', \'c\', this.value)') + '"'
+                    + ' style="width:200px;font-size:10.5px;padding:3px 6px;border-radius:5px;'
+                    + 'border:1px solid ' + (obrig ? 'var(--vm)' : 'var(--brd)') + '">'
+                    + (daEmissao ? '<div style="font-size:9px;color:var(--tx2);margin-top:2px">'
+                                   + 'do card de emissão</div>' : '')
+                  : cpEsc(val || '—')) + '</td>';
+          })()
         + '</tr>';
     });
     h += '</tbody></table></div>';
@@ -16891,6 +16984,115 @@ function jgeRender(){
 // ajuste, e o consolidado passaria a mentir.
 var FDP_LOCAIS = ['Presencial', 'Home Office'];
 
+// ── A RÉGUA DO DIA (22/11) ───────────────────────────────────────
+// André: "a pessoa precisa se justificar apenas se não atingiu a meta
+// de 30 itens... entra na meta pedido emitido (mais de 30 não
+// justifica, mesmo se tiver item memorizado; menos de 30 justifica,
+// inclusive se tiver memorizado). Abertura de PATEC é no mínimo 5 por
+// dia, e esse não entra na meta dos 30. Negociação: tudo que for
+// distribuído precisa fazer; se não fez, precisa se justificar. No
+// caso da Palloma, como ela só trabalha meio período, o item de pedido
+// emitido dela é reduzido para 15; o restante é igual."
+//
+// Três cobranças independentes, e basta uma falhar para o dia pedir
+// justificativa. A meta de abertura nunca cobra mais do que foi
+// distribuído — cobrar 5 de quem recebeu 2 seria uma meta impossível,
+// e meta impossível vira justificativa automática todo dia.
+var FDP_META = {
+  pedidos: 30,
+  pedidosPorPessoa: { 'PALLOMA': 15 },   // meio período
+  abrir: 5
+};
+function fdpMetaPedidos(nome){
+  var k = cpNormNome(nome);
+  var m = FDP_META.pedidosPorPessoa[k];
+  return (m === undefined || m === null) ? FDP_META.pedidos : Math.max(0, +m || 0);
+}
+// a meta de abertura do dia: 5, ou o que foi distribuído, o que for menor
+function fdpMetaAbrir(p){
+  var d = (p && p.abrir) ? (+p.abrir.distribuidos || 0) : 0;
+  return d ? Math.min(FDP_META.abrir, d) : 0;
+}
+
+// O que o dia cobra e o que a pessoa entregou — uma linha por cobrança.
+// A tela, a trava do fechamento e o texto da justificativa leem todos
+// daqui: três leituras do mesmo fato não podem divergir.
+function fdpRegua(p){
+  if (!p) return { itens:[], bateu:true, falhas:[] };
+  var metaPed = fdpMetaPedidos(p.nome);
+  var metaAbr = fdpMetaAbrir(p);
+  var decl = (p.abrir && p.abrir.declarou) ? (+p.abrir.declarado || 0) : null;
+  var itens = [
+    { k:'pedidos', rot:'Pedidos emitidos', meta:metaPed, feito:p.emissao.emitidos,
+      bateu: p.emissao.emitidos >= metaPed,
+      nota: metaPed !== FDP_META.pedidos
+              ? ('meta de ' + cpNum(metaPed) + ' — meio período')
+              : 'item memorizado não conta aqui' }
+  ];
+  if (metaAbr) itens.push({ k:'abrir', rot:'Abertura de PATEC', meta:metaAbr,
+    feito: decl === null ? 0 : decl, bateu: decl !== null && decl >= metaAbr,
+    nota: decl === null ? 'informe quantos você abriu'
+                        : 'não entra na meta dos pedidos' });
+  if (p.neg.meta) itens.push({ k:'neg', rot:'Negociação', meta:p.neg.meta,
+    feito: (p.declaradoNeg === null || p.declaradoNeg === undefined)
+             ? p.neg.feito : Math.max(p.neg.feito, p.declaradoNeg),
+    bateu: ((p.declaradoNeg === null || p.declaradoNeg === undefined)
+              ? p.neg.feito : Math.max(p.neg.feito, p.declaradoNeg)) >= p.neg.meta,
+    nota:'tudo que foi distribuído' });
+  var falhas = itens.filter(function(x){ return !x.bateu; });
+  return { itens:itens, bateu: !falhas.length, falhas:falhas,
+           metaPedidos:metaPed, metaAbrir:metaAbr };
+}
+
+// ── O COMENTÁRIO DO ITEM VEM DO CARD ─────────────────────────────
+// André: "nos itens que a pessoa não conseguiu sair para pedido ela vai
+// precisar colocar o comentário nos cards emitir pedido, emitir pedido
+// PATEC e emitir pedido PATEC manual; os comentários que ela colocar
+// ali devem refletir na justificativa do fechamento do dia".
+//
+// Então o fechamento NÃO guarda um comentário próprio: ele lê o do
+// card. Escrever aqui grava no mesmo lugar (emiSalvar), senão o mesmo
+// item teria dois comentários diferentes dependendo da tela.
+function fdpComentarioDoCard(chave){
+  try { return String((emiDe(chave) || {}).comentario || '').trim(); }
+  catch (e) { return ''; }
+}
+function fdpItensSemComentario(p){
+  if (!p) return [];
+  return p.emissao.itens.filter(function(i){
+    return i.precisa && !fdpComentarioDoCard(i.chave); });
+}
+async function fdpSalvarComentario(chave, valor){
+  try { await emiSalvar(chave, 'comentario', valor); } catch (e) {}
+  await fdpRender();
+}
+
+// Os botões de justificativa são os MESMOS do fechamento do PATEC —
+// ele pediu assim —, mais a curva de aprendizagem, que só existe aqui.
+var FDP_MOTIVOS = [
+  { t:'Reuniões/alinhamentos',       ico:'🤝' },
+  { t:'Volume reduzido de itens',    ico:'📉' },
+  { t:'Itens complexos',             ico:'🔍' },
+  { t:'Suporte a outros times',      ico:'🤲' },
+  { t:'Problemas de sistema',        ico:'💻' },
+  { t:'Curva de aprendizagem',       ico:'📚' },
+  { t:'Meta atingida / Dia normal',  ico:'✅' },
+  { t:'Outro',                       ico:'📝' }
+];
+var FDP_COMENT_MIN = 10;
+
+async function fdpMotivo(m){
+  await acpSalvarCampo(acpEuSou(), 'motivoDia', m);
+  await fdpRender();
+}
+async function fdpDetalhe(v){
+  await acpSalvarCampo(acpEuSou(), 'detalheDia', String(v || '').trim());
+}
+// o mesmo corte do PATEC: espaço e ponto não contam como comentário
+function fdpDetalheValido(v){
+  return String(v || '').replace(/[\s\.…]/g, '').length >= FDP_COMENT_MIN;
+}
+
 async function acpSalvarCampo(nome, campo, valor){
   var dataAlvo = acpDataSel();
   if (_acpDia.data !== dataAlvo) await acpCarregar(dataAlvo);
@@ -16932,8 +17134,20 @@ function fdpPendencias(p){
   }
   if (p.neg.meta && (g.declaradoNeg === undefined || g.declaradoNeg === null))
     faltas.push('informar quantas negociações você fez');
-  var semJust = p.emissao.itens.filter(function(i){ return i.precisa && !i.justificado; }).length;
-  if (semJust) faltas.push('justificar ' + cpNum(semJust) + ' pedido(s) não emitido(s)');
+  // 22/11: o comentário do item é sempre cobrado — "sempre, para todo
+  // não emitido" —, mesmo no dia em que a meta foi batida. Ele é o que
+  // explica, item a item, por que a RC não virou pedido.
+  var semCom = fdpItensSemComentario(p).length;
+  if (semCom) faltas.push('comentar ' + cpNum(semCom) + ' item(ns) que não viraram pedido '
+    + '— o comentário é o do card de emissão');
+  // Já o motivo e o texto do dia só são cobrados quando alguma das três
+  // metas não foi batida.
+  var reg = fdpRegua(p);
+  if (!reg.bateu) {
+    if (!g.motivoDia) faltas.push('escolher o motivo do dia');
+    if (!fdpDetalheValido(g.detalheDia))
+      faltas.push('escrever o que aconteceu (mínimo ' + FDP_COMENT_MIN + ' caracteres)');
+  }
   return faltas;
 }
 
@@ -17026,6 +17240,35 @@ async function fdpRender(){
   h += '</div></div>';
 
   var fechado = !!g.fechado;
+  var reg = fdpRegua(p);
+
+  // ── a régua do dia: o que é cobrado e o que foi entregue ──
+  // Antes a tela só mostrava a composição, e "falta justificar" chegava
+  // no fim sem dizer por quê. Aqui a pessoa vê a conta antes de tentar
+  // fechar o dia.
+  if (!g.folga) {
+    h += '<div class="cd" style="border-left:4px solid '
+      + (reg.bateu ? 'var(--vd)' : 'var(--am)') + '">'
+      + '<div class="cd-t" style="margin-bottom:.5rem">🎯 O que o dia cobra de você</div>'
+      + '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.7rem">'
+      + 'Bateu as três? O dia fecha sem justificativa. Faltou alguma? Aí sim o motivo e o '
+      + 'texto embaixo passam a ser obrigatórios.</div>'
+      + '<div style="overflow:auto"><table><thead><tr><th>Cobrança</th>'
+      + '<th style="text-align:right">Meta</th><th style="text-align:right">Você fez</th>'
+      + '<th>Situação</th><th>Observação</th></tr></thead><tbody>';
+    reg.itens.forEach(function(x){
+      h += '<tr' + (x.bateu ? '' : ' style="background:var(--amc)"') + '>'
+        + '<td style="font-weight:600">' + cpEsc(x.rot) + '</td>'
+        + '<td style="text-align:right;font-weight:700">' + cpNum(x.meta) + '</td>'
+        + '<td style="text-align:right;font-weight:700;color:'
+        +   (x.bateu ? 'var(--vd)' : 'var(--am)') + '">' + cpNum(x.feito) + '</td>'
+        + '<td>' + (x.bateu ? '<span class="pl pl-ok">bateu</span>'
+                            : '<span class="pl pl-w">faltou ' + cpNum(x.meta - x.feito)
+                              + '</span>') + '</td>'
+        + '<td style="font-size:10.5px;color:var(--tx2)">' + cpEsc(x.nota) + '</td></tr>';
+    });
+    h += '</tbody></table></div></div>';
+  }
 
   // ── folga ──
   h += '<div class="cd" style="background:var(--amc);border:1.5px solid var(--am)">'
@@ -17108,45 +17351,91 @@ async function fdpRender(){
 
     // ── os memorizados e os que nem apareceram ──
     var pend = p.emissao.itens.filter(function(i){ return i.precisa; });
+    var semCom = fdpItensSemComentario(p).length;
     h += '<div class="cd"><div class="cd-t" style="margin-bottom:.5rem">'
-      + '📝 Pedidos que não foram emitidos — ' + cpNum(pend.length) + '</div>';
+      + '📝 Pedidos que não foram emitidos — ' + cpNum(pend.length)
+      + (semCom ? ' <span style="font-size:11px;font-weight:700;color:var(--vm)">· '
+                  + cpNum(semCom) + ' sem comentário</span>' : '') + '</div>';
     if (!pend.length) {
       h += '<div class="al al-ok" style="font-size:11.5px">✓ Tudo que foi distribuído para '
-        + 'emissão virou pedido. Nada a justificar.</div>';
+        + 'emissão virou pedido. Nada a comentar.</div>';
     } else {
       h += '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.6rem">'
         + 'Memorizado é o que parou no meio; "não está na medição" é o que não foi começado. '
-        + 'Escolha o motivo de cada um.</div>'
+        + '<strong>Todo item desta lista precisa de comentário</strong>, mesmo no dia em que '
+        + 'você bateu a meta — RC que virou pedido não aparece aqui. '
+        + 'O comentário é o MESMO do card de emissão: o que você escrever aqui aparece lá, '
+        + 'e o que escreveu lá já vem preenchido aqui.</div>'
         + '<div style="overflow:auto;max-height:380px"><table><thead><tr>'
         +   '<th>RC</th><th>Item</th><th>Oportunidade</th><th>O que está</th>'
-        +   '<th>Motivo</th><th>Comentário</th></tr></thead><tbody>';
+        +   '<th>Comentário do card <span style="color:var(--vm)">*</span></th>'
+        +   '<th>Motivo (opcional)</th></tr></thead><tbody>';
       pend.forEach(function(i){
-        h += '<tr' + (i.justificado ? '' : ' style="background:var(--vmc)"') + '>'
+        var com = fdpComentarioDoCard(i.chave);
+        h += '<tr' + (com ? '' : ' style="background:var(--vmc)"') + '>'
           + '<td style="font-weight:700;color:var(--az)">' + cpEsc(i.rc) + '</td>'
           + '<td>' + cpEsc(i.seq) + '</td>'
           + '<td>' + cpEsc(i.op || '—') + '</td>'
           + '<td style="font-size:10.5px;font-weight:600;color:var(--am)">'
           +   (i.status === 'memorizado' ? 'memorizado' : 'não está na medição') + '</td>'
+          + '<td><input type="text" value="' + cpEsc(com) + '" placeholder="por que não saiu?"'
+          +   (fechado ? ' disabled' : '')
+          +   ' onchange="fdpSalvarComentario(\'' + cpEsc(i.chave) + '\', this.value)"'
+          +   ' style="width:260px;font-size:10.5px;padding:3px 6px;border-radius:5px;'
+          +   'border:1.5px solid ' + (com ? 'var(--vd)' : 'var(--vm)') + '"></td>'
           + '<td><select' + (fechado ? ' disabled' : '')
           +   ' onchange="acpSalvarJust(\'' + cpEsc(p.nome) + '\', \'' + cpEsc(i.chave)
           +   '\', \'m\', this.value).then(fdpRender)"'
           +   ' style="font-size:10.5px;padding:3px 6px;border-radius:5px;border:1px solid '
-          +   (i.motivo ? 'var(--vd)' : 'var(--vm)') + '">'
-          +   '<option value="">— escolha —</option>'
+          +   (i.motivo ? 'var(--vd)' : 'var(--brd)') + '">'
+          +   '<option value="">— opcional —</option>'
           +   ACP_MOTIVOS.map(function(m){
                 return '<option value="' + cpEsc(m) + '"'
                   + (i.motivo === m ? ' selected' : '') + '>' + cpEsc(m) + '</option>'; }).join('')
-          +   '</select></td>'
-          + '<td><input type="text" value="' + cpEsc(i.comentario) + '" placeholder="opcional"'
-          +   (fechado ? ' disabled' : '')
-          +   ' onchange="acpSalvarJust(\'' + cpEsc(p.nome) + '\', \'' + cpEsc(i.chave)
-          +   '\', \'c\', this.value).then(fdpRender)"'
-          +   ' style="width:220px;font-size:10.5px;padding:3px 6px;border-radius:5px;'
-          +   'border:1px solid var(--brd)"></td></tr>';
+          +   '</select></td></tr>';
       });
       h += '</tbody></table></div>';
     }
     h += '</div>';
+
+    // ── Como foi o seu dia: o mesmo bloco do PATEC ──
+    // Só é COBRADO quando alguma das três metas não foi batida; fica
+    // visível sempre, porque quem bateu também costuma querer registrar
+    // o dia — e aí o campo é livre.
+    var obrig = !reg.bateu;
+    h += '<div class="cd" style="border:1.5px solid '
+      + (obrig ? 'var(--am)' : 'var(--brd)') + '">'
+      + '<div class="cd-t" style="margin-bottom:.6rem">📝 Como foi o seu dia?</div>'
+      + '<div style="font-size:11px;color:' + (obrig ? 'var(--am)' : 'var(--tx2)')
+      +   ';line-height:1.7;margin-bottom:.7rem">'
+      + (obrig
+          ? '⚠ Faltou <strong>' + cpEsc(reg.falhas.map(function(x){ return x.rot; }).join(' e '))
+            + '</strong> — escolha o motivo e escreva o que aconteceu para poder fechar o dia.'
+          : '✓ Você bateu o que o dia cobrava. Escrever aqui é opcional.')
+      + '</div>'
+      + '<div style="font-size:11px;font-weight:600;color:var(--tx2);margin-bottom:6px">'
+      +   'Motivo' + (obrig ? ' <span style="color:var(--vm)">*</span>' : '') + '</div>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1rem">'
+      + FDP_MOTIVOS.map(function(m){
+          var on = g.motivoDia === m.t;
+          return '<button class="fdia-motivo-btn' + (on ? ' selecionado' : '') + '"'
+            + (fechado ? ' disabled' : '')
+            + ' onclick="fdpMotivo(\'' + cpEsc(m.t) + '\')">' + m.ico + ' ' + cpEsc(m.t)
+            + '</button>';
+        }).join('')
+      + '</div>'
+      + '<div style="font-size:11px;font-weight:600;color:var(--tx2);margin-bottom:4px">'
+      +   'Comentário' + (obrig ? ' <span style="color:var(--vm)">*</span>' : '') + '</div>'
+      + '<div style="font-size:10px;color:var(--tx2);margin-bottom:6px">Mínimo de '
+      +   FDP_COMENT_MIN + ' caracteres reais.</div>'
+      + '<textarea id="fdp-detalhe" rows="3"' + (fechado ? ' disabled' : '')
+      +   ' onchange="fdpDetalhe(this.value)" placeholder="Ex: fiquei em reunião de alinhamento '
+      +   'na parte da manhã e os itens da tarde dependiam do fornecedor..."'
+      +   ' style="width:100%;font-size:12px;padding:8px 10px;border:1.5px solid '
+      +   ((obrig && !fdpDetalheValido(g.detalheDia)) ? 'var(--vm)' : 'var(--brd)')
+      +   ';border-radius:7px;resize:vertical;font-family:inherit;box-sizing:border-box">'
+      +   cpEsc(g.detalheDia || '') + '</textarea>'
+      + '</div>';
   }
 
   // ── fechar ──
@@ -18848,7 +19137,7 @@ function stbRenderResumo(){
     + card('ITENS PARA DUPLICAR', cpNum((d.itens || []).length),
         'em tratativa · status B · pedido eliminado')
     + card('RCs ENVOLVIDAS', cpNum(Object.keys(rcs).length), 'algumas têm mais de um item')
-    + card('MARCADOS COMO LINHA DUPLICADA', cpNum(marcados),
+    + card('MARCADOS PARA REPUBLICAR / DUPLICAR', cpNum(marcados),
         marcados ? 'vão para o arquivo do script' : 'marque os que já duplicou',
         marcados ? 'ok' : '')
     + card('COM NOME', cpNum((d.itens || []).filter(function(i){ return (i.nome || '').trim(); }).length),
@@ -18953,7 +19242,9 @@ function _stbHtmlLista(suf){
     + '</div>'
 
     + '<div style="overflow:auto;max-height:560px"><table>'
-    + '<thead><tr><th style="text-align:center">Linha duplicada</th><th>RC</th><th>Item</th>'
+    + '<thead><tr><th style="text-align:center" title="Republicação / duplicar linha — '
+    + 'é esta caixinha que escolhe o item para o arquivo do script">Republicar</th>'
+    + '<th>RC</th><th>Item</th>'
     + '<th>Oportunidade</th><th>Item da OP</th>'
     // Grupo Comprador saiu em 11/11: é sempre o mesmo (L19) e só
     // ocupava espaço. O arquivo do script continua levando a coluna.
@@ -19008,13 +19299,16 @@ function _stbHtmlLista(suf){
       +     ((i.conclusao || '') ? 'var(--vd)' : 'var(--brd)') + ';font-weight:'
       +     ((i.conclusao || '') ? '700' : '400') + '">'
       +   '<option value="">— escolha —</option>'
-      +   (i.conclusao && STB_CONCLUSOES.indexOf(i.conclusao) === -1
-          ? '<option value="' + cpEsc(i.conclusao) + '" selected>' + cpEsc(i.conclusao)
-            + ' (não está mais na lista)</option>' : '')
-      +   STB_CONCLUSOES.map(function(o){
-            return '<option value="' + cpEsc(o) + '"'
-                 + (i.conclusao === o ? ' selected' : '') + '>' + cpEsc(o) + '</option>';
-          }).join('')
+      +   (function(){
+            var cn = stbConclNorm(i.conclusao);
+            return (cn && STB_CONCLUSOES.indexOf(cn) === -1
+              ? '<option value="' + cpEsc(cn) + '" selected>' + cpEsc(cn)
+                + ' (não está mais na lista)</option>' : '')
+            + STB_CONCLUSOES.map(function(o){
+                return '<option value="' + cpEsc(o) + '"'
+                     + (cn === o ? ' selected' : '') + '>' + cpEsc(o) + '</option>';
+              }).join('');
+          })()
       + '</select></td>'
       + '<td><input type="text" value="' + cpEsc(i.novoItem) + '" onchange="stbCampo(' + k + ', \'novoItem\', this.value)"'
       +   ' style="width:70px;font-size:11.5px;padding:3px 6px;border:1px solid var(--brd);border-radius:5px;font-weight:700"></td>'
@@ -19053,8 +19347,8 @@ function stbMarcar(k, valor){
   if (!_stbDia || !_stbDia.itens[k]) return;
   _stbDia.itens[k].marcado = !!valor;
   // a caixinha e a Conclusão andam juntas: desmarcar à mão não pode
-  // deixar "Linha duplicada" escrito ali
-  if (!valor && _stbDia.itens[k].conclusao === 'Linha duplicada') {
+  // deixar a republicação escrita ali
+  if (!valor && stbEhDup(_stbDia.itens[k].conclusao)) {
     _stbDia.itens[k].conclusao = '';
     _stbDia.itens[k].conclusaoEm = '';
   }
@@ -19159,12 +19453,27 @@ async function stbRelatorioPatec(){
 // que escolhe o item para o arquivo do script, então as duas andam
 // juntas: escolher marca, escolher qualquer outra desmarca — porque
 // devolução, republicação e PATEC não vão para o script.
-var STB_CONCLUSOES = ['Linha duplicada', 'Devolução', 'Republicação', 'PATEC'];
+// 22/11: o André juntou as duas. "Linha duplicada" e "Republicação"
+// eram a mesma coisa dita de dois jeitos — duplicar a linha É a
+// republicação do item. Ficou uma opção só, que continua andando junto
+// com a caixinha do script. O TÍTULO do arquivo do RPA (STB_TITULO)
+// não muda: quem lê aquele arquivo é o SAP, não a equipe.
+var STB_DUP = 'Republicação / duplicar linha';
+var STB_CONCLUSOES = [STB_DUP, 'Devolução', 'PATEC'];
+// o que está gravado nos dias antigos, nos dois nomes de antes
+var STB_CONCL_ANTIGAS = { 'Linha duplicada': STB_DUP, 'Republicação': STB_DUP };
+// Lê a conclusão já no nome novo. Nada é reescrito na base: o dia
+// antigo continua com o texto dele, e a tela mostra o nome de hoje.
+function stbConclNorm(v){
+  var t = String(v == null ? '' : v).trim();
+  return STB_CONCL_ANTIGAS[t] || t;
+}
+function stbEhDup(v){ return stbConclNorm(v) === STB_DUP; }
 
 function stbConclusao(k, valor){
   if (!_stbDia || !_stbDia.itens[k]) return;
   var i = _stbDia.itens[k];
-  var v = String(valor == null ? '' : valor).trim();
+  var v = stbConclNorm(valor);
   // A DATA DA CONCLUSÃO (11/11). O André pediu o relatório dos itens
   // concluídos como PATEC "para eu ter conhecimento de quando o item
   // foi concluído" — então a data é carimbada aqui, na hora, e não
@@ -19172,7 +19481,7 @@ function stbConclusao(k, valor){
   if (v && v !== i.conclusao) i.conclusaoEm = cpHojeISO();
   if (!v) i.conclusaoEm = '';
   i.conclusao = v;
-  i.marcado = (v === 'Linha duplicada');
+  i.marcado = stbEhDup(v);
   stbRender();
   stbSalvar();
 }
@@ -19183,12 +19492,12 @@ function stbMarcarTodos(valor){
   if (!_stbDia) return;
   // a caixinha e a Conclusão andam juntas também aqui
   if (valor) stbVisiveis().forEach(function(v){
-    if (v.i.conclusao !== 'Linha duplicada') v.i.conclusaoEm = cpHojeISO();
-    v.i.marcado = true; v.i.conclusao = 'Linha duplicada';
+    if (!stbEhDup(v.i.conclusao)) v.i.conclusaoEm = cpHojeISO();
+    v.i.marcado = true; v.i.conclusao = STB_DUP;
   });
   else _stbDia.itens.forEach(function(i){
     i.marcado = false;
-    if (i.conclusao === 'Linha duplicada') { i.conclusao = ''; i.conclusaoEm = ''; }
+    if (stbEhDup(i.conclusao)) { i.conclusao = ''; i.conclusaoEm = ''; }
   });
   stbRender();
   stbSalvar();
@@ -25301,7 +25610,7 @@ function gpHtmlStatusB(){
     +   'Da BU do Controle de Pedidos: <strong>em tratativa</strong> · '
     +   '<strong>STATUS_RC igual a B</strong> · '
     +   '<strong>ANALISTA_AUTOMATICO Tratar Pedido Eliminado</strong>. '
-    +   'O número do card é o que ainda não foi marcado como linha duplicada.'
+    +   'O número do card é o que ainda não foi marcado para republicar / duplicar linha.'
     +   '<br>O <strong>analista do pedido</strong> é quem emitiu aquele pedido: '
     +   'vem da medição de momento, pelo <strong>número do pedido</strong> '
     +   '(BU coluna BD = medição coluna D)'
@@ -26931,6 +27240,7 @@ async function gvMonAnalisar(){
 
   _gvComb = await monCombinadoDe(p.ini, p.fim);
   gvRenderCombinado();
+  try { gvRenderNaoDistribuido(); } catch (e5) { console.warn('gvRenderNaoDistribuido:', e5); }
   gvRenderGrafico();
 
   if (av) {
@@ -26961,6 +27271,138 @@ function gvRenderCombinado(){
       gvAvisoMapa(_gvComb));
   if (bn) bn.innerHTML = monBlocoCombinado(_gvComb.neg,
       'Negociação (preço excessivo e acima do limite DPV)', '');
+}
+
+// ── CONTROLE DO QUE NÃO É DISTRIBUÍDO (22/11) ────────────────────
+// Pedido do André: "preciso criar o controle igual a gente tem
+// negociação e patec... o monitoramento dos rejeites supervisor e
+// fornecedor, e também os de Status B".
+//
+// A diferença é de onde vem o dono. Em PATEC e negociação quem reparte
+// é a distribuição do MAPA; aqui não há distribuição — a regra que o
+// André fechou em 11/11 é "quem criou o pedido é o responsável por
+// tratar o rejeite", e o Status B segue a mesma. Então a carga de cada
+// comprador é o que está hoje na lista dele.
+//
+// TRATADO é o mesmo tipo de prova da negociação: algo que a pessoa
+// preencheu. Lá é a data da negociação; aqui é a conclusão registrada.
+// Nenhuma conta nova — as três leem as mesmas funções das telas.
+var GVM_PRAZO = { rejforn:3, rejsup:3, statusb:15 };
+
+function _gvmBloco(itens, prazoDias){
+  var pessoas = {}, porDia = {}, lista = [];
+  (itens || []).forEach(function(i){
+    var nome = String(i.nome || '').trim() || '(sem dono na medição)';
+    var dias = (i.dias == null) ? null : (+i.dias || 0);
+    var feito = !!i.feito;
+    var vencido = !feito && dias != null && dias > prazoDias;
+    var o = pessoas[nome] || (pessoas[nome] =
+      { nome:nome, recebido:0, feito:0, falta:0, vencido:0 });
+    o.recebido++; if (feito) o.feito++; else { o.falta++; if (vencido) o.vencido++; }
+    if (i.desde) {
+      var dd = porDia[i.desde] || (porDia[i.desde] =
+        { data:i.desde, recebido:0, feito:0, vencido:0 });
+      dd.recebido++; if (feito) dd.feito++; else if (vencido) dd.vencido++;
+    }
+    lista.push({ nome:nome, data:i.desde || '', rc:i.rc || '', seq:i.seq || '',
+                 dias:dias, feito:feito, vencido:vencido });
+  });
+  var pl = Object.keys(pessoas).map(function(k){ return pessoas[k]; })
+    .sort(function(a, b){ return b.vencido - a.vencido || b.recebido - a.recebido
+                               || a.nome.localeCompare(b.nome); });
+  var tot = pl.reduce(function(t, p){
+    t.recebido += p.recebido; t.feito += p.feito; t.falta += p.falta; t.vencido += p.vencido;
+    return t; }, { recebido:0, feito:0, falta:0, vencido:0 });
+  return { lista:pl, dias:Object.keys(porDia).sort().map(function(k){ return porDia[k]; }),
+           itens:lista, total:tot, prazo:prazoDias };
+}
+
+// Rejeite fornecedor: a linha é o PEDIDO, e a idade vem da coluna
+// DIAS_REJEITADO da própria planilha.
+function gvmRejForn(){
+  return _gvmBloco(((_gpRej && _gpRej.itens) || []).map(function(i){
+    var t = {};
+    try { t = rjTrat({ pedido:i.pedido }) || {}; } catch (e) {}
+    var d = (i.dias === '' || i.dias == null) ? null : (+i.dias || 0);
+    var ri = {};
+    try { ri = { nome:i.resp || '' }; } catch (e2) {}
+    return { nome:ri.nome, rc:i.pedido, seq:'', dias:d,
+             desde: d == null ? '' : _gvmDesde(d),
+             feito: !!String(t.conclusao || '').trim() };
+  }), GVM_PRAZO.rejforn);
+}
+
+// Rejeite supervisor: a linha é RC + item, o dono é o comprador da
+// medição e a idade é o SLA do pedido.
+function gvmRejSup(){
+  var r = null;
+  try { r = rjsMontar(); } catch (e) { r = null; }
+  if (!r || !r.linhas) return _gvmBloco([], GVM_PRAZO.rejsup);
+  return _gvmBloco(r.linhas.map(function(l){
+    var t = {};
+    try { t = rjTrat(l) || {}; } catch (e) {}
+    var d = (l.slaPedido == null) ? null : (+l.slaPedido || 0);
+    return { nome:l.comprador || '', rc:l.rc, seq:l.itemRc, dias:d,
+             desde: d == null ? '' : _gvmDesde(d),
+             feito: !!String(t.conclusao || '').trim() };
+  }), GVM_PRAZO.rejsup);
+}
+
+// Status B: o dono sai do mesmo cruzamento que a tela usa, a idade é o
+// "em B desde" e tratado é a conclusão escolhida no card.
+function gvmStatusB(){
+  return _gvmBloco(((_gpSB && _gpSB.itens) || []).map(function(i){
+    var ri = {};
+    try { ri = gpRespInfo(i.rc, i.seq, i.pedido) || {}; } catch (e) {}
+    var desde = '';
+    try { desde = gpSBDesde(i) || ''; } catch (e2) {}
+    var d = null;
+    try { d = gpSBDias(i); } catch (e3) { d = null; }
+    return { nome:ri.nome || '', rc:i.rc, seq:i.seq, dias:d, desde:desde,
+             feito: !!String(i.conclusao || '').trim() };
+  }), GVM_PRAZO.statusb);
+}
+
+// a data de entrada deduzida da idade, para a tabela "por dia"
+function _gvmDesde(dias){
+  try {
+    var d = new Date(cpHojeISO() + 'T12:00:00');
+    d.setDate(d.getDate() - Math.max(0, Math.round(+dias || 0)));
+    return d.toISOString().slice(0, 10);
+  } catch (e) { return ''; }
+}
+
+function gvRenderNaoDistribuido(){
+  var alvos = [
+    ['gv-ctrl-rejforn', gvmRejForn, 'Rejeite fornecedor — pedidos recusados na base de hoje',
+     'Dias', GVM_PRAZO.rejforn,
+     'A base do rejeite é substituída a cada upload: esta é a foto de hoje, e a idade vem da '
+     + 'coluna DIAS_REJEITADO.'],
+    ['gv-ctrl-rejsup', gvmRejSup, 'Rejeite supervisor — RCs recusadas na base de hoje',
+     'SLA do pedido', GVM_PRAZO.rejsup,
+     'Foto de hoje, com o SLA do pedido como idade. Precisa das duas pontas carregadas '
+     + '(medição e Rodrigo) — com uma só, a lista sai curta.'],
+    ['gv-ctrl-statusb', gvmStatusB, 'Status B — itens da última BU',
+     'Dias parado', GVM_PRAZO.statusb,
+     'Itens da última BU subida em Controle de Pedidos › Status B, com o "em B desde" como '
+     + 'idade.']
+  ];
+  alvos.forEach(function(a){
+    var el = document.getElementById(a[0]);
+    if (!el) return;
+    var r = null;
+    try { r = a[1](); } catch (e) { r = null; }
+    if (!r || !r.total.recebido) {
+      el.innerHTML = '<div style="font-size:12px;color:var(--tx2)">Nada nesta lista hoje — '
+        + 'ou a base ainda não foi subida nesta sessão.</div>';
+      return;
+    }
+    el.innerHTML = monBlocoCombinado(r, a[2],
+      'ℹ ' + a[5] + ' <strong>Vencido</strong> = sem conclusão e com ' + a[3]
+      + ' acima de ' + a[4] + ' dia(s).',
+      { carga:'Na lista', feito:'Tratados', comb:'Situação',
+        porDia:'Por dia de entrada na lista' });
+  });
 }
 
 // De qual MAPA saiu a coluna Concluídos. Sem isso, "0 concluídos" pode
@@ -27491,7 +27933,15 @@ function monSelo(p){
   return '<span class="pl pl-w">Atenção</span>';
 }
 
-function monBlocoCombinado(r, titulo, aviso){
+// rot: os rótulos das colunas. O controle do que NÃO é distribuído
+// (rejeite e Status B) usa a mesma tabela com outras palavras — era
+// isso ou uma segunda cópia desta função, que divergiria no primeiro
+// ajuste.
+function monBlocoCombinado(r, titulo, aviso, rot){
+  rot = rot || {};
+  var R = { carga: rot.carga || 'Distribuídos', feito: rot.feito || 'Concluídos',
+            comb: rot.comb || 'Combinado',
+            porDia: rot.porDia || 'Por dia de distribuição' };
   if (!r.total.recebido) {
     return '<div style="font-size:12px;color:var(--tx2);margin-bottom:1rem">'
       + '<strong>' + cpEsc(titulo) + '</strong> — nenhuma distribuição do período tem itens desta frente.</div>';
@@ -27499,15 +27949,17 @@ function monBlocoCombinado(r, titulo, aviso){
   var pct = Math.round(r.total.feito * 100 / r.total.recebido);
   var h = '<div style="font-weight:700;font-size:13px;margin:.4rem 0 .6rem">' + cpEsc(titulo)
     + ' <span style="font-weight:500;color:var(--tx2)">· ' + cpNum(r.total.recebido)
-    + ' distribuídos · ' + cpNum(r.total.feito) + ' concluídos (' + pct + '%) · '
+    + ' ' + cpEsc(R.carga.toLowerCase()) + ' · ' + cpNum(r.total.feito) + ' '
+    + cpEsc(R.feito.toLowerCase()) + ' (' + pct + '%) · '
     + '<span style="color:' + (r.total.vencido ? 'var(--vm)' : 'var(--vd)') + '">'
     + cpNum(r.total.vencido) + ' fora do prazo combinado</span></span></div>';
   if (aviso) h += '<div style="font-size:11px;color:var(--am);margin-bottom:.6rem">' + aviso + '</div>';
   h += '<div style="overflow:auto"><table><thead><tr><th>Comprador</th>'
-    + '<th style="text-align:right">Distribuídos</th><th style="text-align:right">Concluídos</th>'
+    + '<th style="text-align:right">' + cpEsc(R.carga) + '</th>'
+    + '<th style="text-align:right">' + cpEsc(R.feito) + '</th>'
     + '<th style="text-align:right">Em aberto</th><th style="text-align:right">Vencidos</th>'
     + '<th style="text-align:right">%</th><th style="width:130px">Evolução</th>'
-    + '<th>Combinado</th></tr></thead><tbody>';
+    + '<th>' + cpEsc(R.comb) + '</th></tr></thead><tbody>';
   r.lista.forEach(function(p){
     var q = p.recebido ? Math.round(p.feito * 100 / p.recebido) : 0;
     h += '<tr' + (p.vencido ? ' style="background:var(--vmc)"' : '') + '>'
@@ -27535,12 +27987,12 @@ function monBlocoCombinado(r, titulo, aviso){
   // coladas com as mesmas colunas parecem a mesma coisa duas vezes.
   if (r.dias.length > 1) {
     h += '<div style="font-size:11px;color:var(--tx2);margin:.9rem 0 .3rem;line-height:1.6">'
-      + '<strong>Por dia de distribuição</strong> — os mesmos ' + cpNum(r.total.recebido)
-      + ' itens de cima, agora pelo dia em que saíram na distribuição. '
-      + 'A soma dos Distribuídos aqui é igual ao total da equipe.</div>'
+      + '<strong>' + cpEsc(R.porDia) + '</strong> — os mesmos ' + cpNum(r.total.recebido)
+      + ' itens de cima, agora pelo dia de entrada. '
+      + 'A soma de ' + cpEsc(R.carga) + ' aqui é igual ao total da equipe.</div>'
       + '<div style="overflow:auto;max-height:200px"><table><thead><tr>'
-      + '<th>Distribuição de</th><th style="text-align:right">Distribuídos</th>'
-      + '<th style="text-align:right">Concluídos</th>'
+      + '<th>Entrou em</th><th style="text-align:right">' + cpEsc(R.carga) + '</th>'
+      + '<th style="text-align:right">' + cpEsc(R.feito) + '</th>'
       + '<th style="text-align:right">Em aberto</th>'
       + '<th style="text-align:right">Vencidos</th>'
       + '<th style="text-align:right">%</th></tr></thead><tbody>';
