@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '24/11 23:00';
+var GTO_BUILD = '24/11 23:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -51952,12 +51952,22 @@ async function aamEspelharNoAdmin(lote){
         var v = Math.max(0, Math.round(+lote[mod][nome] || 0));
         var e = _equipeRt[mod].find(function(x){
           return x && x.nome && cpNormNome(x.nome) === cpNormNome(nome); });
-        if (!e) { _equipeRt[mod].push({ nome:nome, meta:v, temMeta:true }); return; }
+        if (!e) {
+          if (v > 0) _equipeRt[mod].push({ nome:nome, meta:v, temMeta:true });
+          return;
+        }
         // o líder (checkbox desmarcado) continua líder: a meta dele é
         // referência, não cobrança, e mexer nisso aqui seria uma
         // mudança que ele não pediu
         if (e.temMeta === false) return;
-        e.meta = v; e.temMeta = true;
+        // ZERO NÃO VAI PARA O CADASTRO (24/11). O cadastro é a meta
+        // PADRÃO da pessoa — a que vale no dia em que nada foi lançado,
+        // inclusive nos dias passados. Se um dia de apoio em pedidos
+        // zerasse o cadastro, o relatório do mês passaria a achar que
+        // ela nunca teve meta, e o aproveitamento dela ia para 800%.
+        // O zero do dia já está gravado em metas_diarias, que é o que
+        // o velocímetro e o fechamento leem.
+        if (v > 0) { e.meta = v; e.temMeta = true; }
       });
     });
     var ok = false;
@@ -58912,6 +58922,20 @@ let COLABS_LIDER_RT = (_moduloAtivo === 'fast') ? COLABS_LIDER_RT_FAST : COLABS_
 // acompanha automaticamente qualquer ajuste feito em Admin > Equipe (Metas RT)
 // — inclusão/remoção de pessoas ou mudança de meta individual).
 function _recalcularMetaEquipeRT(){
+  // 24/11: a meta da equipe passou a ser a do DIA — a soma do que foi
+  // lançado hoje no Montar base. André: "o velocímetro deve ser
+  // atualizado conforme a meta distribuída; individual igual à meta
+  // estipulada do dia, meta por equipe a soma das metas individuais".
+  // Dia sem lançamento cai na soma do cadastro, que é como era antes.
+  // A meta do líder continua fora da soma (só a produção dele entra).
+  try {
+    var mod = (typeof _moduloAtivo !== 'undefined' && _moduloAtivo === 'fast') ? 'fast' : 'adlv';
+    var hoje = (typeof cpHojeISO === 'function') ? cpHojeISO() : _ceHojeLocal();
+    if (typeof metaEquipeDoDia === 'function') {
+      META_EQUIPE_RT = metaEquipeDoDia(mod, hoje);
+      return;
+    }
+  } catch (e) {}
   // Sem fallback fixo: se ninguém da equipe tiver meta configurada, a meta
   // da equipe é 0 (o velocímetro mostra 0%, o que é o estado real nesse caso).
   META_EQUIPE_RT = (COLABS_RT||[]).reduce((soma, colab) => soma + (META_ANALISTA_RT[colab] || 0), 0);
@@ -59048,6 +59072,9 @@ async function metasDiariasCarregar(){
       fora: Array.isArray(saved && saved.fora) ? saved.fora : AAM_FORA_PADRAO.slice()
     };
   }catch(e){ console.warn('metasDiariasCarregar:', e); }
+  // a meta da equipe do velocímetro é a do dia: recalcula assim que os
+  // lançamentos chegam
+  try{ if(typeof _recalcularMetaEquipeRT==='function') _recalcularMetaEquipeRT(); }catch(e2){}
 }
 
 // Salva os ajustes de um módulo+data de uma vez. `valores` = {nome: meta,...}
@@ -59405,6 +59432,9 @@ function rtAtualizarChipModalidade(modalidade){
 }
 
 function rtRenderizarMonitoramento(acoes, hoje){
+  // a meta da equipe é a do dia — se o líder lançou agora de manhã, o
+  // velocímetro tem de mostrar a régua nova sem recarregar a página
+  try{ if(typeof _recalcularMetaEquipeRT==='function') _recalcularMetaEquipeRT(); }catch(e){}
   // Timestamp
   const upEl = document.getElementById('rt-ultimo-update');
   if(upEl) upEl.textContent = 'Atualizado ' + new Date().toLocaleTimeString('pt-BR');
