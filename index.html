@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '24/11 21:45';
+var GTO_BUILD = '24/11 22:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -61514,7 +61514,7 @@ function ceEsforcoPessoas(mod){
       trabalhados: 0, folgas: 0, semRegistro: 0,
       producao: 0, diasAbaixo: [], diasAcima: 0, melhor: null, pior: null,
       folgasFech: 0, folgasJor: 0, fechTotal: 0, foraMeta: 0, metaSoma: 0,
-      diasFora: 0, diasApoio: 0, motivosFora: {},
+      diasFora: 0, diasApoio: 0, motivosFora: {}, diasSemMeta: 0,
       mov: 0, conc: 0, acoes: ls.length, rcs: {}, filas: {}, motivos: {}, desfechos: {},
       linhaDia: []
     };
@@ -61545,10 +61545,24 @@ function ceEsforcoPessoas(mod){
       if (!f) p.semRegistro++;         // dia cobrado, mas sem fechamento
       // 24/11: a meta é a DO DIA. Quem foi lançado com 15 naquele dia é
       // cobrado por 15 naquele dia, e não pela meta do cadastro.
-      var metaDia = esfMetaDoDia(mod, nome, d, p.meta);
+      // Quem NÃO tem meta individual nesta frente não é cobrado nos
+      // dias em que nada foi lançado para ele. André, 24/11: "a Aline
+      // geralmente atua só no FAST; no relatório do ADLV o resultado
+      // dela não pode afetar o ADLV". Sem isto ela aparecia com 540 de
+      // meta e 0%, como se tivesse falhado numa frente que não é dela.
+      // O líder cai no mesmo caso, e é o certo: a meta dele é
+      // referência, não cobrança.
+      var metaDia = (p.metaFonte === ESF_META_REF)
+        ? esfMetaDoDia(mod, nome, d, 0)
+        : esfMetaDoDia(mod, nome, d, p.meta);
       p.metaSoma += metaDia;
       var sit;
-      if (!metaDia) {
+      if (!metaDia && p.metaFonte === ESF_META_REF && !esfMotivoDoDia(nome, d)) {
+        // nem cobrado nem "fora do PATEC": esta frente simplesmente não
+        // é a dela. O que ela produzir aqui continua contando no total.
+        p.diasSemMeta++;
+        sit = nAcoes ? 'Sem meta nesta frente' : 'Não atua nesta frente';
+      } else if (!metaDia) {
         // DIA FORA DO PATEC: a pessoa existe no período, mas naquele dia
         // ela estava em outra frente (ou travada). Não é dia abaixo da
         // meta nem dia que ela bateu — é dia que não foi cobrado aqui.
@@ -61594,7 +61608,7 @@ function ceEsforcoPessoas(mod){
     // dia fora do PATEC não entra no denominador: a pessoa não estava
     // aqui, e dividir a produção dela por um dia que não era dela
     // puxaria a média para baixo sem motivo
-    p.diasMeta = Math.max(0, p.diasUteis - p.folgas - p.diasFora);
+    p.diasMeta = Math.max(0, p.diasUteis - p.folgas - p.diasFora - p.diasSemMeta);
     // A meta do período é a SOMA das metas de cada dia cobrado. Quando
     // nenhum dia teve lançamento, isso dá exatamente meta × dias, que é
     // como era antes de 24/11 — a conta velha é um caso particular desta.
@@ -62013,8 +62027,10 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     + 'FOLGA/FÉRIAS vem de duas fontes e basta uma delas — a Presença do fechamento do dia e a '
     + 'Gestão de Jornada (férias e folgas programadas). '
     + 'DIAS COM DEMANDA são os dias úteis em que a pessoa tinha meta nesta frente — dia útil '
-    + 'menos folga/férias menos os dias fora do PATEC. É esse número que a Meta do período e a '
-    + 'Média/dia usam. (Folga/Férias, Sem fechamento e Meta/dia continuam no arquivo, só '
+    + 'menos folga/férias, menos os dias fora do PATEC e menos os dias em que ela não atua '
+    + 'nesta frente. É esse número que a Meta do período e a Média/dia usam. Quem atua só na '
+    + 'outra frente aparece com 0 em tudo e sem aproveitamento: ela não falhou aqui, ela não '
+    + 'estava aqui. (Folga/Férias, Sem fechamento e Meta/dia continuam no arquivo, só '
     + 'ocultas: reexiba a coluna no Excel se quiser conferir.) '
     + 'RCs distintas = quantas RCs diferentes a pessoa tocou (a mesma RC tocada 5 vezes conta 1). '
     + 'DIAS FORA DO PATEC são os dias em que a pessoa foi lançada com meta 0 no Montar base '
