@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '24/11 23:40';
+var GTO_BUILD = '25/11 00:15';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -51897,6 +51897,35 @@ function aamRender(){
   else if (av && !/Copiei as metas/.test(av.innerHTML)) av.innerHTML = '';
 }
 
+// Depois de lançar a meta do dia, as telas que já estão abertas
+// precisam mudar de régua na hora. André, 24/11: "tanto a meta
+// individual como a da equipe não mudou... preciso que o velocímetro
+// comece a puxar os dados conforme a meta do dia". Sem isto o número
+// novo só aparecia no próximo F5, e parecia que não tinha pegado.
+function metaDiaAplicarNasTelas(){
+  try { if (typeof _recalcularMetaEquipeRT === 'function') _recalcularMetaEquipeRT(); } catch (e) {}
+  // o velocímetro INDIVIDUAL de quem está logado
+  try {
+    var eu = (typeof _authPerfil !== 'undefined' && _authPerfil && _authPerfil.colabNome)
+           || (typeof colabLogado !== 'undefined' ? colabLogado : '');
+    if (eu && typeof prodRenderizarPaineis === 'function') prodRenderizarPaineis(eu);
+  } catch (e2) {}
+  // o velocímetro da EQUIPE: refaz o monitoramento com o cache que já
+  // está em memória; se ele não estiver, pelo menos troca a régua
+  try {
+    var cache = window._prodAcoesCache || null;
+    if (cache && typeof rtRenderizarMonitoramento === 'function') {
+      var hoje = (typeof cpHojeISO === 'function') ? cpHojeISO() : _ceHojeLocal();
+      rtRenderizarMonitoramento(Object.values(cache).flat(), hoje);
+    } else if (typeof govAtualizarVelocimetroEquipe === 'function') {
+      var u = window._govUltimoEquipe || { total:0 };
+      govAtualizarVelocimetroEquipe(u.total || 0, META_EQUIPE_RT);
+    }
+  } catch (e3) {}
+  // os gráficos do painel, que têm a linha Planejado
+  try { if (typeof renderPainelEstrategico === 'function') renderPainelEstrategico(); } catch (e4) {}
+}
+
 async function aamSalvar(){
   var data = aamDataSel();
   var av = document.getElementById('aam-aviso');
@@ -51927,6 +51956,7 @@ async function aamSalvar(){
   } catch (e) { console.warn('aamSalvar:', e); ok = false; }
   _aamRascunho = null;
   aamRender();
+  metaDiaAplicarNasTelas();
   if (av) av.innerHTML = (ok
     ? '<span style="color:var(--vd)">✔ Metas de ' + cpDataBR(data) + ' guardadas. '
       + 'O Administração › Equipes (Metas RT), os gráficos e o relatório já usam estes '
@@ -59074,7 +59104,8 @@ async function metasDiariasCarregar(){
   }catch(e){ console.warn('metasDiariasCarregar:', e); }
   // a meta da equipe do velocímetro é a do dia: recalcula assim que os
   // lançamentos chegam
-  try{ if(typeof _recalcularMetaEquipeRT==='function') _recalcularMetaEquipeRT(); }catch(e2){}
+  try{ if(typeof metaDiaAplicarNasTelas==='function') metaDiaAplicarNasTelas();
+       else if(typeof _recalcularMetaEquipeRT==='function') _recalcularMetaEquipeRT(); }catch(e2){}
 }
 
 // Salva os ajustes de um módulo+data de uma vez. `valores` = {nome: meta,...}
