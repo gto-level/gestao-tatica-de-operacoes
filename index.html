@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 04:30';
+var GTO_BUILD = '25/11 05:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -40319,6 +40319,32 @@ function _acaoEnvioPadrao(gravado){
   }
   try { _acaoPrazoPrevia(); } catch (e) {}
 }
+// A data de finalização nasce HOJE, como a de envio. André, 25/11:
+// "quero deixar ele preenchido de forma automática com a data do dia;
+// caso na hora de finalizar eu queira outra data, eu apenas altero".
+// Quando já existe uma data gravada na Governança, ela não é apagada
+// nem imposta: vira um atalho de um clique embaixo do campo.
+var _acaoFinAntes = '';
+function _acaoFinalizadoPadrao(gravado){
+  var el = document.getElementById('acao-data-finalizado');
+  var av = document.getElementById('acao-finalizado-antes');
+  var hoje = _govHojeISO();
+  _acaoFinAntes = (gravado && gravado !== hoje) ? gravado : '';
+  if (el) el.value = hoje;
+  if (av) {
+    av.innerHTML = _acaoFinAntes
+      ? 'Havia <strong>' + cpDataBR(_acaoFinAntes) + '</strong> gravado · '
+        + '<a href="javascript:_acaoFinalizadoVoltar()" style="color:var(--az)">usar essa data</a>'
+      : '';
+  }
+}
+function _acaoFinalizadoVoltar(){
+  var el = document.getElementById('acao-data-finalizado');
+  if (el && _acaoFinAntes) el.value = _acaoFinAntes;
+  var av = document.getElementById('acao-finalizado-antes');
+  if (av) av.innerHTML = '<span style="color:var(--tx2)">voltei para a data gravada</span>';
+}
+
 function _acaoEnvioVoltar(){
   var el = document.getElementById('acao-data-envio');
   if (el && _acaoEnvioAntes) el.value = _acaoEnvioAntes;
@@ -47484,6 +47510,7 @@ function nrConcluir(chave){
   const m=_nrDados[chave]||{};
   // mesma regra das outras aberturas: nasce hoje, com a gravada à mão
   _acaoEnvioPadrao(m.envio || '');
+  _acaoFinalizadoPadrao(m.finalizado || '');
   // Avança direto para o estágio 2 (tipo de conclusão)
   _prodCtx.tratamento='Concluído'; _prodCtx.conclusao=null;
   document.getElementById('acao-estagio-1').style.display='none';
@@ -57025,6 +57052,7 @@ function q18Consultar(valor){
       <div style="font-size:11px;font-weight:600;color:var(--tx2);margin-bottom:4px">✅ Data de Finalização <span style="color:var(--vm)">*</span></div>
       <input type="date" id="acao-data-finalizado"
         style="width:100%;font-size:12px;padding:7px 10px;border:1.5px solid var(--brd);border-radius:7px">
+      <div id="acao-finalizado-antes" style="font-size:10.5px;color:var(--tx2);margin-top:3px"></div>
     </div>
 
     <!-- Centro + Motivo (Devolução / Outros) -->
@@ -63717,9 +63745,8 @@ function prodAbrirModalRC(chave, tipo){
   if(_cobrEl) _cobrEl.value = Number(_gd.cobranca || 0);
   const _prevEl = document.getElementById('acao-prazo-previa');
   if(_prevEl) _prevEl.textContent = '';
-  const _finEl   = document.getElementById('acao-data-finalizado');
   _acaoEnvioPadrao(_gd.envio || '');
-  if(_finEl && _gd.finalizado) _finEl.value = _gd.finalizado;
+  _acaoFinalizadoPadrao(_gd.finalizado || '');
 }
 
 function prodAbrirModal(origem, tipo){
@@ -63796,14 +63823,13 @@ function prodAbrirModal(origem, tipo){
       _idasBadge2.style.display = 'none';
     }
   }
-  // A data de envio nasce HOJE; a gravada fica como atalho embaixo
-  const _finEl = document.getElementById('acao-data-finalizado');
-  if(_finEl) _finEl.value = '';
+  // A data de envio e a de finalização nascem HOJE; a gravada fica
+  // como atalho embaixo de cada uma
   _acaoCuBadge();
   const _gdRc = (_prodCtx.rcChave && _govDados[_prodCtx.rcChave])
     ? _govDados[_prodCtx.rcChave] : {};
   _acaoEnvioPadrao(_gdRc.envio || '');
-  if(_finEl && _gdRc.finalizado) _finEl.value = _gdRc.finalizado;
+  _acaoFinalizadoPadrao(_gdRc.finalizado || '');
   document.getElementById('modal-acao-rc').style.display = 'flex';
 }
 
