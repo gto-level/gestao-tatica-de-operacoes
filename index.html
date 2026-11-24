@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '24/11 19:35';
+var GTO_BUILD = '24/11 21:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -10750,6 +10750,11 @@ async function renderAlertasPerf(){
 
   const cards = COLABS_AN.map(colab => {
     const META = (typeof META_ANALISTA_RT!=='undefined' && META_ANALISTA_RT[colab]) || 30;
+    // 24/11: a meta virou do DIA (lançada no Montar base). Cada dia é
+    // comparado com a meta daquele dia; META fica só como referência
+    // para a média e para o dia sem lançamento.
+    const _metaEm = d => (typeof _metaDiaEfetiva==='function')
+      ? _metaDiaEfetiva(_moduloAtivo, colab, d) : META;
     const hist = resultado[colab] || {};
     const vals = dias.map(d => hist[d]); // null = sem fechamento
 
@@ -10758,7 +10763,7 @@ async function renderAlertasPerf(){
     let consecutivos = 0;
     for(let i=dias.length-1;i>=0;i--){
       if(vals[i]===null||vals[i]==='FOLGA') continue; // sem dado/folga = pula, não interrompe a sequência
-      if(vals[i] < META) consecutivos++;
+      if(vals[i] < _metaEm(dias[i])) consecutivos++;
       else break;
     }
 
@@ -10770,7 +10775,7 @@ async function renderAlertasPerf(){
     // Última vez que bateu a meta
     let ultimaBateu = null;
     for(let i=dias.length-1;i>=0;i--){
-      if(vals[i]!==null && vals[i]>=META){ ultimaBateu = dias[i]; break; }
+      if(vals[i]!==null && vals[i]>=_metaEm(dias[i])){ ultimaBateu = dias[i]; break; }
     }
 
     // Status
@@ -10836,6 +10841,8 @@ async function renderFdiaAlertaIndividual(colab){
   if(typeof COLABS_SEM_META_RT!=='undefined' && COLABS_SEM_META_RT.includes(colab)){ el.style.display='none'; return; }
 
   const META = (typeof META_ANALISTA_RT!=='undefined' && META_ANALISTA_RT[colab]) || 30;
+  const _metaEm = d => (typeof _metaDiaEfetiva==='function')
+    ? _metaDiaEfetiva(_moduloAtivo, colab, d) : META;
   const { resultado, dias } = await _buscarFechamentos5Dias([colab]);
   const hist = resultado[colab] || {};
   const vals = dias.map(d => hist[d]);
@@ -10843,7 +10850,7 @@ async function renderFdiaAlertaIndividual(colab){
   let consecutivos = 0;
   for(let i=dias.length-1;i>=0;i--){
     if(vals[i]===null||vals[i]==='FOLGA') continue; // sem dado/folga = pula, não interrompe a sequência
-    if(vals[i] < META) consecutivos++;
+    if(vals[i] < _metaEm(dias[i])) consecutivos++;
     else break;
   }
 
@@ -11242,19 +11249,28 @@ function renderFdiaSemana(colab){
   const fmtDiaSem = d => { const dow=new Date(d+'T12:00:00').getDay(); return ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][dow]; };
   // Meta/dia real do colaborador (mesma fonte de Admin > Equipe (Metas RT)).
   const META_DIA = (typeof META_ANALISTA_RT!=='undefined' && META_ANALISTA_RT[colab]) || 30;
+  // 24/11: a meta da semana é a SOMA da meta de cada dia cobrado —
+  // a meta agora é lançada por dia no Montar base
+  const _metaEm = d => (typeof _metaDiaEfetiva==='function')
+    ? _metaDiaEfetiva(_moduloAtivo, colab, d) : META_DIA;
 
   const { porDia, totalSem, comp, LABEL, COR } = _contarAcoesSemana(colab, dias);
   const _folgaSetInd = _diasFolga(colab, dias);
-  const metaSem = META_DIA * ((dias.filter(d=>_fdiaEhDiaUtil(d) && !_folgaSetInd.has(d)).length) || 1);
+  const _diasCobrados = dias.filter(d=>_fdiaEhDiaUtil(d) && !_folgaSetInd.has(d));
+  const metaSem = _diasCobrados.length
+    ? _diasCobrados.reduce((a,d)=>a+_metaEm(d), 0)
+    : META_DIA;
   const pct = metaSem>0 ? Math.round(totalSem/metaSem*100) : 0;
   const hoje = new Date().toISOString().split('T')[0];
 
   if(lbl) lbl.textContent = `${fmtD(dias[0])} a ${fmtD(dias[4])}`;
 
-  const corCelula = (tot, isHoje) => {
+  const corCelula = (tot, isHoje, metaDoDia) => {
     const base = isHoje ? 'border:2px solid var(--azm);' : '';
-    if(tot >= META_DIA) return base+'background:rgba(76,175,80,.15);color:var(--vd);font-weight:700';
-    if(tot >= META_DIA*0.7) return base+'background:rgba(255,193,7,.15);color:var(--am);font-weight:700';
+    const M = (metaDoDia == null) ? META_DIA : metaDoDia;
+    if(M <= 0) return base+'color:var(--tx2)';     // sem meta no dia: não pinta
+    if(tot >= M) return base+'background:rgba(76,175,80,.15);color:var(--vd);font-weight:700';
+    if(tot >= M*0.7) return base+'background:rgba(255,193,7,.15);color:var(--am);font-weight:700';
     if(tot > 0) return base+'background:rgba(217,64,64,.1);color:var(--vm);font-weight:600';
     return base+'color:var(--tx2)';
   };
@@ -11265,7 +11281,7 @@ function renderFdiaSemana(colab){
       ${dias.map(d => {
         const tot = porDia[d]||0;
         const isHoje = d===hoje;
-        return `<div style="text-align:center;border-radius:8px;padding:.5rem .25rem;${corCelula(tot,isHoje)}">
+        return `<div style="text-align:center;border-radius:8px;padding:.5rem .25rem;${corCelula(tot,isHoje,_metaEm(d))}">
           <div style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px;color:inherit">${fmtDiaSem(d)}</div>
           <div style="font-size:20px;font-weight:800;line-height:1;color:inherit">${tot}</div>
           <div style="font-size:9px;margin-top:2px;color:inherit;opacity:.7">${fmtD(d)}</div>
@@ -61256,6 +61272,15 @@ var ESF_TIPOS_META = ['primeira_analise', 'em_tratativa', 'status_b', 'ag_parece
 
 // A meta de cada um. O cadastro da equipe manda; sem meta cadastrada
 // vale o combinado de 30. A planilha sempre diz qual das duas valeu.
+// Os motivos da meta 0, separados pelo que eles significam para o
+// relatório: APOIO é a pessoa trabalhando em outra frente (o esforço
+// existiu, só não foi aqui); AUSÊNCIA é férias e folga, que o relatório
+// já contava à parte; o que sobra (falta de acesso) é impedimento — o
+// dia foi perdido, e isso tem nome próprio na leitura.
+var ESF_MOT_APOIO = ['Atuando em pedidos', 'Atuando em devolução',
+                     'Atuando em publicação'];
+var ESF_MOT_AUSENCIA = ['Férias', 'Folga'];
+
 // A meta de UM dia: o que foi lançado no Montar base para aquele dia,
 // senão a meta padrão da pessoa. É o que faz "hoje a Ludy faz 15" valer
 // no relatório sem reescrever a meta dos dias anteriores.
@@ -61470,6 +61495,7 @@ function ceEsforcoPessoas(mod){
       trabalhados: 0, folgas: 0, semRegistro: 0,
       producao: 0, diasAbaixo: [], diasAcima: 0, melhor: null, pior: null,
       folgasFech: 0, folgasJor: 0, fechTotal: 0, foraMeta: 0, metaSoma: 0,
+      diasFora: 0, diasApoio: 0, motivosFora: {},
       mov: 0, conc: 0, acoes: ls.length, rcs: {}, filas: {}, motivos: {}, desfechos: {},
       linhaDia: []
     };
@@ -61503,7 +61529,16 @@ function ceEsforcoPessoas(mod){
       var metaDia = esfMetaDoDia(mod, nome, d, p.meta);
       p.metaSoma += metaDia;
       var sit;
-      if (nAcoes < metaDia) {
+      if (!metaDia) {
+        // DIA FORA DO PATEC: a pessoa existe no período, mas naquele dia
+        // ela estava em outra frente (ou travada). Não é dia abaixo da
+        // meta nem dia que ela bateu — é dia que não foi cobrado aqui.
+        var motDia = esfMotivoDoDia(nome, d);
+        p.diasFora++;
+        if (motDia) p.motivosFora[motDia] = (p.motivosFora[motDia] || 0) + 1;
+        if (ESF_MOT_APOIO.indexOf(motDia) !== -1) p.diasApoio++;
+        sit = motDia ? ('Fora do PATEC · ' + motDia) : 'Sem meta no dia';
+      } else if (nAcoes < metaDia) {
         p.diasAbaixo.push({ data:d, prod:nAcoes, falta: metaDia - nAcoes, meta:metaDia });
         sit = 'Abaixo da meta';
       } else { p.diasAcima++; sit = 'Bateu a meta'; }
@@ -61537,7 +61572,10 @@ function ceEsforcoPessoas(mod){
     // e folga, a conta permanece com a meta integral". Antes eu descontava
     // os dias sem fechamento, e isso premiava justamente quem não
     // registrava o dia.
-    p.diasMeta = Math.max(0, p.diasUteis - p.folgas);
+    // dia fora do PATEC não entra no denominador: a pessoa não estava
+    // aqui, e dividir a produção dela por um dia que não era dela
+    // puxaria a média para baixo sem motivo
+    p.diasMeta = Math.max(0, p.diasUteis - p.folgas - p.diasFora);
     // A meta do período é a SOMA das metas de cada dia cobrado. Quando
     // nenhum dia teve lançamento, isso dá exatamente meta × dias, que é
     // como era antes de 24/11 — a conta velha é um caso particular desta.
@@ -61787,6 +61825,28 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     return o;
   }, { trab:0, prod:0, meta:0, ab:0, acima:0, uteis:0, fech:0 });
   var eqDias = esfDiasEquipe(pessoas);
+  // ── O DESFALQUE DO PERÍODO (24/11) ─────────────────────────────
+  // Pedido do André: "quantidade de dias que a equipe ficou desfalcada
+  // e onde os recursos estavam ajudando". Desfalcada = dia em que pelo
+  // menos uma pessoa da equipe não tinha meta no PATEC. Onde estavam =
+  // o motivo que ele escolheu no Montar base naquela manhã.
+  var desf = (function(){
+    var dias = {}, porMotivo = {}, porPessoa = {}, pessoasFora = {}, total = 0;
+    pessoas.forEach(function(p){
+      (p.linhaDia || []).forEach(function(d){
+        if (d.prod === null || d.prod === undefined) return;   // folga já é outra conta
+        if (d.meta) return;                                    // teve meta: estava aqui
+        dias[d.data] = 1; total++;
+        pessoasFora[p.nome] = 1;
+        var m = esfMotivoDoDia(p.nome, d.data) || '(sem motivo informado)';
+        porMotivo[m] = (porMotivo[m] || 0) + 1;
+        (porPessoa[p.nome] = porPessoa[p.nome] || {})[m] =
+          (porPessoa[p.nome][m] || 0) + 1;
+      });
+    });
+    return { dias:Object.keys(dias).sort(), diasPessoa:total, porMotivo:porMotivo,
+             porPessoa:porPessoa, quantas:Object.keys(pessoasFora).length };
+  })();
   var wb = new ExcelJS.Workbook();
   wb.creator = 'GTO'; wb.created = new Date();
   var MOD = String(mod).toUpperCase();
@@ -61829,7 +61889,22 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
      + 'produção somada ficou abaixo da meta somada de quem estava trabalhando'],
     ['Dias acima da meta', eqDias.acima.length,
      'Os outros dias apurados — a equipe bateu a meta do dia. Abaixo + Acima = '
-     + eqDias.total + ' dia(s). O resultado individual, com data, está no One a One']
+     + eqDias.total + ' dia(s). O resultado individual, com data, está no One a One'],
+    // 24/11: o desfalque. Sem isso, um período com meio time emprestado
+    // para pedidos aparecia como um período de equipe inteira rendendo
+    // pouco — e a conversa de fim de medição começava errada.
+    ['Dias com a equipe desfalcada', desf.dias.length,
+     desf.dias.length
+       ? ('Dias úteis em que pelo menos uma pessoa ficou sem meta no ' + MOD
+          + ' — ' + desf.quantas + ' pessoa(s) ao todo, somando '
+          + cpNum(desf.diasPessoa) + ' dia(s)-pessoa fora')
+       : 'Nenhum dia do período teve gente fora da frente'],
+    ['Onde os recursos estavam', cpNum(desf.diasPessoa),
+     desf.diasPessoa
+       ? ('Dias-pessoa por motivo: ' + (_esfTop(desf.porMotivo, 9) || '—')
+          + '. É o esforço que a equipe entregou fora daqui — ele não aparece '
+          + 'em Analisados porque não foi feito nesta frente.')
+       : 'Ninguém foi emprestado para outra frente neste período']
   ];
   ind.forEach(function(x, i){
     _esfLinha(ws, L, x, { fill: i % 2 ? ESF_C.GREY_L : null, wrap:true });
@@ -61881,17 +61956,19 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   // mostra é o HH — as horas de trabalho da equipe no período — e não
   // só uma lista de nomes.
   var ws3 = wb.addWorksheet('HH da Equipe', { views:[{ showGridLines:false }] });
-  ws3.columns = [{ width:24 }, { width:9 }, { width:13 }, { width:11 }, { width:13 },
+  ws3.columns = [{ width:24 }, { width:9 }, { width:13 }, { width:11 }, { width:15 },
+                 { width:13 },
                  { width:9 }, { width:13 }, { width:10 }, { width:11 }, { width:14 },
                  { width:20 }, { width:16 },
                  { width:10 }, { width:11 },
                  { width:11 }, { width:12 }, { width:9 }, { width:12 }, { width:12 },
                  { width:13 }, { width:13 }];
-  // André, 21/11: "pode ocultar as colunas da foto 2" — Movim. (13) e
-  // Fora da meta (21). Ficam escondidas, não apagadas: são elas que
-  // fecham a conta MOVIM. + CONCLUSÕES = ANALISADOS + FORA DA META,
-  // e basta reexibir no Excel para conferir.
-  [13, 21].forEach(function(c){ ws3.getColumn(c).hidden = true; });
+  // André, 21/11: "pode ocultar as colunas da foto 2" — Movim. e Fora
+  // da meta. Ficam escondidas, não apagadas: são elas que fecham a
+  // conta MOVIM. + CONCLUSÕES = ANALISADOS + FORA DA META, e basta
+  // reexibir no Excel para conferir. (24/11: entrou a coluna Fora do
+  // PATEC na 5ª posição, então as duas andaram uma casa.)
+  [14, 22].forEach(function(c){ ws3.getColumn(c).hidden = true; });
   _esfTitulo(ws3, 'HH da Equipe — esforço e aproveitamento por analista',
     'ANALISADOS (prod.) = as AÇÕES lançadas no modal, na MESMA regra do velocímetro: cada vez '
     + 'que um item anda (saiu do fornecedor e foi para o MDG, por exemplo) conta 1, e conclusão '
@@ -61908,21 +61985,26 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     + 'Gestão de Jornada (férias e folgas programadas). '
     + 'DIAS TRABALHADOS é outra coisa: são os dias em que a pessoa FECHOU o dia. O fechamento aqui '
     + 'serve de prova de trabalho, não de contagem — por isso ele não entra em Analisados. '
-    + 'RCs distintas = quantas RCs diferentes a pessoa tocou (a mesma RC tocada 5 vezes conta 1).', 20);
+    + 'RCs distintas = quantas RCs diferentes a pessoa tocou (a mesma RC tocada 5 vezes conta 1). '
+    + 'DIAS FORA DO PATEC são os dias em que a pessoa foi lançada com meta 0 no Montar base '
+    + 'porque estava em outra frente (pedidos, devolução, publicação) ou travada por falta de '
+    + 'acesso — passe o mouse na célula para ver o motivo de cada dia. Esses dias NÃO entram na '
+    + 'meta, não contam como dia abaixo e saem do divisor da Média/dia: ela não estava aqui.', 22);
   var L3 = 4;
   _esfCabecalho(ws3, L3, ['Analista', 'Dias úteis', 'Dias Trabalhados', 'Folga/Férias',
+                          'Dias fora do PATEC',
                           'Sem fechamento', 'Meta/dia', 'Meta do período', 'Média/dia',
                           'Dias abaixo', 'Analisados (prod.)', 'Aproveit. Meta (Analisados)',
                           'Taxa de conclusão', 'Movim.', 'Conclusões',
                           '🛒 Pedido', '🔄 Republic.', '📦 XGL', '↩ Devolução', '🔖 N. Reserva',
                           'RCs distintas', 'Fora da meta'],
                 ESF_C.BLUE); L3++;
-  var COL_APROV = 11, COL_ABAIXO = 9;
+  var COL_APROV = 12, COL_ABAIXO = 10, COL_FORA = 5;
   pessoas.forEach(function(p, i){
     // quem não tem meta individual: a produção soma para a equipe, a meta
     // é só referência — por isso o nome avisa e o TOTAL não leva essa meta
     _esfLinha(ws3, L3, [p.nome + (p.metaFonte === ESF_META_REF ? ' (sem meta individual)' : ''),
-      p.diasUteis, p.trabalhados, p.folgas, p.semRegistro,
+      p.diasUteis, p.trabalhados, p.folgas, p.diasFora, p.semRegistro,
       p.metaVariou ? Number(p.metaMedia.toFixed(1)) : p.meta,
       p.metaPeriodo, p.diasMeta ? Number(p.mediaDia.toFixed(1)) : '—',
       p.diasAbaixo.length, p.producao,
@@ -61941,17 +62023,24 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     }
     if (p.diasAbaixo.length) ws3.getCell(L3, COL_ABAIXO).font =
       { name:'Calibri', size:10, bold:true, color:{ argb:ESF_C.RED } };
+    if (p.diasFora) {
+      var cf = ws3.getCell(L3, COL_FORA);
+      cf.fill = _esfSolid(ESF_C.AMBER_L);
+      cf.font = { name:'Calibri', size:10, bold:true, color:{ argb:ESF_C.AMBER } };
+      cf.note = 'Dias em que a pessoa estava fora desta frente: '
+              + (_esfTop(p.motivosFora, 9) || 'sem motivo informado');
+    }
     L3++;
   });
   var somaP = pessoas.reduce(function(o, p){
     o.trab += p.trabalhados; o.prod += p.producao; o.meta += esfMetaPeriodoEquipe(p);
     o.diasMeta += p.diasMeta;
     o.ab += p.diasAbaixo.length; o.mov += p.mov; o.conc += p.conc;
-    o.fora += p.foraMeta;
+    o.fora += p.foraMeta; o.foraPatec += (p.diasFora || 0);
     ESF_DESFECHOS.forEach(function(d){ o.d[d] = (o.d[d] || 0) + (p.desfechos[d] || 0); });
     return o;
-  }, { trab:0, prod:0, meta:0, ab:0, mov:0, conc:0, diasMeta:0, fora:0, d:{} });
-  _esfLinha(ws3, L3, ['TOTAL DA EQUIPE', '', somaP.trab, '', '', '', somaP.meta,
+  }, { trab:0, prod:0, meta:0, ab:0, mov:0, conc:0, diasMeta:0, fora:0, foraPatec:0, d:{} });
+  _esfLinha(ws3, L3, ['TOTAL DA EQUIPE', '', somaP.trab, '', somaP.foraPatec, '', '', somaP.meta,
     somaP.diasMeta ? Number((somaP.prod / somaP.diasMeta).toFixed(1)) : '—',
     somaP.ab, somaP.prod,
     somaP.meta ? _esfPct(somaP.prod / somaP.meta) : '—',
@@ -61959,7 +62048,7 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     somaP.mov, somaP.conc].concat(ESF_DESFECHOS.map(function(d){ return somaP.d[d] || 0; }))
     .concat([r.nRcs, somaP.fora]), { bold:true, fill:ESF_C.BLUE_L });
   L3 += 2;
-  ws3.mergeCells(L3, 1, L3, 21);
+  ws3.mergeCells(L3, 1, L3, 22);
   var leg = ws3.getCell(L3, 1);
   leg.value = 'Como ler: a Meta do período desconta só Folga/Férias — 30/dia em 19 dias úteis '
     + 'com 1 folga dá 540, e não 570. Média/dia = Analisados ÷ dias cobrados (os mesmos da meta), '
@@ -62002,14 +62091,26 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
       ['Aproveit. Meta (Analisados)',
        p.metaPeriodo ? _esfPct(p.aproveitamento) : 'sem meta no período',
        p.metaPeriodo ? ('analisou ' + p.producao + ' de ' + p.metaPeriodo
-         + ' (' + p.meta + '/dia × ' + p.diasMeta + ' dia(s) cobrados'
+         + ' (' + (p.metaVariou ? Number(p.metaMedia.toFixed(1)) : p.meta)
+         + '/dia × ' + p.diasMeta + ' dia(s) cobrados'
          + (p.folgas ? ', já descontando ' + p.folgas + ' de folga/férias' : '') + ')'
          + (p.semRegistro ? ' — ' + p.semRegistro + ' dia(s) sem fechamento continuam cobrados'
                           : '')) : 'nenhum dia útil cobrado no período'],
       ['Dias úteis no período', p.diasUteis,
        p.diasMeta + ' cobrado(s) · ' + p.folgas + ' de folga/férias ('
        + p.folgasFech + ' pelo fechamento, ' + p.folgasJor + ' pela Jornada) · '
+       + (p.diasFora ? p.diasFora + ' fora desta frente · ' : '')
        + p.trabalhados + ' com o dia fechado · ' + p.semRegistro + ' sem fechamento'],
+      // 24/11: "mostrar a quantidade de dias apoiando outras atividades
+      // (individual)". É o crédito que não aparecia em lugar nenhum: a
+      // pessoa produziu, só não foi aqui.
+      ['Dias apoiando outras atividades', p.diasApoio,
+       p.diasFora
+         ? (_esfTop(p.motivosFora, 9) + (p.diasApoio < p.diasFora
+              ? ' — dos ' + p.diasFora + ' dia(s) fora, ' + p.diasApoio
+                + ' foram apoiando outra frente'
+              : ''))
+         : 'esteve nesta frente todos os dias úteis do período'],
       ['Dias abaixo da meta', p.diasAbaixo.length, abaixo || 'nenhum'],
       ['Dias que bateu a meta', p.diasAcima,
        p.melhor ? ('melhor dia: ' + fmtDt(p.melhor.data) + ' com ' + p.melhor.prod) : '—'],
