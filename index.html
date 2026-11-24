@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 03:15';
+var GTO_BUILD = '25/11 04:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -63307,7 +63307,13 @@ function _ceRenderChart(mod){
   let acProg=0, acAnal=0, acSaid=0;
   const progAcum=[], analAcum=[], saidAcum=[];
   dias.forEach((dt,i)=>{
-    acProg+=META; progAcum.push(acProg);
+    // 25/11: o Planejado acumula a meta DAQUELE dia — "começa com 150,
+    // amanhã 300, depois 450... e quando eu ajustar a distribuição a
+    // linha se ajusta sozinha (50 hoje, 200 amanhã, 350...)".
+    // Dia sem lançamento usa a equipe da frente a 30 por pessoa.
+    let _mD = META;
+    try { const _x = metaEquipeDoDia(mod, dt); if(_x > 0) _mD = _x; } catch(e){}
+    acProg += _mD; progAcum.push(acProg);
     if(dt<=hoje){
       // fim de semana/feriado desde o dia útil anterior → embute neste ponto
       if(i>0){
