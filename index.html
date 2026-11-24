@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '24/11 22:20';
+var GTO_BUILD = '24/11 23:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -61280,6 +61280,7 @@ var ESF_TIPOS_META = ['primeira_analise', 'em_tratativa', 'status_b', 'ag_parece
 var ESF_MOT_APOIO = ['Atuando em pedidos', 'Atuando em devolução',
                      'Atuando em publicação'];
 var ESF_MOT_AUSENCIA = ['Férias', 'Folga'];
+function _esfOutraFrente(mod){ return (mod === 'fast') ? 'adlv' : 'fast'; }
 
 // A meta de UM dia: o que foi lançado no Montar base para aquele dia,
 // senão a meta padrão da pessoa. É o que faz "hoje a Ludy faz 15" valer
@@ -61514,7 +61515,7 @@ function ceEsforcoPessoas(mod){
       trabalhados: 0, folgas: 0, semRegistro: 0,
       producao: 0, diasAbaixo: [], diasAcima: 0, melhor: null, pior: null,
       folgasFech: 0, folgasJor: 0, fechTotal: 0, foraMeta: 0, metaSoma: 0,
-      diasFora: 0, diasApoio: 0, motivosFora: {}, diasSemMeta: 0,
+      diasFora: 0, diasApoio: 0, motivosFora: {}, diasSemMeta: 0, diasOutraFrente: 0,
       mov: 0, conc: 0, acoes: ls.length, rcs: {}, filas: {}, motivos: {}, desfechos: {},
       linhaDia: []
     };
@@ -61556,21 +61557,30 @@ function ceEsforcoPessoas(mod){
         ? esfMetaDoDia(mod, nome, d, 0)
         : esfMetaDoDia(mod, nome, d, p.meta);
       p.metaSoma += metaDia;
+      // a meta DELA na outra frente naquele dia, contando só o que foi
+      // lançado de verdade. André, 24/11: "agora FAST e ADLV são a mesma
+      // equipe; ela só fica desfalcada quando as duas estão zeradas".
+      var metaOutra = esfMetaDoDia(_esfOutraFrente(mod), nome, d, 0);
+      var motDia = esfMotivoDoDia(nome, d);
       var sit;
-      if (!metaDia && p.metaFonte === ESF_META_REF && !esfMotivoDoDia(nome, d)) {
-        // nem cobrado nem "fora do PATEC": esta frente simplesmente não
-        // é a dela. O que ela produzir aqui continua contando no total.
+      if (!metaDia && metaOutra > 0) {
+        // não é desfalque nenhum: a pessoa está trabalhando, só do outro
+        // lado. Este relatório não a cobra, e o outro cobra.
+        p.diasOutraFrente++;
+        sit = 'No ' + _ceModLabel(_esfOutraFrente(mod)) + ' (' + metaOutra + '/dia)';
+      } else if (!metaDia && !motDia) {
+        // sem meta aqui, sem meta lá e sem motivo: esta frente não é a
+        // dela, ou o dia não foi lançado. Nos dois casos, não se cobra.
         p.diasSemMeta++;
         sit = nAcoes ? 'Sem meta nesta frente' : 'Não atua nesta frente';
       } else if (!metaDia) {
-        // DIA FORA DO PATEC: a pessoa existe no período, mas naquele dia
-        // ela estava em outra frente (ou travada). Não é dia abaixo da
-        // meta nem dia que ela bateu — é dia que não foi cobrado aqui.
-        var motDia = esfMotivoDoDia(nome, d);
+        // DESFALQUE DE VERDADE: zerada nas duas frentes, com o motivo
+        // que o líder registrou de manhã. Não é dia abaixo da meta nem
+        // dia que ela bateu — é dia em que a equipe não a teve.
         p.diasFora++;
-        if (motDia) p.motivosFora[motDia] = (p.motivosFora[motDia] || 0) + 1;
+        p.motivosFora[motDia] = (p.motivosFora[motDia] || 0) + 1;
         if (ESF_MOT_APOIO.indexOf(motDia) !== -1) p.diasApoio++;
-        sit = motDia ? ('Fora do PATEC · ' + motDia) : 'Sem meta no dia';
+        sit = 'Fora do PATEC · ' + motDia;
       } else if (nAcoes < metaDia) {
         p.diasAbaixo.push({ data:d, prod:nAcoes, falta: metaDia - nAcoes, meta:metaDia });
         sit = 'Abaixo da meta';
@@ -61608,7 +61618,8 @@ function ceEsforcoPessoas(mod){
     // dia fora do PATEC não entra no denominador: a pessoa não estava
     // aqui, e dividir a produção dela por um dia que não era dela
     // puxaria a média para baixo sem motivo
-    p.diasMeta = Math.max(0, p.diasUteis - p.folgas - p.diasFora - p.diasSemMeta);
+    p.diasMeta = Math.max(0, p.diasUteis - p.folgas - p.diasFora - p.diasSemMeta
+                             - p.diasOutraFrente);
     // A meta do período é a SOMA das metas de cada dia cobrado. Quando
     // nenhum dia teve lançamento, isso dá exatamente meta × dias, que é
     // como era antes de 24/11 — a conta velha é um caso particular desta.
@@ -61869,26 +61880,38 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   // o motivo que ele escolheu no Montar base naquela manhã.
   var desf = (function(){
     var dias = {}, porMotivo = {}, porPessoa = {}, pessoasFora = {}, total = 0;
+    var outra = 0, outraPessoas = {};
     pessoas.forEach(function(p){
       (p.linhaDia || []).forEach(function(d){
         if (d.prod === null || d.prod === undefined) return;   // folga já é outra conta
         if (d.meta) return;                                    // teve meta: estava aqui
+        // 24/11: desfalque é só quando as DUAS frentes estão zeradas —
+        // "agora FAST e ADLV são a mesma equipe; se ela não tem meta no
+        // ADLV mas tem no FAST, não é equipe desfalcada". O motivo é a
+        // prova disso: o Montar base só o pede quando o total do dia é 0.
+        var m = esfMotivoDoDia(p.nome, d.data);
+        if (!m) {
+          if (/^No /.test(d.situacao || '')) {
+            outra++; outraPessoas[p.nome] = 1;
+          }
+          return;
+        }
         dias[d.data] = 1; total++;
         pessoasFora[p.nome] = 1;
-        var m = esfMotivoDoDia(p.nome, d.data) || '(sem motivo informado)';
         porMotivo[m] = (porMotivo[m] || 0) + 1;
         (porPessoa[p.nome] = porPessoa[p.nome] || {})[m] =
           (porPessoa[p.nome][m] || 0) + 1;
       });
     });
     return { dias:Object.keys(dias).sort(), diasPessoa:total, porMotivo:porMotivo,
-             porPessoa:porPessoa, quantas:Object.keys(pessoasFora).length };
+             porPessoa:porPessoa, quantas:Object.keys(pessoasFora).length,
+             outra:outra, outraQuantas:Object.keys(outraPessoas).length };
   })();
   var wb = new ExcelJS.Workbook();
   wb.creator = 'GTO'; wb.created = new Date();
   var MOD = String(mod).toUpperCase();
   var periodo = 'Módulo: ' + MOD + '  ·  Período: ' + fmtDt(faixa.de) + ' a ' + fmtDt(faixa.ate)
-    + '  ·  ' + r.dias + ' dia(s) com registro  ·  Fonte: GTO (ações da produção)';
+    + '  ·  ' + r.dias + ' dia(s) com lançamento de ação  ·  Fonte: GTO (ações da produção)';
 
   // ── 1. Resumo executivo ────────────────────────────────────────
   var ws = wb.addWorksheet('Resumo Executivo', { views:[{ showGridLines:false }] });
@@ -61932,16 +61955,22 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     // pouco — e a conversa de fim de medição começava errada.
     ['Dias com a equipe desfalcada', desf.dias.length,
      desf.dias.length
-       ? ('Dias úteis em que pelo menos uma pessoa ficou sem meta no ' + MOD
-          + ' — ' + desf.quantas + ' pessoa(s) ao todo, somando '
-          + cpNum(desf.diasPessoa) + ' dia(s)-pessoa fora')
-       : 'Nenhum dia do período teve gente fora da frente'],
-    ['Onde os recursos estavam', cpNum(desf.diasPessoa),
+       ? ('Dias úteis em que pelo menos uma pessoa ficou sem meta NAS DUAS frentes '
+          + '(ADLV e FAST) e você registrou o motivo — ' + desf.quantas
+          + ' pessoa(s) ao todo. Quem estava no ' + _ceModLabel(_esfOutraFrente(mod))
+          + ' naquele dia NÃO conta aqui: é a mesma equipe, só do outro lado'
+          + (desf.outra ? ' (' + cpNum(desf.outra) + ' dia(s)-pessoa nesse caso)' : ''))
+       : ('Ninguém ficou fora das duas frentes neste período'
+          + (desf.outra ? ' — ' + cpNum(desf.outra) + ' dia(s)-pessoa foram trabalhados no '
+             + _ceModLabel(_esfOutraFrente(mod)) + ', e isso não é desfalque' : ''))],
+    ['Onde os recursos estavam (dias-pessoa)', cpNum(desf.diasPessoa),
      desf.diasPessoa
-       ? ('Dias-pessoa por motivo: ' + (_esfTop(desf.porMotivo, 9) || '—')
-          + '. É o esforço que a equipe entregou fora daqui — ele não aparece '
-          + 'em Analisados porque não foi feito nesta frente.')
-       : 'Ninguém foi emprestado para outra frente neste período']
+       ? ('Um dia-pessoa = uma pessoa fora por um dia; ' + desf.quantas
+          + ' pessoa(s) em ' + desf.dias.length + ' dia(s) dão estes '
+          + cpNum(desf.diasPessoa) + '. Por motivo: '
+          + (_esfTop(desf.porMotivo, 9) || '—')
+          + '. É o esforço que a equipe entregou fora das duas frentes.')
+       : 'Ninguém foi emprestado para fora das duas frentes neste período']
   ];
   ind.forEach(function(x, i){
     _esfLinha(ws, L, x, { fill: i % 2 ? ESF_C.GREY_L : null, wrap:true });
