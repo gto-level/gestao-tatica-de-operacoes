@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '24/11 21:00';
+var GTO_BUILD = '24/11 21:45';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -61452,6 +61452,25 @@ function esfDiasEquipe(pessoas){
   };
 }
 
+// Quem aparece no relatório. André, 24/11: "este relatório só deve sair
+// os nomes das pessoas da minha equipe, e neste relatório pode deixar o
+// meu nome também". A lista é a mesma do Montar base, mais quem estiver
+// logado (ele), mais quem PRODUZIU no período — gente que já saiu da
+// equipe mas trabalhou dentro do recorte não some, senão o TOTAL do
+// relatório deixaria de bater com as ações da base.
+function esfNaEquipe(nome){
+  var n = cpNormNome(nome);
+  try {
+    if (AAM_EQUIPE.some(function(x){ return cpNormNome(x) === n; })) return true;
+  } catch (e) {}
+  try {
+    var eu = (typeof _authPerfil !== 'undefined' && _authPerfil && _authPerfil.colabNome)
+           || (typeof colabLogado !== 'undefined' ? colabLogado : '');
+    if (eu && cpNormNome(eu) === n) return true;
+  } catch (e2) {}
+  return false;
+}
+
 function ceEsforcoPessoas(mod){
   var cache = _ceCache[mod];
   if (!cache) return [];
@@ -61592,6 +61611,10 @@ function ceEsforcoPessoas(mod){
     p.mediaDia = p.diasMeta ? (p.producao / p.diasMeta) : 0;
     p.porConclusao = p.conc ? (p.mov / p.conc) : 0;
     return p;
+  }).filter(function(p){
+    // nome de cadastro antigo, sem nenhuma ação no período, só fazia a
+    // tabela crescer com linhas de zero
+    return esfNaEquipe(p.nome) || p.acoes > 0 || p.producao > 0 || p.conc > 0;
   }).sort(function(a, b){
     return b.aproveitamento - a.aproveitamento || b.producao - a.producao
         || a.nome.localeCompare(b.nome);
@@ -61968,7 +61991,13 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   // conta MOVIM. + CONCLUSÕES = ANALISADOS + FORA DA META, e basta
   // reexibir no Excel para conferir. (24/11: entrou a coluna Fora do
   // PATEC na 5ª posição, então as duas andaram uma casa.)
-  [14, 22].forEach(function(c){ ws3.getColumn(c).hidden = true; });
+  //
+  // No mesmo dia saíram de vista Folga/Férias e Sem fechamento — "agora
+  // eu vou colocar as informações todo dia na distribuição" — e Meta/dia,
+  // que ele achou redundante perto de Analisados e Meta do período.
+  // Todas continuam no arquivo: é uma reexibição de coluna no Excel para
+  // conferir qualquer número que pareça estranho.
+  [4, 6, 7, 14, 22].forEach(function(c){ ws3.getColumn(c).hidden = true; });
   _esfTitulo(ws3, 'HH da Equipe — esforço e aproveitamento por analista',
     'ANALISADOS (prod.) = as AÇÕES lançadas no modal, na MESMA regra do velocímetro: cada vez '
     + 'que um item anda (saiu do fornecedor e foi para o MDG, por exemplo) conta 1, e conclusão '
@@ -61983,15 +62012,17 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     + 'com a Meta do período. Só folga e férias descontam dias. '
     + 'FOLGA/FÉRIAS vem de duas fontes e basta uma delas — a Presença do fechamento do dia e a '
     + 'Gestão de Jornada (férias e folgas programadas). '
-    + 'DIAS TRABALHADOS é outra coisa: são os dias em que a pessoa FECHOU o dia. O fechamento aqui '
-    + 'serve de prova de trabalho, não de contagem — por isso ele não entra em Analisados. '
+    + 'DIAS COM DEMANDA são os dias úteis em que a pessoa tinha meta nesta frente — dia útil '
+    + 'menos folga/férias menos os dias fora do PATEC. É esse número que a Meta do período e a '
+    + 'Média/dia usam. (Folga/Férias, Sem fechamento e Meta/dia continuam no arquivo, só '
+    + 'ocultas: reexiba a coluna no Excel se quiser conferir.) '
     + 'RCs distintas = quantas RCs diferentes a pessoa tocou (a mesma RC tocada 5 vezes conta 1). '
     + 'DIAS FORA DO PATEC são os dias em que a pessoa foi lançada com meta 0 no Montar base '
     + 'porque estava em outra frente (pedidos, devolução, publicação) ou travada por falta de '
     + 'acesso — passe o mouse na célula para ver o motivo de cada dia. Esses dias NÃO entram na '
     + 'meta, não contam como dia abaixo e saem do divisor da Média/dia: ela não estava aqui.', 22);
   var L3 = 4;
-  _esfCabecalho(ws3, L3, ['Analista', 'Dias úteis', 'Dias Trabalhados', 'Folga/Férias',
+  _esfCabecalho(ws3, L3, ['Analista', 'Dias úteis', 'Dias com demanda', 'Folga/Férias',
                           'Dias fora do PATEC',
                           'Sem fechamento', 'Meta/dia', 'Meta do período', 'Média/dia',
                           'Dias abaixo', 'Analisados (prod.)', 'Aproveit. Meta (Analisados)',
@@ -62004,7 +62035,7 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     // quem não tem meta individual: a produção soma para a equipe, a meta
     // é só referência — por isso o nome avisa e o TOTAL não leva essa meta
     _esfLinha(ws3, L3, [p.nome + (p.metaFonte === ESF_META_REF ? ' (sem meta individual)' : ''),
-      p.diasUteis, p.trabalhados, p.folgas, p.diasFora, p.semRegistro,
+      p.diasUteis, p.diasMeta, p.folgas, p.diasFora, p.semRegistro,
       p.metaVariou ? Number(p.metaMedia.toFixed(1)) : p.meta,
       p.metaPeriodo, p.diasMeta ? Number(p.mediaDia.toFixed(1)) : '—',
       p.diasAbaixo.length, p.producao,
@@ -62040,7 +62071,7 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     ESF_DESFECHOS.forEach(function(d){ o.d[d] = (o.d[d] || 0) + (p.desfechos[d] || 0); });
     return o;
   }, { trab:0, prod:0, meta:0, ab:0, mov:0, conc:0, diasMeta:0, fora:0, foraPatec:0, d:{} });
-  _esfLinha(ws3, L3, ['TOTAL DA EQUIPE', '', somaP.trab, '', somaP.foraPatec, '', '', somaP.meta,
+  _esfLinha(ws3, L3, ['TOTAL DA EQUIPE', '', somaP.diasMeta, '', somaP.foraPatec, '', '', somaP.meta,
     somaP.diasMeta ? Number((somaP.prod / somaP.diasMeta).toFixed(1)) : '—',
     somaP.ab, somaP.prod,
     somaP.meta ? _esfPct(somaP.prod / somaP.meta) : '—',
@@ -62053,8 +62084,7 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   leg.value = 'Como ler: a Meta do período desconta só Folga/Férias — 30/dia em 19 dias úteis '
     + 'com 1 folga dá 540, e não 570. Média/dia = Analisados ÷ dias cobrados (os mesmos da meta), '
     + 'então Média/dia ÷ Meta/dia dá o aproveitamento. Dia útil sem nenhuma ação conta como dia '
-    + 'abaixo da meta — não some da conta. "Dias Trabalhados" e "Sem fechamento" falam só do '
-    + 'registro do fechamento, e não mexem em Analisados. Ação lançada em sábado, domingo ou '
+    + 'abaixo da meta — não some da conta. Ação lançada em sábado, domingo ou '
     + 'feriado entra em Analisados, mas não cria dia cobrado — a meta é dos dias úteis. '
     + 'Quem está marcado como "(sem meta individual)" contribui com a produção da equipe '
     + 'normalmente: os Analisados dele entram no TOTAL, só a meta dele não — a Meta/dia '
