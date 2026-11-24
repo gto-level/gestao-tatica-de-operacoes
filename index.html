@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 04:00';
+var GTO_BUILD = '25/11 04:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -63305,7 +63305,7 @@ function _ceRenderChart(mod){
   });
 
   let acProg=0, acAnal=0, acSaid=0;
-  const progAcum=[], analAcum=[], saidAcum=[];
+  const progAcum=[], analAcum=[], saidAcum=[], progDia=[];
   dias.forEach((dt,i)=>{
     // 25/11: o Planejado acumula a meta DAQUELE dia — "começa com 150,
     // amanhã 300, depois 450... e quando eu ajustar a distribuição a
@@ -63313,7 +63313,7 @@ function _ceRenderChart(mod){
     // Dia sem lançamento usa a equipe da frente a 30 por pessoa.
     let _mD = META;
     try { const _x = metaEquipeDoDia(mod, dt); if(_x > 0) _mD = _x; } catch(e){}
-    acProg += _mD; progAcum.push(acProg);
+    acProg += _mD; progAcum.push(acProg); progDia.push(_mD);
     if(dt<=hoje){
       // fim de semana/feriado desde o dia útil anterior → embute neste ponto
       if(i>0){
@@ -63343,12 +63343,26 @@ function _ceRenderChart(mod){
   _ceChart[mod]=new Chart(canvas,{
     type:'line',
     data:{labels,datasets:[
-      {label:'Planejado', data:progAcum, borderColor:'#2563EB',backgroundColor:'rgba(37,99,235,.06)',borderWidth:2,borderDash:[6,4],pointRadius:0,pointHoverRadius:4,fill:true,tension:0,spanGaps:true},
+      // 25/11: o Planejado ganhou as bolinhas das outras duas linhas.
+      // Sem ponto não há o que apontar, e o André precisa passar o mouse
+      // e ler o planejado daquele dia — inclusive o degrau, que agora
+      // muda de um dia para o outro conforme ele distribui.
+      {label:'Planejado', data:progAcum, borderColor:'#2563EB',backgroundColor:'rgba(37,99,235,.06)',borderWidth:2,borderDash:[6,4],pointRadius:3,pointHoverRadius:5,pointBackgroundColor:'#fff',pointBorderColor:'#2563EB',pointBorderWidth:2,fill:true,tension:0,spanGaps:true,_dia:progDia},
       {label:'Analisado', data:analAcum, borderColor:'#F97316',backgroundColor:'rgba(249,115,22,.08)',borderWidth:2.5,pointRadius:3,pointHoverRadius:5,fill:false,tension:.3,spanGaps:false},
       {label:'Saídas',    data:saidAcum, borderColor:'#16A34A',backgroundColor:'rgba(22,163,74,.08)',borderWidth:2,pointRadius:3,pointHoverRadius:5,fill:false,tension:.3,spanGaps:false},
     ]},
     options:{responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{position:'top',labels:{font:{size:11},usePointStyle:true}}},
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{position:'top',labels:{font:{size:11},usePointStyle:true}},
+        tooltip:{callbacks:{label:function(ctx){
+          var v = ctx.parsed.y;
+          var txt = ctx.dataset.label + ': ' + (v == null ? '—' : cpNum(v));
+          // no Planejado, o acumulado sozinho não responde "quanto era
+          // a meta de hoje" — o degrau do dia vai junto
+          var d = ctx.dataset._dia;
+          if (d && d[ctx.dataIndex] != null) txt += '  (meta do dia: ' + cpNum(d[ctx.dataIndex]) + ')';
+          return txt;
+        }}}},
       scales:{y:{beginAtZero:true,ticks:{font:{size:10}},grid:{color:'rgba(0,0,0,.06)'}},x:{ticks:{font:{size:10},maxRotation:60,autoSkip:false},grid:{display:false}}}
     }
   });
