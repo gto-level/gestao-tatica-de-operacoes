@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 02:30';
+var GTO_BUILD = '25/11 03:15';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -6648,6 +6648,15 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               <input type="date" id="aam-data" onchange="aamRender()"
                 style="font-size:12.5px;padding:5px 9px;border:1.5px solid var(--brd);border-radius:7px;font-weight:600;color:var(--az)">
               <button class="btn btn-s" style="font-size:11px" onclick="aamCopiarOntem()">↩ repetir o último dia</button>
+              <!-- 25/11: "até 02/12 a Aline está de férias, então a Ludy
+                   fica 15 ADLV e 15 FAST". Repetir o mesmo lançamento
+                   em oito dias à mão é onde se erra um dia e ninguém
+                   descobre. -->
+              <label style="font-size:11px;color:var(--tx2);display:flex;align-items:center;gap:5px">
+                até
+                <input type="date" id="aam-ate"
+                  style="font-size:12px;padding:4px 7px;border:1.5px solid var(--brd);border-radius:6px;font-weight:600;color:var(--az)">
+              </label>
               <button class="btn btn-p" style="font-size:11px" onclick="aamSalvar()">💾 Salvar as metas do dia</button>
             </span>
           </div>
@@ -6660,6 +6669,11 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
             Meta do período do relatório de esforço acompanham sozinhas.
             Quem fica com <strong>0 nas duas frentes</strong> precisa de um motivo: é o que
             explica, depois, por que a meta do dia caiu.
+            <br>O dia que você ainda não lançou já nasce com a equipe da frente a
+            <strong>30 por pessoa</strong> — é isso que a linha Planejado dos gráficos mostra.
+            Para repetir o mesmo lançamento por vários dias (uma substituição enquanto alguém
+            está de férias, por exemplo), preencha o campo <strong>até</strong>: salvo em todos
+            os dias úteis do intervalo.
           </div>
           <div id="aam-corpo"></div>
           <div id="aam-aviso" style="font-size:11.5px;margin-top:.6rem;min-height:14px"></div>
@@ -51793,6 +51807,22 @@ var AAG_JULG_FATOR = 1;
 // na lista mas tem meta no dia entra assim mesmo: a lista é um atalho,
 // não um filtro que esconde trabalho.
 var AAM_EQUIPE = ['Aline', 'Ana', 'Guilherme Silva', 'Gustavo Lima', 'Ludy', 'Wanessa'];
+// Quem é da frente, para o PLANEJADO do dia que ainda não foi lançado.
+// André, 25/11: "5 × 30 = 150; a Aline só tem meta no FAST". O cadastro
+// do Administração não serve para isto: ele tem nomes antigos e gente
+// zerada pelos salvamentos de antes, e por isso a linha Planejado do
+// gráfico estava em 15/dia em vez de 150.
+var AAM_EQUIPE_MOD = {
+  adlv: ['Ana', 'Guilherme Silva', 'Gustavo Lima', 'Ludy', 'Wanessa'],
+  fast: ['Aline']
+};
+var AAM_META_PADRAO = 30;
+function aamEquipeDoModulo(mod){
+  var l = AAM_EQUIPE_MOD[(mod === 'fast') ? 'fast' : 'adlv'] || [];
+  return l.filter(function(n){
+    try { return !aamEstaFora(n); } catch (e) { return true; }
+  });
+}
 var AAM_MOTIVOS = ['Atuando em pedidos', 'Atuando em devolução',
                    'Atuando em publicação', 'Falta de acesso', 'Férias', 'Folga'];
 // Quem saiu da equipe (24/11). O cadastro do Administração continua
@@ -51870,11 +51900,15 @@ function aamValor(mod, nome, data){
     var k = Object.keys(d).find(function(n){ return cpNormNome(n) === cpNormNome(nome); });
     if (k != null) return +d[k] || 0;
   } catch (e) {}
-  // sem lançamento no dia: cai no padrão, e só para quem tem meta real
+  // sem lançamento no dia: quem é da frente nasce com a meta padrão
+  // dele (a do cadastro, se houver, senão 30); quem não é da frente
+  // nasce zerado — é a Aline no ADLV, que só tem meta no FAST
   try {
+    if (aamEquipeDoModulo(mod).some(function(n){ return cpNormNome(n) === cpNormNome(nome); }))
+      return aamMetaPadraoDe(mod, nome);
     var e2 = ((_equipeRt && _equipeRt[mod]) || []).find(function(x){
       return x && x.nome && cpNormNome(x.nome) === cpNormNome(nome); });
-    if (e2 && e2.temMeta) return +e2.meta || 0;
+    if (e2 && e2.temMeta && (+e2.meta) > 0) return +e2.meta;
   } catch (e3) {}
   return 0;
 }
@@ -52060,8 +52094,32 @@ function metaDiaAplicarNasTelas(){
   try { if (typeof renderPainelEstrategico === 'function') renderPainelEstrategico(); } catch (e4) {}
 }
 
+// Os dias úteis de uma data até outra, inclusive — é por eles que o
+// "até" repete o mesmo lançamento sem pedir para digitar oito vezes.
+function aamDiasAte(de, ate){
+  var out = [de];
+  try {
+    if (!ate || ate <= de) return out;
+    var d = new Date(de + 'T12:00:00'), f = new Date(ate + 'T12:00:00');
+    var guarda = 0;
+    d.setDate(d.getDate() + 1);
+    while (d <= f && guarda++ < 400) {
+      var iso = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+              + '-' + String(d.getDate()).padStart(2, '0');
+      var util = true;
+      try { util = _fdiaEhDiaUtil(iso); } catch (e) { util = (d.getDay() >= 1 && d.getDay() <= 5); }
+      if (util) out.push(iso);
+      d.setDate(d.getDate() + 1);
+    }
+  } catch (e2) {}
+  return out;
+}
+
 async function aamSalvar(){
   var data = aamDataSel();
+  var elAte = document.getElementById('aam-ate');
+  var ate = (elAte && elAte.value) ? elAte.value : '';
+  var dias = aamDiasAte(data, ate);
   var av = document.getElementById('aam-aviso');
   var pessoas = aamPessoas(data);
   var lote = { adlv:{}, fast:{} }, motivos = {}, faltando = [];
@@ -52078,12 +52136,14 @@ async function aamSalvar(){
   if (av) av.innerHTML = '<span style="color:var(--tx2)">⏳ Salvando...</span>';
   var ok = true;
   try {
-    ok = await metasDiariasSalvarLote('adlv', data, lote.adlv) && ok;
-    ok = await metasDiariasSalvarLote('fast', data, lote.fast) && ok;
-    // os motivos moram no mesmo documento, numa chave própria
-    if (!_metasDiarias.mot) _metasDiarias.mot = {};
-    _metasDiarias.mot[data] = motivos;
-    if (!Object.keys(motivos).length) delete _metasDiarias.mot[data];
+    for (var di = 0; di < dias.length; di++) {
+      ok = await metasDiariasSalvarLote('adlv', dias[di], lote.adlv) && ok;
+      ok = await metasDiariasSalvarLote('fast', dias[di], lote.fast) && ok;
+      // os motivos moram no mesmo documento, numa chave própria
+      if (!_metasDiarias.mot) _metasDiarias.mot = {};
+      _metasDiarias.mot[dias[di]] = JSON.parse(JSON.stringify(motivos));
+      if (!Object.keys(motivos).length) delete _metasDiarias.mot[dias[di]];
+    }
     try { await fbSetGeral('config', 'metas_diarias', _metasDiarias); } catch (e) { ok = false; }
     // o espelho no Administração › Equipes (Metas RT)
     ok = await aamEspelharNoAdmin(lote) && ok;
@@ -52092,7 +52152,10 @@ async function aamSalvar(){
   aamRender();
   metaDiaAplicarNasTelas();
   if (av) av.innerHTML = (ok
-    ? '<span style="color:var(--vd)">✔ Metas de ' + cpDataBR(data) + ' guardadas. '
+    ? '<span style="color:var(--vd)">✔ Metas de '
+      + (dias.length > 1 ? cpDataBR(data) + ' a ' + cpDataBR(dias[dias.length - 1])
+                           + ' (' + cpNum(dias.length) + ' dias úteis)'
+                         : cpDataBR(data)) + ' guardadas. '
       + 'O Administração › Equipes (Metas RT), os gráficos e o relatório já usam estes '
       + 'números.</span>'
     : '<span style="color:var(--vm)">✗ A base recusou parte da gravação. Tente de novo.</span>')
@@ -59887,25 +59950,43 @@ function _ceMetaInd(mod, nome){ const e=_ceEquipe(mod).find(x=>x.nome.trim().toL
 function metaEquipeDoDia(mod, data){
   try {
     var dia = (_metasDiarias && _metasDiarias[mod]) ? _metasDiarias[mod][data] : null;
-    if (!dia || !Object.keys(dia).length) return _ceMetaEquipe(mod);
     var soma = 0, vistos = {};
-    Object.keys(dia).forEach(function(n){
+    if (dia) Object.keys(dia).forEach(function(n){
       vistos[cpNormNome(n)] = 1;
       soma += Math.max(0, +dia[n] || 0);
     });
-    // quem está cadastrado com meta e não foi lançado naquele dia
-    // continua valendo o padrão dele — lançar a meta de dois e esquecer
-    // o terceiro não pode zerar o terceiro
+    // Quem é da frente e não foi lançado naquele dia entra com a meta
+    // dele: a do cadastro, se houver, senão os 30 combinados. Lançar a
+    // meta de dois e esquecer o terceiro não pode zerar o terceiro, e
+    // dia nenhum pode ficar com um planejado menor do que a equipe que
+    // existe.
+    aamEquipeDoModulo(mod).forEach(function(nome){
+      if (vistos[cpNormNome(nome)]) return;
+      vistos[cpNormNome(nome)] = 1;
+      soma += aamMetaPadraoDe(mod, nome);
+    });
+    // e quem não está na lista da frente mas tem meta real no cadastro
+    // também conta — a lista é o piso, não um filtro
     _ceEquipe(mod).forEach(function(x){
       if (!x || !x.nome || !x.temMeta) return;
       if (vistos[cpNormNome(x.nome)]) return;
-      // quem saiu da equipe não cobra meta: o cadastro dela fica para o
-      // histórico, mas a meta do dia é de quem está trabalhando hoje
       try { if (typeof aamEstaFora === 'function' && aamEstaFora(x.nome)) return; } catch (e) {}
       soma += Math.max(0, +x.meta || 0);
     });
     return soma;
   } catch (e) { return _ceMetaEquipe(mod); }
+}
+
+// A meta padrão de alguém numa frente: o que estiver no cadastro, se
+// for maior que zero; senão os 30 combinados. O zero do cadastro é
+// resquício dos salvamentos antigos e não vale como "meta zero".
+function aamMetaPadraoDe(mod, nome){
+  try {
+    var e = ((_equipeRt && _equipeRt[mod]) || []).find(function(x){
+      return x && x.nome && cpNormNome(x.nome) === cpNormNome(nome); });
+    if (e && e.temMeta && (+e.meta) > 0) return +e.meta;
+  } catch (err) {}
+  return AAM_META_PADRAO;
 }
 
 function _ceMetaEquipe(mod){
