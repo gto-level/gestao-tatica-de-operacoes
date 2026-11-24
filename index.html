@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '24/11 17:40';
+var GTO_BUILD = '24/11 19:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -8831,6 +8831,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
               <div style="font-size:11px;color:var(--tx2);margin-bottom:2px">Total do dia</div>
               <div style="font-size:32px;font-weight:700;line-height:1" id="fdia-total" style="color:var(--az)">—</div>
               <div style="font-size:11px;color:var(--tx2)">de <span id="fdia-meta">30</span> meta</div>
+              <!-- 24/11: quando a meta do dia é 0, o motivo lançado no
+                   Montar base aparece aqui — a pessoa não precisa
+                   explicar de novo o que o líder já registrou. -->
+              <div id="fdia-meta-motivo" style="display:none;font-size:10.5px;font-weight:700;color:var(--am);margin-top:2px"></div>
             </div>
           </div>
           <!-- Barra de progresso -->
@@ -51638,10 +51642,41 @@ var AAG_JULG_FATOR = 1;
 // A equipe que aparece aqui é a que ele listou em 24/11. Quem não está
 // na lista mas tem meta no dia entra assim mesmo: a lista é um atalho,
 // não um filtro que esconde trabalho.
-var AAM_EQUIPE = ['Aline', 'Ana', 'Guilherme', 'Gustavo', 'Ludy', 'Wanessa'];
+var AAM_EQUIPE = ['Aline', 'Ana', 'Guilherme Silva', 'Gustavo Lima', 'Ludy', 'Wanessa'];
 var AAM_MOTIVOS = ['Atuando em pedidos', 'Atuando em devolução',
                    'Atuando em publicação', 'Férias', 'Folga'];
+// Quem saiu da equipe (24/11). O cadastro do Administração continua
+// com essas pessoas — o histórico delas não pode sumir —, mas elas não
+// são mais perguntadas toda manhã nem entram na meta da equipe do dia.
+// "Guilherme" e "Gustavo" eram as versões curtas dos nomes que o
+// cadastro tem por inteiro, e apareciam como pessoas a mais.
+var AAM_FORA_PADRAO = ['Claudio', 'Lory', 'Guilherme', 'Gustavo'];
 var _aamRascunho = null;   // { data, metas:{nome:{adlv,fast}}, motivos:{nome} }
+
+// A lista de fora é editável na própria tela e fica gravada junto com as
+// metas — assim ele tira ou devolve alguém sem precisar de mim.
+function aamFora(){
+  var l = (_metasDiarias && Array.isArray(_metasDiarias.fora))
+            ? _metasDiarias.fora : AAM_FORA_PADRAO;
+  var o = {};
+  l.forEach(function(n){ var t = String(n || '').trim(); if (t) o[cpNormNome(t)] = t; });
+  return o;
+}
+function aamEstaFora(nome){ return !!aamFora()[cpNormNome(nome)]; }
+async function aamTirar(nome){
+  var f = aamFora(); f[cpNormNome(nome)] = String(nome || '').trim();
+  _metasDiarias.fora = Object.keys(f).map(function(k){ return f[k]; });
+  await _aamGravarFora();
+}
+async function aamDevolver(nome){
+  var f = aamFora(); delete f[cpNormNome(nome)];
+  _metasDiarias.fora = Object.keys(f).map(function(k){ return f[k]; });
+  await _aamGravarFora();
+}
+async function _aamGravarFora(){
+  try { await fbSet('config', 'metas_diarias', _metasDiarias); } catch (e) {}
+  aamRender();
+}
 
 function aamDataSel(){
   var el = document.getElementById('aam-data');
@@ -51655,11 +51690,11 @@ function aamDataSel(){
 // lançada naquele dia, mais quem está cadastrado com meta nas duas
 // frentes. Nomes repetidos com grafia diferente viram um só.
 function aamPessoas(data){
-  var out = [], vistos = {};
+  var out = [], vistos = {}, fora = aamFora();
   var por = function(n){
     var t = String(n || '').trim(); if (!t) return;
     var k = cpNormNome(t);
-    if (vistos[k]) return;
+    if (vistos[k] || fora[k]) return;
     vistos[k] = 1; out.push(t);
   };
   AAM_EQUIPE.forEach(por);
@@ -51781,7 +51816,9 @@ function aamRender(){
     + '<th style="text-align:right">🟦 ADLV /dia</th>'
     + '<th style="text-align:right">🟧 FAST /dia</th>'
     + '<th style="text-align:right">Total</th>'
-    + '<th>Motivo (quando fica zerado)</th></tr></thead><tbody>';
+    + '<th>Motivo (quando fica zerado)</th>'
+    + '<th style="text-align:center" title="Tira a pessoa desta tela — o cadastro e o '
+    +   'histórico dela continuam no Administração">Saiu</th></tr></thead><tbody>';
   linhas.forEach(function(l){
     var tot = l.adlv + l.fast;
     var zero = !tot;
@@ -51802,7 +51839,11 @@ function aamRender(){
                      + (l.mot === m ? ' selected' : '') + '>' + cpEsc(m) + '</option>'; }).join('')
             + '</select>'
           : '<span style="font-size:10.5px;color:var(--tx2)">—</span>')
-      + '</td></tr>';
+      + '</td>'
+      + '<td style="text-align:center"><button onclick="aamTirar(\'' + cpEsc(l.nome) + '\')"'
+      +   ' title="Não faz mais parte da equipe" style="border:none;background:none;'
+      +   'cursor:pointer;color:var(--vm);font-size:13px;font-weight:700">✕</button></td>'
+      + '</tr>';
   });
   h += '</tbody><tfoot><tr><td style="font-weight:800">Meta da equipe</td>'
     + '<td style="text-align:right;font-weight:800;color:#1A4A8A">' + cpNum(somaA) + '</td>'
@@ -51810,7 +51851,29 @@ function aamRender(){
     + '<td style="text-align:right;font-weight:800">' + cpNum(somaA + somaF) + '</td>'
     + '<td style="font-size:10.5px;color:var(--tx2)">'
     +   (zerados ? cpNum(zerados) + ' sem meta hoje' : 'todo mundo com meta') + '</td>'
-    + '</tr></tfoot></table></div>';
+    + '<td></td></tr></tfoot></table></div>';
+  // quem saiu: fica listado, pequeno, com o caminho de volta
+  var fora = aamFora(), nomesFora = Object.keys(fora).map(function(k){ return fora[k]; }).sort();
+  if (nomesFora.length) {
+    h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:.6rem;line-height:1.9">'
+      + 'Fora da equipe: '
+      + nomesFora.map(function(n){
+          return '<span style="background:var(--cin);border:1px solid var(--brd);'
+            + 'border-radius:12px;padding:2px 8px;margin-right:4px;white-space:nowrap">'
+            + cpEsc(n) + ' <a href="#" onclick="aamDevolver(\'' + cpEsc(n)
+            + '\');return false;" style="color:var(--azm);font-weight:700;text-decoration:none"'
+            + ' title="Trazer de volta para a lista">↩</a></span>';
+        }).join('')
+      + '<br>O cadastro e o histórico dessas pessoas continuam no Administração — elas só '
+      + 'não são perguntadas aqui e não entram na meta do dia.</div>';
+  }
+  // a regra do líder, dita na tela para ninguém procurar o número sumido
+  h += '<div style="font-size:10.5px;color:var(--tx2);margin-top:.5rem;line-height:1.8">'
+    + 'Quem <strong>não tem meta individual</strong> (você, como líder) não aparece nesta '
+    + 'lista — mas tudo que você produz <strong>conta no resultado da equipe</strong>: entra '
+    + 'no velocímetro da equipe, na linha Analisado dos gráficos e nos Analisados do '
+    + 'relatório. O que não entra é a meta, porque meta de líder seria cobrança que ninguém '
+    + 'combinou.</div>';
   box.innerHTML = h;
   var av = document.getElementById('aam-aviso');
   if (av && semMotivo) av.innerHTML = '<span style="color:var(--vm)">⚠ ' + cpNum(semMotivo)
@@ -58964,7 +59027,9 @@ async function metasDiariasCarregar(){
       fast: (saved && saved.fast && typeof saved.fast==='object') ? saved.fast : {},
       // o motivo de quem ficou com meta 0 no dia (24/11): mora no mesmo
       // documento porque é o mesmo fato — a meta daquele dia
-      mot:  (saved && saved.mot  && typeof saved.mot ==='object') ? saved.mot  : {}
+      mot:  (saved && saved.mot  && typeof saved.mot ==='object') ? saved.mot  : {},
+      // quem saiu da equipe e não é mais perguntado no Montar base
+      fora: Array.isArray(saved && saved.fora) ? saved.fora : AAM_FORA_PADRAO.slice()
     };
   }catch(e){ console.warn('metasDiariasCarregar:', e); }
 }
@@ -59596,6 +59661,9 @@ function metaEquipeDoDia(mod, data){
     _ceEquipe(mod).forEach(function(x){
       if (!x || !x.nome || !x.temMeta) return;
       if (vistos[cpNormNome(x.nome)]) return;
+      // quem saiu da equipe não cobra meta: o cadastro dela fica para o
+      // histórico, mas a meta do dia é de quem está trabalhando hoje
+      try { if (typeof aamEstaFora === 'function' && aamEstaFora(x.nome)) return; } catch (e) {}
       soma += Math.max(0, +x.meta || 0);
     });
     return soma;
@@ -64386,6 +64454,15 @@ async function fdiaInicializar(){
   const metaVal = (typeof _metaDiaEfetiva==='function' && typeof _moduloAtivo!=='undefined') ? _metaDiaEfetiva(_moduloAtivo, colab, dataAlvo) : (META_ANALISTA_RT[colab] || 30);
   const metaEl  = document.getElementById('fdia-meta');
   if(metaEl) metaEl.textContent = metaVal;
+  // o porquê da meta 0, vindo do Montar base
+  const motEl = document.getElementById('fdia-meta-motivo');
+  if(motEl){
+    let _mot = '';
+    try { _mot = (metaVal > 0) ? '' : (typeof esfMotivoDoDia==='function'
+                   ? esfMotivoDoDia(colab, dataAlvo) : ''); } catch(e){}
+    motEl.textContent = _mot ? ('sem meta hoje · ' + _mot) : '';
+    motEl.style.display = _mot ? 'block' : 'none';
+  }
 
   // Carregar ações do dia (data-alvo = hoje, ou o dia anterior no fechamento retroativo)
   await prodCarregarData(colab, dataAlvo);
