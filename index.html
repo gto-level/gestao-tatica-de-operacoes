@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 01:10';
+var GTO_BUILD = '25/11 01:45';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -9683,6 +9683,42 @@ async function fbGet(col, docId){
     const doc = await db.collection(col).doc(docId).get();
     return doc.exists ? doc.data() : null;
   } catch(e){ console.warn('fbGet erro:', col, docId, e.message); return null; }
+}
+
+// ── CONFIG QUE VALE PARA AS DUAS FRENTES (25/11) ─────────────────
+// A demanda do ADLV fica no ADLV e a do FAST fica no FAST — isso vale
+// para as AÇÕES, que vivem na base de cada frente e nunca se misturam.
+// Mas a tabela de metas do dia guarda os dois lados no MESMO documento
+// (adlv e fast lado a lado), e ela precisa de um endereço só: gravada
+// pelo getDB() comum, ela cairia na base da frente que estivesse aberta
+// na hora, e o que fosse lançado no ADLV não existiria para o FAST.
+// Mora no mesmo projeto do cadastro de usuários, que já é o endereço
+// único das coisas que valem para as duas frentes.
+async function fbSetGeral(col, docId, dados){
+  try{
+    if(typeof firebase === 'undefined' || !_fbLoaded){
+      const ok = await loadFirebaseSDK();
+      if(!ok) return false;
+      await new Promise(r => setTimeout(r, 200));
+    }
+    const db = getDBUsuarios();
+    if(!db) return false;
+    await db.collection(col).doc(docId).set(dados, {merge:true});
+    return true;
+  } catch(e){ console.warn('fbSetGeral erro:', col, docId, e.message); return false; }
+}
+async function fbGetGeral(col, docId){
+  try{
+    if(typeof firebase === 'undefined' || !_fbLoaded){
+      const ok = await loadFirebaseSDK();
+      if(!ok) return null;
+      await new Promise(r => setTimeout(r, 200));
+    }
+    const db = getDBUsuarios();
+    if(!db) return null;
+    const doc = await db.collection(col).doc(docId).get();
+    return doc.exists ? doc.data() : null;
+  } catch(e){ console.warn('fbGetGeral erro:', col, docId, e.message); return null; }
 }
 
 async function fbGetAll(col){
@@ -51690,7 +51726,7 @@ async function aamDevolver(nome){
   await _aamGravarFora();
 }
 async function _aamGravarFora(){
-  try { await fbSet('config', 'metas_diarias', _metasDiarias); } catch (e) {}
+  try { await fbSetGeral('config', 'metas_diarias', _metasDiarias); } catch (e) {}
   aamRender();
 }
 
@@ -51950,7 +51986,7 @@ async function aamSalvar(){
     if (!_metasDiarias.mot) _metasDiarias.mot = {};
     _metasDiarias.mot[data] = motivos;
     if (!Object.keys(motivos).length) delete _metasDiarias.mot[data];
-    try { await fbSet('config', 'metas_diarias', _metasDiarias); } catch (e) { ok = false; }
+    try { await fbSetGeral('config', 'metas_diarias', _metasDiarias); } catch (e) { ok = false; }
     // o espelho no Administração › Equipes (Metas RT)
     ok = await aamEspelharNoAdmin(lote) && ok;
   } catch (e) { console.warn('aamSalvar:', e); ok = false; }
@@ -59113,7 +59149,11 @@ function _metaDiaEfetiva(mod, colab, data){
 
 async function metasDiariasCarregar(){
   try{
-    var saved = await fbGet('config','metas_diarias');
+    var saved = await fbGetGeral('config','metas_diarias');
+    // resgate: o que foi gravado antes de 25/11 pode estar na base da
+    // frente que estava aberta na hora. Lê de lá só se o endereço único
+    // ainda estiver vazio — nada é perdido na mudança de lugar.
+    if(!saved) saved = await fbGet('config','metas_diarias');
     _metasDiarias = {
       adlv: (saved && saved.adlv && typeof saved.adlv==='object') ? saved.adlv : {},
       fast: (saved && saved.fast && typeof saved.fast==='object') ? saved.fast : {},
@@ -59143,7 +59183,7 @@ async function metasDiariasSalvarLote(mod, data, valores){
   });
   if(Object.keys(_metasDiarias[mod][data]).length===0) delete _metasDiarias[mod][data];
   var ok=false;
-  try{ ok = await fbSet('config','metas_diarias', _metasDiarias); }catch(e){ console.warn('metasDiariasSalvarLote:', e); }
+  try{ ok = await fbSetGeral('config','metas_diarias', _metasDiarias); }catch(e){ console.warn('metasDiariasSalvarLote:', e); }
   return ok;
 }
 
