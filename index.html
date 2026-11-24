@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 00:15';
+var GTO_BUILD = '25/11 01:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -58951,6 +58951,28 @@ let COLABS_LIDER_RT = (_moduloAtivo === 'fast') ? COLABS_LIDER_RT_FAST : COLABS_
 // módulo ativo agora (mesma regra do ADLV: 30+30=60 hoje no FAST, mas
 // acompanha automaticamente qualquer ajuste feito em Admin > Equipe (Metas RT)
 // — inclusão/remoção de pessoas ou mudança de meta individual).
+// ── QUEM É LÍDER (25/11) ─────────────────────────────────────────
+// André: "líder só deve aparecer no meu, no restante não pode".
+// O checkbox "Meta Individual" desmarcado não serve para isso: ele está
+// desmarcado em vários cadastros antigos, e desde que a meta passou a
+// ser lançada por dia ele também pega quem ficou zerado hoje. Líder é
+// um papel, e papel se declara — aqui e no perfil de administrador de
+// quem está logado.
+var PROD_LIDERES = ['André'];
+function prodEhLider(colab){
+  var n = '';
+  try { n = cpNormNome(colab); } catch (e) { n = String(colab || '').toUpperCase(); }
+  if (!n) return false;
+  try {
+    if (PROD_LIDERES.some(function(x){ return cpNormNome(x) === n; })) return true;
+  } catch (e2) {}
+  try {
+    var eu = (typeof _authPerfil !== 'undefined' && _authPerfil && _authPerfil.colabNome) || '';
+    if (eu && cpNormNome(eu) === n && _authPerfil.perfil === 'adm') return true;
+  } catch (e3) {}
+  return false;
+}
+
 function _recalcularMetaEquipeRT(){
   // 24/11: a meta da equipe passou a ser a do DIA — a soma do que foi
   // lançado hoje no Montar base. André: "o velocímetro deve ser
@@ -59537,7 +59559,8 @@ function rtRenderizarMonitoramento(acoes, hoje){
       // Meta/dia=0 não é líder — é só alguém sem meta real nesse módulo, e
       // o card mostra "meta 0" mesmo (COLABS_SEM_META_RT inclui os dois
       // casos juntos, por isso não dá pra usar ele aqui).
-      const lider = (typeof COLABS_LIDER_RT!=='undefined') ? COLABS_LIDER_RT.includes(colab) : COLABS_SEM_META_RT.includes(colab);
+      const lider = (typeof prodEhLider==='function') ? prodEhLider(colab)
+                  : ((typeof COLABS_LIDER_RT!=='undefined') ? COLABS_LIDER_RT.includes(colab) : false);
       // Meta de HOJE — pode ter sido ajustada pontualmente (ver "Ajustar meta
       // de um dia específico" em Equipe (Metas RT)); se não houver ajuste,
       // cai na meta padrão do colaborador.
@@ -59628,7 +59651,7 @@ function rtRenderizarMonitoramento(acoes, hoje){
         const acoesJson = JSON.stringify(p.acoes).replace(/'/g,"&#39;").replace(/"/g,'&quot;');
 
         return `<tr>
-          <td style="font-weight:700;color:var(--az)">${colab}${semMeta?' 👑':''}</td>
+          <td style="font-weight:700;color:var(--az)">${colab}${(typeof prodEhLider==='function'&&prodEhLider(colab))?' 👑':''}</td>
           <td style="font-size:11px;color:var(--tx2)">${horario}</td>
           <td style="text-align:center;font-weight:700;color:var(--azm)">${p.primeira_analise}</td>
           <td style="text-align:center;font-weight:700;color:var(--azm)">${p.em_tratativa}</td>
@@ -60090,7 +60113,7 @@ function _ceRenderRT(mod){
       // checkbox "Meta Individual" DESMARCADO. Quem está marcado mas com
       // Meta/dia=0 (ex.: Lory/Ludy/Wanessa no FAST) não é líder — é só
       // alguém sem meta real nesse módulo, e o card mostra "meta 0" mesmo.
-      const lider=_ceEhLider(mod,colab);
+      const lider = (typeof prodEhLider==='function') ? prodEhLider(colab) : _ceEhLider(mod,colab);
       // Meta de HOJE — pode ter sido ajustada pontualmente (ver "Ajustar meta
       // de um dia específico"); sem ajuste, cai na meta padrão da pessoa.
       const meta = lider ? 30 : (typeof _metaDiaEfetiva==='function' ? _metaDiaEfetiva(mod, colab, _fdiaHojeLocal()) : _ceMetaInd(mod,colab));
@@ -63138,7 +63161,8 @@ async function fechCarregarHistorico(){
       // "Líder" só pra quem está com o checkbox desmarcado de verdade.
       // Quem está marcado com Meta/dia=0 mostra "sem meta" com 0 mesmo,
       // não o rótulo de líder.
-      const lider = (typeof COLABS_LIDER_RT!=='undefined') ? COLABS_LIDER_RT.includes(colab) : COLABS_SEM_META_RT.includes(colab);
+      const lider = (typeof prodEhLider==='function') ? prodEhLider(colab)
+                  : ((typeof COLABS_LIDER_RT!=='undefined') ? COLABS_LIDER_RT.includes(colab) : false);
       const meta = lider ? 30 : ((typeof META_ANALISTA_RT_BRUTA!=='undefined' && META_ANALISTA_RT_BRUTA[colab]!=null) ? META_ANALISTA_RT_BRUTA[colab] : (META_ANALISTA_RT[colab]||30));
       const temMetaReal = meta>0;
 
@@ -63197,7 +63221,8 @@ async function fechCarregarHistorico(){
     if(regs.length){
       tabelaWrap.style.display = 'block';
       tbody.innerHTML = regs.filter(r=>_equipeVis(r.colab,'hist')).sort((a,b)=>a.colab>b.colab?1:-1).map(r=>{
-        const lider = (typeof COLABS_LIDER_RT!=='undefined') ? COLABS_LIDER_RT.includes(r.colab) : COLABS_SEM_META_RT.includes(r.colab);
+        const lider = (typeof prodEhLider==='function') ? prodEhLider(r.colab)
+                    : ((typeof COLABS_LIDER_RT!=='undefined') ? COLABS_LIDER_RT.includes(r.colab) : false);
         const meta = lider ? 30 : ((typeof META_ANALISTA_RT_BRUTA!=='undefined' && META_ANALISTA_RT_BRUTA[r.colab]!=null) ? META_ANALISTA_RT_BRUTA[r.colab] : (META_ANALISTA_RT[r.colab]||30));
         const temMetaReal = meta>0;
         const bd = r.breakdown||{};
@@ -64349,10 +64374,19 @@ function prodRenderizarPaineis(colab){
   // Meta de HOJE — pode ter sido ajustada pontualmente (Equipe (Metas RT) >
   // Ajustar meta de um dia específico); sem ajuste, cai na meta padrão.
   const metaVal = (typeof _metaDiaEfetiva==='function' && typeof _moduloAtivo!=='undefined') ? _metaDiaEfetiva(_moduloAtivo, colab, _fdiaHojeLocal()) : (META_ANALISTA_RT[colab] || 0);
-  const semMeta = COLABS_SEM_META_RT.includes(colab);
+  // LÍDER é só quem está com o checkbox de meta individual DESMARCADO.
+  // 25/11: antes bastava estar "sem meta" para o selo dizer Líder — e,
+  // desde que a meta passou a ser lançada por dia, quem ficou com 0 hoje
+  // (apoiando pedidos, sem acesso) caía nessa conta e aparecia como
+  // líder na própria tela. Duas coisas diferentes com o mesmo nome.
+  const ehLider = (typeof prodEhLider === 'function') && prodEhLider(colab);
   const pct = metaVal > 0 ? Math.min(100, Math.round(cnt.meta / metaVal * 100)) : 100;
-  const cor = semMeta ? 'var(--azm)' : cnt.meta >= metaVal ? 'var(--vd)' : cnt.meta >= metaVal*.8 ? 'var(--am)' : 'var(--vm)';
-  const totalLabel = semMeta ? `Líder: ${cnt.meta} itens` : `Total: ${cnt.meta} / ${metaVal}`;
+  const cor = (ehLider || !metaVal) ? 'var(--azm)'
+            : cnt.meta >= metaVal ? 'var(--vd)'
+            : cnt.meta >= metaVal*.8 ? 'var(--am)' : 'var(--vm)';
+  const totalLabel = ehLider ? `Líder: ${cnt.meta} itens`
+                   : (metaVal > 0 ? `Total: ${cnt.meta} / ${metaVal}`
+                                  : `Sem meta hoje: ${cnt.meta} itens`);
 
   // Atualizar badges compactos em Gov, PC, SLA, Prazo e Cobrança por Status
   ['gov','pc','sla','prazo','cob','gnv'].forEach(origem => {
@@ -64364,14 +64398,17 @@ function prodRenderizarPaineis(colab){
     if(s('outros')) s('outros').textContent = `📋 ${cnt.outros}`;
     if(s('total')){
       s('total').textContent = totalLabel;
-      s('total').style.background = semMeta ? 'var(--azc)' : cnt.meta>=metaVal?'var(--vdc)':cnt.meta>=metaVal*.8?'var(--amc)':'var(--vmc)';
+      s('total').style.background = (ehLider || !metaVal) ? 'var(--azc)'
+        : cnt.meta>=metaVal?'var(--vdc)':cnt.meta>=metaVal*.8?'var(--amc)':'var(--vmc)';
       s('total').style.color = cor;
     }
   });
 
-  // Atualizar velocímetros — sem-meta usa total (inclui Outros); com meta usa só itens que contam
-  const _velMeta  = metaVal > 0 ? metaVal : 30;
-  const _velTotal = semMeta ? cnt.total : cnt.meta;
+  // Atualizar velocímetros — o líder usa total (inclui Outros) contra a
+  // referência de 30; quem está sem meta HOJE não tem régua, e o
+  // velocímetro fica no zero com o selo dizendo o porquê.
+  const _velMeta  = metaVal > 0 ? metaVal : (ehLider ? 30 : 0);
+  const _velTotal = ehLider ? cnt.total : cnt.meta;
   govAtualizarVelocimetro(_velTotal, _velMeta);
   pcAtualizarVelocimetro(_velTotal, _velMeta);
   _velAtualizarPrefixo('slav', _velTotal, _velMeta);
