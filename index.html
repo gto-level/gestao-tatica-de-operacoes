@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '22/11 11:20';
+var GTO_BUILD = '24/11 17:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -6631,6 +6631,40 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
       <!-- ABA: MONTAR BASE ─────────────────────────────────────── -->
       <div id="aa-tab-base" style="display:none">
 
+        <!-- ══ METAS DO DIA (24/11) ══════════════════════════════
+             Pedido do André: "preciso colocar a meta/dia junto com o
+             montar a base; os dados que eu colocar aí o dash deve
+             transcrever de forma automática para o Administração ›
+             Equipes (Metas RT)... tenho funcionários que estão
+             apoiando outras atividades, então preciso abaixar a meta
+             por equipe todo dia; o jeito mais fácil de eu saber quem
+             vai atuar é no começo do dia".
+             Uma linha por pessoa, as duas frentes lado a lado, e o
+             motivo para quem fica zerado. -->
+        <div class="cd" id="aam-card" style="margin-bottom:1rem;border-top:3px solid var(--azm)">
+          <div class="cd-t" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+            <span>🎯 Metas do dia</span>
+            <span style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input type="date" id="aam-data" onchange="aamRender()"
+                style="font-size:12.5px;padding:5px 9px;border:1.5px solid var(--brd);border-radius:7px;font-weight:600;color:var(--az)">
+              <button class="btn btn-s" style="font-size:11px" onclick="aamCopiarOntem()">↩ repetir o último dia</button>
+              <button class="btn btn-p" style="font-size:11px" onclick="aamSalvar()">💾 Salvar as metas do dia</button>
+            </span>
+          </div>
+          <div style="font-size:11.5px;color:var(--tx2);line-height:1.75;margin-bottom:.8rem">
+            Comece o dia por aqui: diga quanto cada um vai fazer no <strong>ADLV</strong> e no
+            <strong>FAST</strong>. O que você digitar vale para <strong>este dia</strong> e é o
+            mesmo número que aparece em <strong>Administração › Equipes (Metas RT)</strong> —
+            não há duas metas para a mesma pessoa. A meta da equipe é a
+            <strong>soma das individuais</strong>, então a linha Planejado dos gráficos e a
+            Meta do período do relatório de esforço acompanham sozinhas.
+            Quem fica com <strong>0 nas duas frentes</strong> precisa de um motivo: é o que
+            explica, depois, por que a meta do dia caiu.
+          </div>
+          <div id="aam-corpo"></div>
+          <div id="aam-aviso" style="font-size:11.5px;margin-top:.6rem;min-height:14px"></div>
+        </div>
+
         <div class="cd" style="margin-bottom:1rem">
           <div class="cd-t">⚙️ Montar a base do Analista Completo</div>
           <div style="font-size:11.5px;color:var(--tx2);line-height:1.75;margin-bottom:1rem">
@@ -11903,7 +11937,14 @@ function renderPainelEstrategico(){
   let acumProg = 0;
 
   todosOsDias.forEach((dt, i) => {
-    if(_fdiaEhDiaUtil(dt)) acumProg += META_EQUIPE;
+    // 24/11: a meta deixou de ser um número fixo do ciclo. Cada dia
+    // soma as metas individuais lançadas no Montar base; dia sem
+    // lançamento continua com a meta padrão da equipe.
+    if(_fdiaEhDiaUtil(dt)){
+      var _mDia = META_EQUIPE;
+      try { var _x = metaEquipeDoDia(_moduloAtivo, dt); if(_x > 0) _mDia = _x; } catch(e){}
+      acumProg += _mDia;
+    }
     progAcum.push(acumProg);
 
     if(dt <= hoje){
@@ -51580,7 +51621,283 @@ var _aagEscalas = null; // como cada coluna de dinheiro foi lida
 // Ele decide — e o número aparece na tela dos dois jeitos.
 var AAG_JULG_FATOR = 1;
 
+// ══ METAS DO DIA — o card do Montar base (24/11) ═════════════════
+// Pedido do André: "tenho funcionários que estão apoiando outras
+// atividades, então preciso abaixar a meta por equipe todo dia... o
+// jeito mais fácil de eu saber quem vai atuar é no começo do dia, aí
+// já coloca a quantidade de cada pessoa. Esses mesmos colaboradores
+// atuam no módulo FAST e ADLV, então preciso que ao montar a base eu
+// consiga ajustar também a demanda individual do FAST."
+//
+// Onde isso grava: em config/metas_diarias, que JÁ existia e já é o que
+// o velocímetro, a Performance Semanal e a meta pessoal leem. Não há
+// base nova. O que a tela acrescenta é o espelho: o mesmo número é
+// escrito na meta padrão (config/equipe_rt), que é o campo Meta/dia do
+// Administração — ele pediu para os dois andarem juntos.
+//
+// A equipe que aparece aqui é a que ele listou em 24/11. Quem não está
+// na lista mas tem meta no dia entra assim mesmo: a lista é um atalho,
+// não um filtro que esconde trabalho.
+var AAM_EQUIPE = ['Aline', 'Ana', 'Guilherme', 'Gustavo', 'Ludy', 'Wanessa'];
+var AAM_MOTIVOS = ['Atuando em pedidos', 'Atuando em devolução',
+                   'Atuando em publicação', 'Férias', 'Folga'];
+var _aamRascunho = null;   // { data, metas:{nome:{adlv,fast}}, motivos:{nome} }
+
+function aamDataSel(){
+  var el = document.getElementById('aam-data');
+  var v = el && el.value ? el.value : '';
+  if (!v) { v = (typeof cpHojeISO === 'function') ? cpHojeISO() : _ceHojeLocal();
+            if (el) el.value = v; }
+  return v;
+}
+
+// Quem aparece na tela: a equipe combinada, mais quem já tem meta
+// lançada naquele dia, mais quem está cadastrado com meta nas duas
+// frentes. Nomes repetidos com grafia diferente viram um só.
+function aamPessoas(data){
+  var out = [], vistos = {};
+  var por = function(n){
+    var t = String(n || '').trim(); if (!t) return;
+    var k = cpNormNome(t);
+    if (vistos[k]) return;
+    vistos[k] = 1; out.push(t);
+  };
+  AAM_EQUIPE.forEach(por);
+  ['adlv', 'fast'].forEach(function(mod){
+    var d = (_metasDiarias && _metasDiarias[mod]) ? (_metasDiarias[mod][data] || {}) : {};
+    Object.keys(d).forEach(por);
+    ((_equipeRt && _equipeRt[mod]) || []).forEach(function(x){
+      if (x && x.nome && x.temMeta && (+x.meta) > 0) por(x.nome);
+    });
+  });
+  return out.sort(function(a, b){ return a.localeCompare(b, 'pt-BR'); });
+}
+
+// o valor que a tela mostra: o rascunho em edição, senão o que está
+// gravado para o dia, senão a meta padrão da pessoa naquele módulo
+function aamValor(mod, nome, data){
+  if (_aamRascunho && _aamRascunho.data === data) {
+    var r = _aamRascunho.metas[cpNormNome(nome)];
+    if (r && r[mod] != null) return +r[mod] || 0;
+  }
+  try {
+    var d = (_metasDiarias && _metasDiarias[mod]) ? (_metasDiarias[mod][data] || {}) : {};
+    var k = Object.keys(d).find(function(n){ return cpNormNome(n) === cpNormNome(nome); });
+    if (k != null) return +d[k] || 0;
+  } catch (e) {}
+  // sem lançamento no dia: cai no padrão, e só para quem tem meta real
+  try {
+    var e2 = ((_equipeRt && _equipeRt[mod]) || []).find(function(x){
+      return x && x.nome && cpNormNome(x.nome) === cpNormNome(nome); });
+    if (e2 && e2.temMeta) return +e2.meta || 0;
+  } catch (e3) {}
+  return 0;
+}
+
+function aamMotivo(nome, data){
+  if (_aamRascunho && _aamRascunho.data === data) {
+    var m = _aamRascunho.motivos[cpNormNome(nome)];
+    if (m != null) return m;
+  }
+  try {
+    var d = (_metasDiarias && _metasDiarias.mot) ? (_metasDiarias.mot[data] || {}) : {};
+    var k = Object.keys(d).find(function(n){ return cpNormNome(n) === cpNormNome(nome); });
+    if (k != null) return String(d[k] || '');
+  } catch (e) {}
+  return '';
+}
+
+function _aamGarantirRascunho(data){
+  if (!_aamRascunho || _aamRascunho.data !== data)
+    _aamRascunho = { data:data, metas:{}, motivos:{} };
+  return _aamRascunho;
+}
+
+function aamSetMeta(mod, nome, valor){
+  var data = aamDataSel();
+  var r = _aamGarantirRascunho(data);
+  var k = cpNormNome(nome);
+  r.metas[k] = r.metas[k] || {};
+  r.metas[k][mod] = Math.max(0, Math.round(+valor || 0));
+  r.metas[k].nome = nome;
+  aamRender();
+}
+function aamSetMotivo(nome, valor){
+  var data = aamDataSel();
+  var r = _aamGarantirRascunho(data);
+  r.motivos[cpNormNome(nome)] = String(valor || '');
+  aamRender();
+}
+
+// Repetir o último dia lançado poupa digitar a mesma coisa toda manhã.
+function aamCopiarOntem(){
+  var data = aamDataSel();
+  var anteriores = [];
+  ['adlv', 'fast'].forEach(function(mod){
+    Object.keys((_metasDiarias && _metasDiarias[mod]) || {}).forEach(function(d){
+      if (d < data && anteriores.indexOf(d) === -1) anteriores.push(d);
+    });
+  });
+  var av = document.getElementById('aam-aviso');
+  if (!anteriores.length) {
+    if (av) av.innerHTML = '<span style="color:var(--am)">Não há nenhum dia lançado antes de '
+      + cpDataBR(data) + ' para copiar.</span>';
+    return;
+  }
+  anteriores.sort();
+  var de = anteriores[anteriores.length - 1];
+  var r = _aamGarantirRascunho(data);
+  aamPessoas(de).forEach(function(n){
+    var k = cpNormNome(n);
+    r.metas[k] = { nome:n, adlv: aamValor('adlv', n, de), fast: aamValor('fast', n, de) };
+    r.motivos[k] = aamMotivo(n, de);
+  });
+  aamRender();
+  if (av) av.innerHTML = '<span style="color:var(--tx2)">Copiei as metas de <strong>'
+    + cpDataBR(de) + '</strong>. Ajuste o que mudou e salve.</span>';
+}
+
+function aamRender(){
+  var box = document.getElementById('aam-corpo');
+  if (!box) return;
+  var data = aamDataSel();
+  var pessoas = aamPessoas(data);
+  var somaA = 0, somaF = 0, zerados = 0, semMotivo = 0;
+  var linhas = pessoas.map(function(n){
+    var a = aamValor('adlv', n, data), f = aamValor('fast', n, data);
+    var mot = aamMotivo(n, data);
+    somaA += a; somaF += f;
+    if (!a && !f) { zerados++; if (!mot) semMotivo++; }
+    return { nome:n, adlv:a, fast:f, mot:mot };
+  });
+  var campo = function(mod, l){
+    return '<input type="number" min="0" step="1" value="' + cpEsc(String(l[mod]))
+      + '" onchange="aamSetMeta(\'' + mod + '\', \'' + cpEsc(l.nome) + '\', this.value)"'
+      + ' style="width:84px;text-align:right;font-size:12.5px;padding:4px 8px;border-radius:6px;'
+      + 'font-weight:700;border:1.5px solid ' + (l[mod] ? 'var(--vd)' : 'var(--brd)')
+      + ';color:' + (l[mod] ? 'var(--az)' : 'var(--tx2)') + '">';
+  };
+  var h = '<div style="overflow:auto"><table><thead><tr><th>Colaborador</th>'
+    + '<th style="text-align:right">🟦 ADLV /dia</th>'
+    + '<th style="text-align:right">🟧 FAST /dia</th>'
+    + '<th style="text-align:right">Total</th>'
+    + '<th>Motivo (quando fica zerado)</th></tr></thead><tbody>';
+  linhas.forEach(function(l){
+    var tot = l.adlv + l.fast;
+    var zero = !tot;
+    h += '<tr' + (zero && !l.mot ? ' style="background:var(--vmc)"' : '') + '>'
+      + '<td style="font-weight:600">' + cpEsc(l.nome) + '</td>'
+      + '<td style="text-align:right">' + campo('adlv', l) + '</td>'
+      + '<td style="text-align:right">' + campo('fast', l) + '</td>'
+      + '<td style="text-align:right;font-weight:800;color:'
+      +   (tot ? 'var(--az)' : 'var(--tx2)') + '">' + cpNum(tot) + '</td>'
+      + '<td>'
+      + (zero
+          ? '<select onchange="aamSetMotivo(\'' + cpEsc(l.nome) + '\', this.value)"'
+            + ' style="font-size:11.5px;padding:3px 7px;border-radius:6px;border:1.5px solid '
+            + (l.mot ? 'var(--vd)' : 'var(--vm)') + ';font-weight:' + (l.mot ? '700' : '400') + '">'
+            + '<option value="">— escolha o motivo —</option>'
+            + AAM_MOTIVOS.map(function(m){
+                return '<option value="' + cpEsc(m) + '"'
+                     + (l.mot === m ? ' selected' : '') + '>' + cpEsc(m) + '</option>'; }).join('')
+            + '</select>'
+          : '<span style="font-size:10.5px;color:var(--tx2)">—</span>')
+      + '</td></tr>';
+  });
+  h += '</tbody><tfoot><tr><td style="font-weight:800">Meta da equipe</td>'
+    + '<td style="text-align:right;font-weight:800;color:#1A4A8A">' + cpNum(somaA) + '</td>'
+    + '<td style="text-align:right;font-weight:800;color:#C07A12">' + cpNum(somaF) + '</td>'
+    + '<td style="text-align:right;font-weight:800">' + cpNum(somaA + somaF) + '</td>'
+    + '<td style="font-size:10.5px;color:var(--tx2)">'
+    +   (zerados ? cpNum(zerados) + ' sem meta hoje' : 'todo mundo com meta') + '</td>'
+    + '</tr></tfoot></table></div>';
+  box.innerHTML = h;
+  var av = document.getElementById('aam-aviso');
+  if (av && semMotivo) av.innerHTML = '<span style="color:var(--vm)">⚠ ' + cpNum(semMotivo)
+    + ' pessoa(s) com meta 0 e sem motivo. Escolha o motivo antes de salvar.</span>';
+  else if (av && !/Copiei as metas/.test(av.innerHTML)) av.innerHTML = '';
+}
+
+async function aamSalvar(){
+  var data = aamDataSel();
+  var av = document.getElementById('aam-aviso');
+  var pessoas = aamPessoas(data);
+  var lote = { adlv:{}, fast:{} }, motivos = {}, faltando = [];
+  pessoas.forEach(function(n){
+    var a = aamValor('adlv', n, data), f = aamValor('fast', n, data);
+    lote.adlv[n] = a; lote.fast[n] = f;
+    var mot = aamMotivo(n, data);
+    if (!a && !f) { if (!mot) faltando.push(n); else motivos[n] = mot; }
+  });
+  // O motivo é cobrado, não travado: ele pediu "uma opção de informar o
+  // motivo". Salvar mesmo assim evita o dia inteiro ficar preso por um
+  // nome que nem é da equipe hoje — mas a tela continua dizendo quem
+  // ficou sem explicação, porque é isso que some do relatório depois.
+  if (av) av.innerHTML = '<span style="color:var(--tx2)">⏳ Salvando...</span>';
+  var ok = true;
+  try {
+    ok = await metasDiariasSalvarLote('adlv', data, lote.adlv) && ok;
+    ok = await metasDiariasSalvarLote('fast', data, lote.fast) && ok;
+    // os motivos moram no mesmo documento, numa chave própria
+    if (!_metasDiarias.mot) _metasDiarias.mot = {};
+    _metasDiarias.mot[data] = motivos;
+    if (!Object.keys(motivos).length) delete _metasDiarias.mot[data];
+    try { await fbSet('config', 'metas_diarias', _metasDiarias); } catch (e) { ok = false; }
+    // o espelho no Administração › Equipes (Metas RT)
+    ok = await aamEspelharNoAdmin(lote) && ok;
+  } catch (e) { console.warn('aamSalvar:', e); ok = false; }
+  _aamRascunho = null;
+  aamRender();
+  if (av) av.innerHTML = (ok
+    ? '<span style="color:var(--vd)">✔ Metas de ' + cpDataBR(data) + ' guardadas. '
+      + 'O Administração › Equipes (Metas RT), os gráficos e o relatório já usam estes '
+      + 'números.</span>'
+    : '<span style="color:var(--vm)">✗ A base recusou parte da gravação. Tente de novo.</span>')
+    + (faltando.length
+        ? '<div style="color:var(--vm);margin-top:4px">⚠ Sem motivo: <strong>'
+          + cpEsc(faltando.join(', ')) + '</strong>. No relatório do fim da medição esses '
+          + 'dias aparecem com meta 0 e sem explicação.</div>'
+        : '');
+  return ok;
+}
+
+// O espelho que ele pediu: o mesmo número aparece no campo Meta/dia do
+// Administração. Quem fica com 0 continua na lista, com o checkbox
+// marcado e meta 0 — que é exatamente como o resto do sistema lê
+// "sem meta hoje".
+async function aamEspelharNoAdmin(lote){
+  try {
+    ['adlv', 'fast'].forEach(function(mod){
+      if (!Array.isArray(_equipeRt[mod])) _equipeRt[mod] = [];
+      Object.keys(lote[mod]).forEach(function(nome){
+        var v = Math.max(0, Math.round(+lote[mod][nome] || 0));
+        var e = _equipeRt[mod].find(function(x){
+          return x && x.nome && cpNormNome(x.nome) === cpNormNome(nome); });
+        if (!e) { _equipeRt[mod].push({ nome:nome, meta:v, temMeta:true }); return; }
+        // o líder (checkbox desmarcado) continua líder: a meta dele é
+        // referência, não cobrança, e mexer nisso aqui seria uma
+        // mudança que ele não pediu
+        if (e.temMeta === false) return;
+        e.meta = v; e.temMeta = true;
+      });
+    });
+    var ok = false;
+    try { ok = await fbSet('config', 'equipe_rt', _equipeRt); } catch (e) { ok = false; }
+    equipeAplicarListas();
+    try { if (typeof _equipeAtualizarPlanejado === 'function') _equipeAtualizarPlanejado(); } catch (e2) {}
+    return ok;
+  } catch (e) { console.warn('aamEspelharNoAdmin:', e); return false; }
+}
+
+async function aamAbrir(){
+  var el = document.getElementById('aam-data');
+  if (el && !el.value) el.value = (typeof cpHojeISO === 'function') ? cpHojeISO() : _ceHojeLocal();
+  try { if (typeof metasDiariasCarregar === 'function') await metasDiariasCarregar(); } catch (e) {}
+  aamRender();
+}
+
 function aagAbrir(){
+  try { aamAbrir(); } catch (e) { console.warn('aamAbrir:', e); }
   aagPintarUploads();
   aagRenderPassos();
   aagRender();
@@ -58644,7 +58961,10 @@ async function metasDiariasCarregar(){
     var saved = await fbGet('config','metas_diarias');
     _metasDiarias = {
       adlv: (saved && saved.adlv && typeof saved.adlv==='object') ? saved.adlv : {},
-      fast: (saved && saved.fast && typeof saved.fast==='object') ? saved.fast : {}
+      fast: (saved && saved.fast && typeof saved.fast==='object') ? saved.fast : {},
+      // o motivo de quem ficou com meta 0 no dia (24/11): mora no mesmo
+      // documento porque é o mesmo fato — a meta daquele dia
+      mot:  (saved && saved.mot  && typeof saved.mot ==='object') ? saved.mot  : {}
     };
   }catch(e){ console.warn('metasDiariasCarregar:', e); }
 }
@@ -59257,6 +59577,31 @@ function _ceEhLider(mod, nome){ const e=_ceEquipe(mod).find(x=>x.nome.trim().toL
 // (inclusive 0, se for o caso — não vira 30 escondido); líder sem checkbox
 // usa 30 como referência solta (não é uma meta cobrada de verdade).
 function _ceMetaInd(mod, nome){ const e=_ceEquipe(mod).find(x=>x.nome.trim().toLowerCase()===String(nome).toLowerCase()); if(!e) return 30; return e.temMeta ? (+e.meta||0) : 30; }
+// A meta da EQUIPE num dia: a soma das metas individuais daquele dia.
+// Enquanto não houver lançamento para o dia, vale a meta padrão —
+// assim o gráfico de um dia antigo não muda de forma retroativa só
+// porque o André passou a lançar a meta todo dia a partir de 24/11.
+function metaEquipeDoDia(mod, data){
+  try {
+    var dia = (_metasDiarias && _metasDiarias[mod]) ? _metasDiarias[mod][data] : null;
+    if (!dia || !Object.keys(dia).length) return _ceMetaEquipe(mod);
+    var soma = 0, vistos = {};
+    Object.keys(dia).forEach(function(n){
+      vistos[cpNormNome(n)] = 1;
+      soma += Math.max(0, +dia[n] || 0);
+    });
+    // quem está cadastrado com meta e não foi lançado naquele dia
+    // continua valendo o padrão dele — lançar a meta de dois e esquecer
+    // o terceiro não pode zerar o terceiro
+    _ceEquipe(mod).forEach(function(x){
+      if (!x || !x.nome || !x.temMeta) return;
+      if (vistos[cpNormNome(x.nome)]) return;
+      soma += Math.max(0, +x.meta || 0);
+    });
+    return soma;
+  } catch (e) { return _ceMetaEquipe(mod); }
+}
+
 function _ceMetaEquipe(mod){
   // Soma das metas de quem tem meta individual real (self-corrige se a
   // equipe mudar). Sem fallback fixo: se ninguém tiver meta > 0, a meta da
@@ -60843,6 +61188,30 @@ var ESF_TIPOS_META = ['primeira_analise', 'em_tratativa', 'status_b', 'ag_parece
 
 // A meta de cada um. O cadastro da equipe manda; sem meta cadastrada
 // vale o combinado de 30. A planilha sempre diz qual das duas valeu.
+// A meta de UM dia: o que foi lançado no Montar base para aquele dia,
+// senão a meta padrão da pessoa. É o que faz "hoje a Ludy faz 15" valer
+// no relatório sem reescrever a meta dos dias anteriores.
+function esfMetaDoDia(mod, nome, data, padrao){
+  try {
+    var dia = (_metasDiarias && _metasDiarias[mod]) ? _metasDiarias[mod][data] : null;
+    if (dia) {
+      var k = Object.keys(dia).find(function(n){ return cpNormNome(n) === cpNormNome(nome); });
+      if (k != null) return Math.max(0, +dia[k] || 0);
+    }
+  } catch (e) {}
+  return padrao;
+}
+// o motivo de quem ficou sem meta naquele dia (atuando em pedidos,
+// devolução, publicação, férias, folga)
+function esfMotivoDoDia(nome, data){
+  try {
+    var d = (_metasDiarias && _metasDiarias.mot) ? (_metasDiarias.mot[data] || {}) : {};
+    var k = Object.keys(d).find(function(n){ return cpNormNome(n) === cpNormNome(nome); });
+    if (k != null) return String(d[k] || '');
+  } catch (e) {}
+  return '';
+}
+
 function esfMetaDe(mod, nome){
   try {
     if (typeof _ceTemMeta === 'function' && !_ceTemMeta(mod, nome))
@@ -60963,9 +61332,12 @@ function esfMetaPeriodoEquipe(p){
 function esfDiasEquipe(pessoas){
   var porDia = {};
   (pessoas || []).forEach(function(p){
-    var metaDia = esfMetaEquipe(p);
+    var metaRef = esfMetaEquipe(p);
     (p.linhaDia || []).forEach(function(d){
       if (d.prod === null || d.prod === undefined) return;   // folga/férias não cobra
+      // a meta daquele dia, quando foi lançada no Montar base
+      var metaDia = (p.metaFonte === ESF_META_REF) ? 0
+                  : ((d.meta == null) ? metaRef : Math.max(0, +d.meta || 0));
       var o = porDia[d.data] || (porDia[d.data] = { data:d.data, prod:0, meta:0, gente:0 });
       o.prod += (+d.prod || 0); o.meta += metaDia; if (metaDia) o.gente++;
     });
@@ -61029,7 +61401,7 @@ function ceEsforcoPessoas(mod){
       diasUteis: uteis.length,
       trabalhados: 0, folgas: 0, semRegistro: 0,
       producao: 0, diasAbaixo: [], diasAcima: 0, melhor: null, pior: null,
-      folgasFech: 0, folgasJor: 0, fechTotal: 0, foraMeta: 0,
+      folgasFech: 0, folgasJor: 0, fechTotal: 0, foraMeta: 0, metaSoma: 0,
       mov: 0, conc: 0, acoes: ls.length, rcs: {}, filas: {}, motivos: {}, desfechos: {},
       linhaDia: []
     };
@@ -61058,14 +61430,19 @@ function ceEsforcoPessoas(mod){
         return;
       }
       if (!f) p.semRegistro++;         // dia cobrado, mas sem fechamento
+      // 24/11: a meta é a DO DIA. Quem foi lançado com 15 naquele dia é
+      // cobrado por 15 naquele dia, e não pela meta do cadastro.
+      var metaDia = esfMetaDoDia(mod, nome, d, p.meta);
+      p.metaSoma += metaDia;
       var sit;
-      if (nAcoes < p.meta) {
-        p.diasAbaixo.push({ data:d, prod:nAcoes, falta: p.meta - nAcoes });
+      if (nAcoes < metaDia) {
+        p.diasAbaixo.push({ data:d, prod:nAcoes, falta: metaDia - nAcoes, meta:metaDia });
         sit = 'Abaixo da meta';
       } else { p.diasAcima++; sit = 'Bateu a meta'; }
       if (p.melhor === null || nAcoes > p.melhor.prod) p.melhor = { data:d, prod:nAcoes };
       if (p.pior === null || nAcoes < p.pior.prod) p.pior = { data:d, prod:nAcoes };
-      p.linhaDia.push({ data:d, prod:nAcoes, acoes:nAcoes, fechou:!!f, situacao:sit });
+      p.linhaDia.push({ data:d, prod:nAcoes, acoes:nAcoes, fechou:!!f, situacao:sit,
+                        meta:metaDia });
     });
     ls.forEach(function(l){
       if (!l.contaMeta) p.foraMeta++;   // Outros, nova reserva, saiu da fila
@@ -61093,7 +61470,15 @@ function ceEsforcoPessoas(mod){
     // os dias sem fechamento, e isso premiava justamente quem não
     // registrava o dia.
     p.diasMeta = Math.max(0, p.diasUteis - p.folgas);
-    p.metaPeriodo = p.meta * p.diasMeta;
+    // A meta do período é a SOMA das metas de cada dia cobrado. Quando
+    // nenhum dia teve lançamento, isso dá exatamente meta × dias, que é
+    // como era antes de 24/11 — a conta velha é um caso particular desta.
+    p.metaPeriodo = p.metaSoma;
+    // a Meta/dia que a planilha mostra passa a ser a média do período,
+    // senão Meta/dia × dias deixaria de bater com a Meta do período
+    p.metaMedia = p.diasMeta ? (p.metaPeriodo / p.diasMeta) : p.meta;
+    p.metaVariou = p.diasMeta
+      ? Math.abs(p.metaMedia - p.meta) > 0.001 : false;
     p.aproveitamento = p.metaPeriodo ? (p.producao / p.metaPeriodo) : 0;
     // a média é sobre os MESMOS dias que a meta cobra — assim
     // Média/dia × dias cobrados = Analisados, e Aproveitamento =
@@ -61446,7 +61831,11 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     + 'e Ag Parecer. FORA DA META são as ações de tipo que o velocímetro também não conta '
     + '(Outros, nova reserva e "sai da fila", que o modal avisa que não conta na produção). '
     + 'A conta sempre fecha: MOVIM. + CONCLUSÕES = ANALISADOS + FORA DA META. '
-    + 'META DO PERÍODO = Meta/dia × (Dias úteis − Folga/Férias): só folga e férias descontam. '
+    + 'META DO PERÍODO = a SOMA da meta de cada dia cobrado. A meta do dia é a que você lança '
+    + 'no Analista Automático › Montar base; o dia sem lançamento usa a meta do cadastro, e aí '
+    + 'a conta dá Meta/dia × (Dias úteis − Folga/Férias), como sempre deu. Quando a meta variou '
+    + 'no período, a coluna Meta/dia mostra a MÉDIA — assim Meta/dia × dias continua batendo '
+    + 'com a Meta do período. Só folga e férias descontam dias. '
     + 'FOLGA/FÉRIAS vem de duas fontes e basta uma delas — a Presença do fechamento do dia e a '
     + 'Gestão de Jornada (férias e folgas programadas). '
     + 'DIAS TRABALHADOS é outra coisa: são os dias em que a pessoa FECHOU o dia. O fechamento aqui '
@@ -61466,7 +61855,8 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
     // é só referência — por isso o nome avisa e o TOTAL não leva essa meta
     _esfLinha(ws3, L3, [p.nome + (p.metaFonte === ESF_META_REF ? ' (sem meta individual)' : ''),
       p.diasUteis, p.trabalhados, p.folgas, p.semRegistro,
-      p.meta, p.metaPeriodo, p.diasMeta ? Number(p.mediaDia.toFixed(1)) : '—',
+      p.metaVariou ? Number(p.metaMedia.toFixed(1)) : p.meta,
+      p.metaPeriodo, p.diasMeta ? Number(p.mediaDia.toFixed(1)) : '—',
       p.diasAbaixo.length, p.producao,
       p.metaPeriodo ? _esfPct(p.aproveitamento) : '—',
       p.acoes ? _esfPct(p.conc / p.acoes) : '—',
@@ -61591,23 +61981,28 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
   // ── 3c. Dia a dia por analista ─────────────────────────────────
   var ws3c = wb.addWorksheet('Dia a Dia por Analista', { views:[{ showGridLines:false }] });
   ws3c.columns = [{ width:24 }, { width:13 }, { width:9 }, { width:12 }, { width:10 },
-                  { width:12 }, { width:14 }, { width:18 }];
+                  { width:12 }, { width:14 }, { width:18 }, { width:26 }];
   _esfTitulo(ws3c, 'Dia a dia de cada analista',
     'A linha de base do one a one: quantas ações cada pessoa lançou em cada dia útil do período, '
     + 'contra a meta dela. Dia útil sem ação nenhuma conta como zero e entra em Dias abaixo. '
-    + '"Fechou o dia" é só o registro do fechamento — não muda a contagem de Analisados.', 8);
+    + '"Fechou o dia" é só o registro do fechamento — não muda a contagem de Analisados. '
+    + 'A META é a do DIA: a que foi lançada no Montar base naquela manhã. Quando a pessoa '
+    + 'ficou com meta 0, a última coluna diz por quê.', 9);
   var L3c = 4;
   _esfCabecalho(ws3c, L3c, ['Analista', 'Data', 'Dia', 'Analisados', 'Meta',
-                            'Diferença', 'Fechou o dia', 'Situação'], ESF_C.BLUE); L3c++;
+                            'Diferença', 'Fechou o dia', 'Situação',
+                            'Motivo da meta 0'], ESF_C.BLUE); L3c++;
   var DS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
   pessoas.forEach(function(p){
     p.linhaDia.forEach(function(d){
       var dow = '';
       try { var q = d.data.split('-'); dow = DS[new Date(+q[0], (+q[1]) - 1, +q[2]).getDay()]; } catch (e) {}
+      var mD = (d.meta == null) ? p.meta : d.meta;
       _esfLinha(ws3c, L3c, [p.nome, fmtDt(d.data), dow,
-        d.prod === null ? '—' : d.prod, p.meta,
-        d.prod === null ? '—' : (d.prod - p.meta),
-        d.fechou ? 'sim' : 'não', d.situacao]);
+        d.prod === null ? '—' : d.prod, d.prod === null ? '—' : mD,
+        d.prod === null ? '—' : (d.prod - mD),
+        d.fechou ? 'sim' : 'não', d.situacao,
+        (!mD && d.prod !== null) ? (esfMotivoDoDia(p.nome, d.data) || '—') : '']);
       var c = ws3c.getCell(L3c, 8);
       if (d.situacao === 'Abaixo da meta') { c.fill = _esfSolid(ESF_C.RED_L);
         c.font = { name:'Calibri', size:10, bold:true, color:{ argb:ESF_C.RED } }; }
@@ -61617,7 +62012,7 @@ async function _esfGerarRelatorio(mod, r, jornadas, faixa){
       L3c++;
     });
   });
-  ws3c.autoFilter = { from:{ row:4, column:1 }, to:{ row:4, column:8 } };
+  ws3c.autoFilter = { from:{ row:4, column:1 }, to:{ row:4, column:9 } };
   ws3c.views = [{ state:'frozen', ySplit:4, showGridLines:false }];
 
 
