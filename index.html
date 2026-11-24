@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 01:45';
+var GTO_BUILD = '25/11 02:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -19078,7 +19078,14 @@ function stbLerBU(linhas){
     oport:  _cpColOuLetra(cabs, ['NUMERO_OPORTUNIDADE','OPORTUNIDADE','NUM_OPORTUNIDADE'],
                           'AO', 'Número da oportunidade', r.porLetra),
     itemOp: _cpColOuLetra(cabs, ['ITEM_OPORTUNIDADE','ITEM_DA_OPORTUNIDADE','ITEM_OP'],
-                          'AP', 'Item da oportunidade', r.porLetra)
+                          'AP', 'Item da oportunidade', r.porLetra),
+    // 25/11: o que diz que o pedido foi eliminado é esta coluna, não a
+    // classificação do Analista Automático. A RC 36648210 estava "EM
+    // TRATATIVA", status B e com o pedido eliminado, mas a AA a chamou
+    // de "Acompanhar PATEC" porque havia parecer em andamento — e ela
+    // sumia do card. São três itens assim nesta BU.
+    pedReal: ix(['STATUS_PEDIDO_REAL']),
+    parecer: ix(['STATUS_PARECER'])
   };
   r.colunas = col;
   r.cabPedido = (col.ped >= 0 && cabs[col.ped]) ? cabs[col.ped] : '';
@@ -19115,12 +19122,18 @@ function stbLerBU(linhas){
     var cart = cpNormCab(pega(l, col.carteira));
     var st   = cpNormCab(pega(l, col.statusRc));
     var aa   = cpNormCab(pega(l, col.aa));
+    var pr   = cpNormCab(pega(l, col.pedReal));
+    var ehEliminado = (aa.indexOf('TRATAR_PEDIDO_ELIMINADO') !== -1)
+                   || (pr.indexOf('PEDIDO_ELIMINADO') !== -1);
     if (cart.indexOf('TRATATIVA') !== -1) r.emTratativa++;
     if (st === 'B') r.statusB++;
-    if (aa.indexOf('TRATAR_PEDIDO_ELIMINADO') !== -1) r.eliminado++;
+    if (ehEliminado) r.eliminado++;
     if (cart.indexOf('TRATATIVA') === -1) continue;
     if (st !== 'B') continue;
-    if (aa.indexOf('TRATAR_PEDIDO_ELIMINADO') === -1) continue;
+    if (!ehEliminado) continue;
+    // só pela coluna do pedido, sem a AA concordar: conta à parte, para
+    // a tela poder dizer quantos entraram por este caminho
+    if (aa.indexOf('TRATAR_PEDIDO_ELIMINADO') === -1) r.porPedidoReal = (r.porPedidoReal || 0) + 1;
 
     var seq = stbInt(l[col.seq]);
     r.itens.push({
@@ -19135,11 +19148,17 @@ function stbLerBU(linhas){
       // a oportunidade e o item dela, das colunas AO e AP — o André
       // pediu as quatro colunas no Status B em 11/11
       oport: (function(v){ return (v === '0') ? '' : v; })(_rjsN(pega(l, col.oport))),
-      itemOp: (function(v){ return (v === '0') ? '' : v; })(_rjsN(pega(l, col.itemOp)))
+      itemOp: (function(v){ return (v === '0') ? '' : v; })(_rjsN(pega(l, col.itemOp))),
+      // PATEC aberto: o parecer ainda está em andamento. Não impede de
+      // duplicar, mas é o que explica por que a AA não o chamou de
+      // pedido eliminado.
+      patec: cpNormCab(pega(l, col.parecer)).indexOf('EM_ANDAMENTO') !== -1,
+      conclusao: '', conclusaoEm: '',
+      visto: stbDataSel()          // o último dia em que ele veio na BU
     });
   }
   if (!r.itens.length && !r.aviso) {
-    r.aviso = 'Nenhum item em tratativa com status B e Tratar Pedido Eliminado.';
+    r.aviso = 'Nenhum item em tratativa, com status B e pedido eliminado.';
   }
   return r;
 }
@@ -19188,6 +19207,25 @@ async function stbUpload(file){
     });
     r.reaproveitados = reaproveitados;
 
+    // os que não vieram nesta BU e ainda não têm conclusão continuam na
+    // lista — é a regra do André: o item sai pela conclusão, não pela
+    // ausência na planilha de hoje
+    var naBU = {};
+    r.itens.forEach(function(i){ naBU[i.rc + '|' + i.seq] = 1; });
+    var pend = await stbPendentesAnteriores(stbDataSel());
+    r.semBU = 0;
+    Object.keys(pend).forEach(function(k){
+      if (naBU[k]) return;
+      var i = pend[k];
+      if (String(i.conclusao || '').trim()) return;     // já foi tratado
+      // item que sumiu há muito tempo e ninguém concluiu para de ser
+      // arrastado: fica no histórico do dia em que apareceu
+      if (i.visto && stbDiasEntre(i.visto, stbDataSel()) > STB_GUARDA_SEM_BU) return;
+      var c = Object.assign({}, i, { foraDaBU:true });
+      r.itens.push(c);
+      r.semBU++;
+    });
+
     _stbDia = { data: stbDataSel(), arquivo: file.name, aba: nome,
                 itens: r.itens, lidas: r.lidas, reaproveitados: r.reaproveitados || 0,
                 emTratativa: r.emTratativa, statusB: r.statusB, eliminado: r.eliminado,
@@ -19197,6 +19235,12 @@ async function stbUpload(file){
       + '</strong> para duplicar.'
       + (r.reaproveitados ? ' <span style="color:var(--az)">' + cpNum(r.reaproveitados)
           + ' já vinham com comentário ou marcação de antes.</span>' : '') + '</span>'
+      + (r.semBU ? '<div style="color:var(--am);margin-top:4px">↩ ' + cpNum(r.semBU)
+          + ' item(ns) não vieram nesta BU e continuam na lista porque ainda não têm '
+          + 'conclusão — eles saem quando você escolher a conclusão no dash.</div>' : '')
+      + (r.porPedidoReal ? '<div style="color:var(--az);margin-top:4px">ℹ ' + cpNum(r.porPedidoReal)
+          + ' entrou(entraram) pela coluna STATUS_PEDIDO_REAL (pedido eliminado), e não pela '
+          + 'classificação do Analista Automático.</div>' : '')
       + ((r.porLetra || []).length
           ? '<div style="color:var(--am);margin-top:4px">⚠ Não achei pelo nome: '
             + cpEsc(r.porLetra.join(' · ')) + '. Confira se a coluna é essa mesmo.</div>' : '');
@@ -19358,7 +19402,19 @@ function _stbHtmlLista(suf){
     h += '<tr' + (i.marcado ? ' style="background:var(--vdc)"' : '') + '>'
       + '<td style="text-align:center"><input type="checkbox" onchange="stbMarcar(' + k + ', this.checked)"'
       +   (i.marcado ? ' checked' : '') + ' style="width:16px;height:16px;cursor:pointer"></td>'
-      + '<td style="font-weight:700;color:var(--az)">' + cpEsc(i.rc) + '</td>'
+      + '<td style="font-weight:700;color:var(--az)">' + cpEsc(i.rc)
+      +   (i.foraDaBU
+            ? ' <span title="Não veio na BU de hoje; continua aqui porque ainda não tem '
+              + 'conclusão" style="font-size:8.5px;font-weight:700;color:var(--am);'
+              + 'background:var(--amc);border-radius:4px;padding:1px 5px;white-space:nowrap">'
+              + 'fora da BU</span>' : '')
+      +   (i.patec
+            ? ' <span title="O parecer do PATEC está em andamento — o pedido já foi '
+              + 'eliminado, mas o item ainda está no fluxo do PATEC"'
+              + ' style="font-size:8.5px;font-weight:700;color:var(--azm);'
+              + 'background:var(--azc);border-radius:4px;padding:1px 5px;white-space:nowrap">'
+              + 'PATEC aberto</span>' : '')
+      + '</td>'
       + '<td style="font-weight:600">' + cpEsc(i.seq) + '</td>'
       + '<td style="font-size:10.5px">' + cpEsc(i.oport || '—') + '</td>'
       + '<td>' + cpEsc(i.itemOp || '—') + '</td>'
@@ -19675,6 +19731,48 @@ async function stbSalvar(){
 
 // Pega o que já foi preenchido antes desta data, do dia mais recente
 // para o mais antigo — o item que ninguém tratou mantém o comentário.
+// ── O ITEM FICA ATÉ SER CONCLUÍDO (25/11) ────────────────────────
+// André: "o item deve ficar no card até a conclusão feita no dash".
+// Antes, o card era refeito a cada BU: item que saísse da BU — porque
+// o Analista Automático o reclassificou, por exemplo — sumia da tela
+// sem nunca ter sido tratado, e o trabalho sumia junto.
+// Agora, o que já esteve no card e ainda não tem conclusão volta,
+// marcado como "não veio na BU de hoje". Sai da lista quando você
+// escolher a conclusão, e não antes.
+var STB_GUARDA_SEM_BU = 90;   // dias que um item sumido continua sendo mostrado
+function stbDiasEntre(de, ate){
+  try {
+    var a = new Date(de + 'T12:00:00'), b = new Date(ate + 'T12:00:00');
+    if (isNaN(a.getTime()) || isNaN(b.getTime())) return 0;
+    return Math.max(0, Math.round((b - a) / 86400000));
+  } catch (e) { return 0; }
+}
+
+async function stbPendentesAnteriores(data){
+  var out = {};
+  try {
+    var db = getDB(); if (!db) return out;
+    var snap = await db.collection(STB_COL).get();
+    var dias = [];
+    snap.forEach(function(doc){
+      var d = doc.data() || {};
+      var dt = d.data || doc.id;
+      if (dt < data) dias.push({ data:dt, itens:d.itens || [] });
+    });
+    dias.sort(function(a, b){ return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
+    dias.forEach(function(dia){
+      (dia.itens || []).forEach(function(i){
+        if (!i || !i.rc) return;
+        var k = i.rc + '|' + i.seq;
+        var c = Object.assign({}, i);
+        if (!c.visto) c.visto = dia.data;      // dia antigo não guardava
+        out[k] = c;                            // o mais recente prevalece
+      });
+    });
+  } catch (e) { console.warn('stbPendentesAnteriores:', e); }
+  return out;
+}
+
 async function stbPreenchidosAnteriores(data){
   var out = {};
   try {
