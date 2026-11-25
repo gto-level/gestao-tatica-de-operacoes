@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 10:05';
+var GTO_BUILD = '25/11 11:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -15333,10 +15333,10 @@ async function acpDesenhar(){
       + 'gap:12px;margin-bottom:1rem">'
       + monCard('DISTRIBUÍDO', cpNum(t.distribuidos), cpNum(r.lista.length) + ' comprador(es)')
       + monCard('FEITO', cpNum(t.feitos), t.pct + '% do distribuído', 'var(--vd)', 'var(--vdc)')
-      + monCard('ITENS A COMENTAR', cpNum(t.aJustificar),
-          cpNum(t.justificados = t.aJustificar - t.pendentes) + ' já comentados',
+      + monCard('ITENS NÃO EMITIDOS', cpNum(t.aJustificar),
+          cpNum(t.justificados = t.aJustificar - t.pendentes) + ' com comentário',
           t.aJustificar ? 'var(--am)' : 'var(--tx2)', t.aJustificar ? 'var(--amc)' : 'var(--cin)')
-      + monCard('SEM COMENTÁRIO', cpNum(t.pendentes), 'item não emitido e sem explicação',
+      + monCard('SEM COMENTÁRIO', cpNum(t.pendentes), 'opcional — o que o dia cobra é o motivo',
           t.pendentes ? 'var(--vm)' : 'var(--vd)', t.pendentes ? 'var(--vmc)' : 'var(--vdc)')
       + monCard('FECHARAM O DIA', cpNum(t.fecharam) + '/' + cpNum(r.lista.length),
           (t.semLocal ? cpNum(t.semLocal) + ' sem informar o local' : 'todos informaram'),
@@ -15355,13 +15355,18 @@ async function acpDesenhar(){
       +   '<th style="text-align:right" title="Não aparece na medição">Sem registro</th>'
       +   '<th>Abrir PATEC</th>'
       +   '<th style="text-align:right">Negociação</th>'
-      +   '<th style="text-align:right" title="Itens não emitidos — todos precisam de comentário no card">A comentar</th>'
-      +   '<th style="text-align:right">Sem comentário</th>'
+      +   '<th style="text-align:right" title="Itens que não viraram pedido">Não emitidos</th>'
+      +   '<th style="text-align:right" title="Comentário por item é opcional desde 25/11">Sem comentário</th>'
       +   '<th title="Pedidos emitidos, abertura de PATEC e negociação">Bateu o dia?</th>'
       +   '<th>Justificativa do dia</th>'
       + '</tr></thead><tbody>';
     r.lista.forEach(function(p){
-      var ruim = p.pendentes > 0;
+      // 25/11: o comentário por RC virou opcional. O que marca a linha
+      // é o dia que não bateu a meta e não tem motivo informado.
+      var ruim = (function(){
+        if (p.folga) return false;
+        try { return !fdpRegua(p).bateu && !p.motivoDia; } catch (e) { return false; }
+      })();
       h += '<tr' + (ruim ? ' style="background:var(--vmc)"' : '') + '>'
         + '<td style="font-weight:600">' + cpEsc(p.nome) + '</td>'
         + '<td style="font-size:10.5px">' + acpSeloLocal(p) + '</td>'
@@ -15443,7 +15448,7 @@ function acpBlocoPessoa(p, r){
     +   '<span style="font-size:11.5px;font-weight:500;color:'
     +     (p.pendentes ? 'var(--vm)' : 'var(--vd)') + '">'
     +     cpNum(p.feitos) + ' de ' + cpNum(p.distribuidos) + ' feitos'
-    +     (p.pendentes ? ' · ' + cpNum(p.pendentes) + ' sem comentário' : ' · nada pendente')
+    +     (p.pendentes ? ' · ' + cpNum(p.pendentes) + ' item(ns) sem comentário (opcional)' : '')
     +   '</span></div>'
     + (function(){
         if (p.folga) return '';
@@ -17109,9 +17114,10 @@ var FDP_LOCAIS = ['Presencial', 'Home Office'];
 // justificativa. A meta de abertura nunca cobra mais do que foi
 // distribuído — cobrar 5 de quem recebeu 2 seria uma meta impossível,
 // e meta impossível vira justificativa automática todo dia.
+// 25/11: a meta subiu — "agora preciso que vire 35, e a Palloma 18".
 var FDP_META = {
-  pedidos: 30,
-  pedidosPorPessoa: { 'PALLOMA': 15 },   // meio período
+  pedidos: 35,
+  pedidosPorPessoa: { 'PALLOMA': 18 },   // meio período
   abrir: 5
 };
 function fdpMetaPedidos(nome){
@@ -17245,13 +17251,13 @@ function fdpPendencias(p){
   }
   if (p.neg.meta && (g.declaradoNeg === undefined || g.declaradoNeg === null))
     faltas.push('informar quantas negociações você fez');
-  // 22/11: o comentário do item é sempre cobrado — "sempre, para todo
-  // não emitido" —, mesmo no dia em que a meta foi batida. Ele é o que
-  // explica, item a item, por que a RC não virou pedido.
-  var semCom = fdpItensSemComentario(p).length;
-  if (semCom) faltas.push('comentar ' + cpNum(semCom) + ' item(ns) que não viraram pedido '
-    + '— o comentário é o do card de emissão');
-  // Já o motivo e o texto do dia só são cobrados quando alguma das três
+  // 25/11: o comentário RC por RC deixou de ser cobrado — "ele não
+  // precisa justificar RC por RC que não emitiu, precisa apenas
+  // informar o motivo de não chegar na meta". O campo continua ali,
+  // agora opcional: quem quiser registrar o que travou um item
+  // específico registra, e isso segue indo para o card de emissão.
+  //
+  // O que o dia cobra é o motivo e o texto, e só quando alguma das três
   // metas não foi batida.
   var reg = fdpRegua(p);
   if (!reg.bateu) {
@@ -17464,26 +17470,24 @@ async function fdpRender(){
     var pend = p.emissao.itens.filter(function(i){ return i.precisa; });
     var semCom = fdpItensSemComentario(p).length;
     h += '<div class="cd"><div class="cd-t" style="margin-bottom:.5rem">'
-      + '📝 Pedidos que não foram emitidos — ' + cpNum(pend.length)
-      + (semCom ? ' <span style="font-size:11px;font-weight:700;color:var(--vm)">· '
-                  + cpNum(semCom) + ' sem comentário</span>' : '') + '</div>';
+      + '📝 Pedidos que não foram emitidos — ' + cpNum(pend.length) + '</div>';
     if (!pend.length) {
       h += '<div class="al al-ok" style="font-size:11.5px">✓ Tudo que foi distribuído para '
-        + 'emissão virou pedido. Nada a comentar.</div>';
+        + 'emissão virou pedido.</div>';
     } else {
       h += '<div style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:.6rem">'
         + 'Memorizado é o que parou no meio; "não está na medição" é o que não foi começado. '
-        + '<strong>Todo item desta lista precisa de comentário</strong>, mesmo no dia em que '
-        + 'você bateu a meta — RC que virou pedido não aparece aqui. '
-        + 'O comentário é o MESMO do card de emissão: o que você escrever aqui aparece lá, '
-        + 'e o que escreveu lá já vem preenchido aqui.</div>'
+        + '<strong>Comentar item a item é opcional</strong> — o que o dia cobra é o motivo lá '
+        + 'embaixo, quando a meta não foi batida. Se quiser registrar o que travou uma RC '
+        + 'específica, o comentário é o MESMO do card de emissão: o que você escrever aqui '
+        + 'aparece lá, e o que escreveu lá já vem preenchido aqui.</div>'
         + '<div style="overflow:auto;max-height:380px"><table><thead><tr>'
         +   '<th>RC</th><th>Item</th><th>Oportunidade</th><th>O que está</th>'
-        +   '<th>Comentário do card <span style="color:var(--vm)">*</span></th>'
+        +   '<th>Comentário do card (opcional)</th>'
         +   '<th>Motivo (opcional)</th></tr></thead><tbody>';
       pend.forEach(function(i){
         var com = fdpComentarioDoCard(i.chave);
-        h += '<tr' + (com ? '' : ' style="background:var(--vmc)"') + '>'
+        h += '<tr>'
           + '<td style="font-weight:700;color:var(--az)">' + cpEsc(i.rc) + '</td>'
           + '<td>' + cpEsc(i.seq) + '</td>'
           + '<td>' + cpEsc(i.op || '—') + '</td>'
@@ -17493,7 +17497,7 @@ async function fdpRender(){
           +   (fechado ? ' disabled' : '')
           +   ' onchange="fdpSalvarComentario(\'' + cpEsc(i.chave) + '\', this.value)"'
           +   ' style="width:260px;font-size:10.5px;padding:3px 6px;border-radius:5px;'
-          +   'border:1.5px solid ' + (com ? 'var(--vd)' : 'var(--vm)') + '"></td>'
+          +   'border:1.5px solid ' + (com ? 'var(--vd)' : 'var(--brd)') + '"></td>'
           + '<td><select' + (fechado ? ' disabled' : '')
           +   ' onchange="acpSalvarJust(\'' + cpEsc(p.nome) + '\', \'' + cpEsc(i.chave)
           +   '\', \'m\', this.value).then(fdpRender)"'
@@ -64015,7 +64019,8 @@ function acaoSelecionarTratamento(btn, tratamento){
 // ══════════════════════════════════════════════════════════════════
 var MOTIVOS_FILA = {
   fornecedor: { rotulo:'O que foi pedido ao fornecedor', emoji:'🏭',
-                itens:['Solicitar Prorrogação','Solicitar Documentação','Solicitar Desconto'] },
+                itens:['Solicitar Prorrogação','Solicitar Documentação','Solicitar Desconto',
+                       'Solicitação de esclarecimento'] },
   requisitante:{ rotulo:'O que foi pedido ao requisitante', emoji:'👤',
                 itens:['Solicitação de nova reserva','Ajuste na RC'] },
   mdg:         { rotulo:'O que foi pedido ao MDG', emoji:'🗂',
