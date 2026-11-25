@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 14:40';
+var GTO_BUILD = '25/11 15:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1107,6 +1107,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
   <div class="sb-it" id="sb-q18-it" onclick="go('consulta-q18',this)">🚫 Consulta Q18</div>
   <div class="sb-it" id="sb-fq-it" onclick="go('formatacao-query',this)">🧾 Formatação de Query</div>
   <div class="sb-it" id="sb-ctc-it" onclick="go('patec-cspn',this)">📇 PATEC / CSPN</div>
+  <div class="sb-it" id="sb-cpn-it" onclick="go('comparativo-pn',this)">🔍 Comparativo de PN</div>
 
   <!-- Gestão de Produção movida para ADM. O item do PCP é montado por
        authMontarSidebar (PERMS_SIDEBAR.pcp), e só na frente ADLV · PCP. -->
@@ -2597,6 +2598,43 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
     </div>
   </div>
   <!-- ══ fim PATEC / CSPN ══ -->
+
+  <!-- ══ COMPARATIVO DE PN ══
+       25/11 — André: "preciso também criar outro tópico chamado
+       comparativo de PN, onde eu consiga comparar os dois PN sem
+       precisar ficar procurando onde está a diferença, igual está
+       nas fotos". ══ -->
+  <div id="p-comparativo-pn" class="page">
+    <div class="cd">
+      <div class="cd-t">🔍 Comparativo de Part Numbers</div>
+      <p style="font-size:12px;color:var(--tx2);margin-bottom:1.1rem">
+        Insira os dois Part Numbers abaixo para visualizar as divergências de
+        caracteres, espaços ou pontuações.
+      </p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <label style="display:block;font-size:12px;font-weight:700;color:var(--tx);margin-bottom:6px">
+            PN Fornecedor
+          </label>
+          <input type="text" id="cpn-a" spellcheck="false" autocomplete="off"
+            placeholder="Digite o PN do fornecedor..." oninput="cpnComparar()"
+            style="width:100%;font-size:14px;padding:10px 13px;border:1.5px solid var(--brd);border-radius:9px;background:var(--bg);color:var(--tx)">
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:700;color:var(--tx);margin-bottom:6px">
+            PN Petrobras
+          </label>
+          <input type="text" id="cpn-b" spellcheck="false" autocomplete="off"
+            placeholder="Digite o PN Petrobras..." oninput="cpnComparar()"
+            style="width:100%;font-size:14px;padding:10px 13px;border:1.5px solid var(--brd);border-radius:9px;background:var(--bg);color:var(--tx)">
+        </div>
+      </div>
+
+      <div id="cpn-resultado" style="margin-top:1.25rem"></div>
+    </div>
+  </div>
+  <!-- ══ fim COMPARATIVO DE PN ══ -->
 
   <div id="p-adm" class="page">
 
@@ -10424,6 +10462,7 @@ function go(id, el) {
   if(id==='consulta-q18') setTimeout(()=>{ if(!_q18Impedidos.size) q18CarregarFirebase(); }, 100);
   if(id==='formatacao-query') setTimeout(()=>{ try{ fqAbrir(); }catch(e){} }, 60);
   if(id==='patec-cspn') setTimeout(()=>{ try{ ctcAbrir(); }catch(e){} }, 60);
+  if(id==='comparativo-pn') setTimeout(()=>{ try{ cpnAbrir(); }catch(e){} }, 60);
   if(id==='adm') setTimeout(()=>{
     const login=document.getElementById('adm-login');
     if(login&&login.style.display!=='none') admLogin();
@@ -57655,6 +57694,159 @@ function ctcInfo(){
     + (_ctc.arquivo ? ' · ' + _ctc.arquivo : '') + d;
 }
 
+
+// ══════════════════════════════════════════════════════════════════
+//  COMPARATIVO DE PN   (tópico do PATEC, 25/11)
+//
+//  André: "preciso também criar outro tópico chamado comparativo de
+//  PN, onde eu consiga comparar os dois PN sem precisar ficar
+//  procurando onde está a diferença, igual está nas fotos".
+//
+//  A comparação é POSIÇÃO A POSIÇÃO, como nas fotos: o 1º caractere
+//  de um contra o 1º do outro, o 2º contra o 2º, até o fim do mais
+//  longo. Quem sobra do lado comprido fica marcado; do lado curto
+//  aparece um traço no lugar que falta. Não é um "diff inteligente"
+//  que procura o melhor encaixe — num PN o que interessa é a posição
+//  em que os dois deixaram de bater.
+//
+//  Nada é aparado nem normalizado antes de comparar: espaço no fim e
+//  maiúscula trocada SÃO divergência, e é justamente o que some do
+//  olho de quem confere na mão. Para não deixar o motivo escondido,
+//  quando os dois só diferem por espaço, caixa ou pontuação a tela
+//  diz isso com todas as letras.
+//
+//  Tela sem dado: não lê nem grava nada em lugar nenhum.
+// ══════════════════════════════════════════════════════════════════
+
+function cpnEsc(v){
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Caractere a caractere, do começo ao fim do mais longo.
+function cpnDiff(a, b){
+  var A = String(a == null ? '' : a), B = String(b == null ? '' : b);
+  var n = Math.max(A.length, B.length);
+  var marcas = [], difs = 0, pos = [];
+  for (var i = 0; i < n; i++) {
+    var x = i < A.length ? A.charAt(i) : null;
+    var y = i < B.length ? B.charAt(i) : null;
+    var dif = x !== y;
+    if (dif) { difs++; pos.push(i + 1); }
+    marcas.push({ i:i, a:x, b:y, dif:dif });
+  }
+  return { a:A, b:B, marcas:marcas, difs:difs, posicoes:pos,
+           igual: A === B && A.length > 0 };
+}
+
+// Por que eles diferem — o recado que evita a caça ao caractere.
+function cpnMotivo(A, B){
+  if (A === B) return '';
+  var semPonta = function(s){ return s.replace(/^\s+|\s+$/g, ''); };
+  var semEspaco = function(s){ return s.replace(/\s+/g, ''); };
+  var soLetraNum = function(s){ return semEspaco(s).replace(/[^0-9A-Za-zÀ-ÿ]/g, ''); };
+  if (semPonta(A) === semPonta(B))
+    return 'A única diferença é espaço no começo ou no fim — o conteúdo é o mesmo.';
+  if (semEspaco(A) === semEspaco(B))
+    return 'A única diferença são espaços no meio — os caracteres são os mesmos.';
+  if (A.toUpperCase() === B.toUpperCase())
+    return 'A única diferença é maiúscula/minúscula.';
+  if (soLetraNum(A).toUpperCase() === soLetraNum(B).toUpperCase())
+    return 'A única diferença é pontuação ou espaço (traço, ponto, barra).';
+  if (A.length !== B.length && (A.indexOf(B) === 0 || B.indexOf(A) === 0))
+    return 'Um é o começo do outro: sobra' + (A.length > B.length
+      ? ' no PN Fornecedor' : ' no PN Petrobras') + ' o que vem depois.';
+  return '';
+}
+
+// Uma linha do resultado: o PN desenhado caractere a caractere, com
+// os que não batem em vermelho.
+function _cpnLinha(rot, marcas, lado){
+  var h = '<div style="border:1px solid var(--brd);border-radius:9px;padding:10px 12px;'
+        + 'margin-bottom:10px;background:var(--bg)">'
+        + '<div style="font-size:11px;color:var(--tx2);margin-bottom:5px">' + rot + '</div>'
+        + '<div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;'
+        + 'font-size:17px;letter-spacing:1.5px;word-break:break-all;line-height:1.7">';
+  marcas.forEach(function(m){
+    var c = m[lado];
+    var falta = (c === null);
+    var ehEspaco = (c === ' ');
+    // o que falta vira um traço, e espaço vira um traço baixo: os dois
+    // são invisíveis e são justamente onde o erro se esconde
+    var txt = falta ? '&nbsp;' : (ehEspaco ? '&nbsp;' : cpnEsc(c));
+    var est = '';
+    if (m.dif) est = 'background:#FDE2E2;color:#C62828;font-weight:700;'
+                   + 'border-radius:3px;padding:0 1px';
+    if (falta || ehEspaco) est += (est ? ';' : '') + 'border-bottom:2px solid '
+                   + (m.dif ? '#C62828' : 'var(--brd)');
+    h += '<span' + (est ? ' style="' + est + '"' : '')
+       + (falta ? ' title="não existe neste PN"' : (ehEspaco ? ' title="espaço"' : ''))
+       + '>' + txt + '</span>';
+  });
+  return h + '</div></div>';
+}
+
+function cpnComparar(){
+  var el = document.getElementById('cpn-resultado');
+  if (!el) return;
+  var A = (document.getElementById('cpn-a') || {}).value || '';
+  var B = (document.getElementById('cpn-b') || {}).value || '';
+
+  if (!A && !B) { el.innerHTML = ''; return; }
+  if (!A || !B) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--tx2);padding:.6rem 0">'
+      + 'Preencha os dois campos para comparar.</div>';
+    return;
+  }
+
+  var d = cpnDiff(A, B);
+  var cab = '<div style="display:flex;align-items:center;justify-content:space-between;'
+    + 'gap:10px;flex-wrap:wrap;margin-bottom:.7rem">'
+    + '<div style="font-size:13px;font-weight:700;color:var(--tx)">Resultado da Comparação</div>'
+    + '<button class="btn btn-s" onclick="cpnLimpar()" style="font-size:11px;padding:4px 10px">✕ limpar</button>'
+    + '</div>';
+
+  if (d.igual) {
+    el.innerHTML = '<div style="border:1px solid var(--brd);border-radius:11px;padding:14px 16px;'
+      + 'background:var(--cin)">' + cab
+      + '<div style="background:#C8EBD2;border-radius:8px;padding:13px 16px;display:flex;'
+      + 'align-items:center;gap:10px"><span style="font-size:18px">✅</span>'
+      + '<span style="font-size:14px;font-weight:700;color:#14633F">PN correto: '
+      + cpnEsc(A) + '</span></div></div>';
+    return;
+  }
+
+  var motivo = cpnMotivo(A, B);
+  var resumo = d.difs + (d.difs === 1 ? ' posição diferente' : ' posições diferentes')
+    + ' · ' + A.length + ' caracteres no Fornecedor, ' + B.length + ' no Petrobras'
+    + ' · 1ª divergência na posição ' + d.posicoes[0];
+
+  el.innerHTML = '<div style="border:1px solid var(--brd);border-radius:11px;padding:14px 16px;'
+    + 'background:var(--cin)">' + cab
+    + _cpnLinha('PN Fornecedor', d.marcas, 'a')
+    + _cpnLinha('PN Petrobras', d.marcas, 'b')
+    + '<div style="font-size:11.5px;color:var(--tx2);margin-top:2px">' + resumo + '</div>'
+    + (motivo ? '<div style="font-size:12px;color:var(--am);background:var(--amc);'
+        + 'padding:8px 11px;border-radius:7px;margin-top:8px">⚠️ ' + motivo + '</div>' : '')
+    + '</div>';
+}
+
+function cpnLimpar(){
+  var a = document.getElementById('cpn-a'), b = document.getElementById('cpn-b');
+  if (a) a.value = '';
+  if (b) b.value = '';
+  var el = document.getElementById('cpn-resultado');
+  if (el) el.innerHTML = '';
+  if (a) try { a.focus(); } catch (e) {}
+}
+
+function cpnAbrir(){
+  var a = document.getElementById('cpn-a');
+  if (a) try { a.focus(); } catch (e) {}
+  cpnComparar();
+}
+
 function ctcAbrir(){
   var up = document.getElementById('ctc-card-upload');
   if (up) up.style.display = _isAdmGeral() ? '' : 'none';
@@ -58176,6 +58368,8 @@ const PERMS_SIDEBAR = {
   // 25/11: consulta dos contatos por centro. A base vive no endereço
   // único das duas frentes — tabela de consulta, não demanda.
   'patec-cspn':     { icon:'📇', label:'PATEC / CSPN',              mod:'EXECUÇÃO' },
+  // 25/11: compara dois PN caractere a caractere. Tela sem dado.
+  'comparativo-pn': { icon:'🔍', label:'Comparativo de PN',          mod:'EXECUÇÃO' },
   'pr-bancoferias': { icon:'🗓', label:'Gestão de Jornada',        mod:'EXECUÇÃO',
                       labelPerm:'Gestão de Jornada (PATEC)' },
   // Só existem dentro do módulo Pedidos, que tem Firebase próprio
