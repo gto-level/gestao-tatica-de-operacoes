@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 09:30';
+var GTO_BUILD = '25/11 10:05';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -63981,6 +63981,10 @@ function acaoSelecionarTratamento(btn, tratamento){
   } else {
     document.getElementById('acao-selecao-atual').style.display = 'block';
     document.getElementById('acao-selecao-texto').textContent = 'Status: ' + tratamento;
+    // movimentação de fila não finaliza nada: a caixa da Data de
+    // Finalização fica fora de vista, venha de onde vier
+    const _finBoxT = document.getElementById('acao-finalizado-box');
+    if(_finBoxT) _finBoxT.style.display = 'none';
     // Mostrar campos de devolução se tipo do modal for 'outros'
     _acaoMotivoBox(_prodCtx.tipo === 'outros' ? 'Devolução' : '');
     const _centroBoxT = document.getElementById('acao-centro-box');
@@ -64365,7 +64369,14 @@ async function prodConfirmarAcao(){
   // (MAPA usa _govDados/gov_mapa, XGL usa _xglDados/gov_xgl, Status B usa _sbDados/gov_sb —
   // são 3 estruturas separadas; salvar na errada fazia o status "voltar" ao recarregar a página)
   const _dataEnvio = (document.getElementById('acao-data-envio')?.value||'').trim();
-  const _dataFin   = (document.getElementById('acao-data-finalizado')?.value||'').trim();
+  // 25/11: a Data de Finalização passou a nascer preenchida com hoje, e
+  // o campo fica no modal mesmo quando a ação é uma MOVIMENTAÇÃO de
+  // fila. Lendo o campo sempre, mandar para o Fornecedor gravava uma
+  // data de finalização e o item aparecia como concluído. A data só vale
+  // quando a ação é conclusão de verdade.
+  const _ehConclusaoAgora = (_tratamentoRaw === 'Concluído') || !!_prodCtx.conclusao;
+  const _dataFin   = _ehConclusaoAgora
+    ? (document.getElementById('acao-data-finalizado')?.value||'').trim() : '';
   // Quando a conclusão é XGL: a Data de Finalização do MAPA passa a ser a Data de ENVIO no XGL
   // (o prazo do XGL conta a partir do momento em que a RC foi concluída no MAPA) — e o XGL
   // nasce SEM data de finalização própria, pois o item está apenas iniciando ali
