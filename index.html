@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 12:30';
+var GTO_BUILD = '25/11 14:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1106,6 +1106,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
   <div class="sb-it" id="sb-aa-it" onclick="go('analista-auto',this)">🤖 Analista Automático</div>
   <div class="sb-it" id="sb-q18-it" onclick="go('consulta-q18',this)">🚫 Consulta Q18</div>
   <div class="sb-it" id="sb-fq-it" onclick="go('formatacao-query',this)">🧾 Formatação de Query</div>
+  <div class="sb-it" id="sb-ctc-it" onclick="go('patec-cspn',this)">📇 PATEC / CSPN</div>
 
   <!-- Gestão de Produção movida para ADM. O item do PCP é montado por
        authMontarSidebar (PERMS_SIDEBAR.pcp), e só na frente ADLV · PCP. -->
@@ -2529,6 +2530,73 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
     </div>
   </div>
   <!-- ══ fim FORMATAÇÃO DE QUERY ══ -->
+
+  <!-- ══ PATEC / CSPN — CONTATOS POR CENTRO ══
+       25/11 — André: "preciso também criar um outro tópico chamado
+       PATEC/CSPN... e tb um campo para eu subir um upload, pois esta
+       planilha ela é atualizada de tempo em tempo".
+       Centro: digita e busca. Tipo: Todos · Ponto focal · PATEC —
+       e PATEC traz Distribuidor de PATEC e Analista de PATEC. ══ -->
+  <div id="p-patec-cspn" class="page">
+    <div class="cd" style="margin-bottom:1rem">
+      <div class="cd-t">📇 PATEC / CSPN — Contatos por centro</div>
+      <p style="font-size:12px;color:var(--tx2);margin-bottom:1rem">
+        Consulte os contatos por <strong>centro</strong> e <strong>tipo de atendimento</strong>.
+      </p>
+
+      <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">
+        <div>
+          <label style="display:block;font-size:12px;font-weight:700;color:var(--tx);margin-bottom:6px">Centro</label>
+          <input type="text" id="ctc-centro" placeholder="Digite o centro (ex.: 4142)"
+            onkeydown="if(event.key==='Enter') ctcBuscar()"
+            style="width:260px;font-size:14px;padding:9px 13px;border:1.5px solid var(--brd);border-radius:8px;font-weight:600;background:var(--bg);color:var(--tx)">
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:700;color:var(--tx);margin-bottom:6px">Tipo</label>
+          <select id="ctc-tipo" onchange="ctcBuscar()"
+            style="width:220px;font-size:14px;padding:9px 13px;border:1.5px solid var(--brd);border-radius:8px;background:var(--bg);color:var(--tx)">
+            <option value="todos">Todos</option>
+            <option value="focal">Ponto focal</option>
+            <option value="patec">PATEC</option>
+          </select>
+        </div>
+        <button class="btn btn-p" onclick="ctcBuscar()">🔍 BUSCAR</button>
+        <button class="btn btn-s" onclick="ctcLimpar()">✕ LIMPAR</button>
+      </div>
+      <div style="font-size:11px;color:var(--tx2);margin-top:7px">
+        Dá para procurar mais de um centro de uma vez, separando por vírgula ou espaço.
+        Em <strong>PATEC</strong> entram <em>Distribuidor de PATEC</em> e <em>Analista de PATEC</em>;
+        em <strong>Ponto focal</strong>, todos os pontos focais (Demandante, PN titular e suplente, Bens).
+      </div>
+
+      <div id="ctc-resultado" style="margin-top:1.25rem"></div>
+    </div>
+
+    <!-- Quem atualiza a base é só o ADM geral: o card abaixo nem existe
+         para os outros. A consulta, essa é de todo mundo. -->
+    <div class="cd" id="ctc-card-upload" style="display:none;margin-bottom:1rem">
+      <div class="cd-t">⬆ Atualizar a base de contatos</div>
+      <p style="font-size:12px;color:var(--tx2);margin-bottom:.9rem">
+        Suba a planilha de contatos (<code>.csv</code>, <code>.xlsx</code> ou <code>.xls</code>) quando ela for
+        atualizada. A base nova substitui a anterior inteira e vale para as duas frentes do PATEC —
+        subir aqui já serve o ADLV e o FAST.
+      </p>
+      <input type="file" id="ctc-file" accept=".csv,.xlsx,.xls,.xlsb" style="display:none"
+        onchange="ctcUpload(this.files[0]); this.value='';">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-p" onclick="document.getElementById('ctc-file').click()">📁 Escolher planilha</button>
+        <button class="btn btn-s" onclick="ctcRecarregar()">🔄 Recarregar base</button>
+      </div>
+      <div id="ctc-upload-status" style="margin-top:.8rem;font-size:12px"></div>
+    </div>
+
+    <div class="cd" style="background:var(--cin)">
+      <div style="font-size:12px;color:var(--tx2)">
+        📋 <strong>Base carregada:</strong> <span id="ctc-base-info">Nenhuma planilha carregada</span>
+      </div>
+    </div>
+  </div>
+  <!-- ══ fim PATEC / CSPN ══ -->
 
   <div id="p-adm" class="page">
 
@@ -10355,6 +10423,7 @@ function go(id, el) {
   }, 100);
   if(id==='consulta-q18') setTimeout(()=>{ if(!_q18Impedidos.size) q18CarregarFirebase(); }, 100);
   if(id==='formatacao-query') setTimeout(()=>{ try{ fqAbrir(); }catch(e){} }, 60);
+  if(id==='patec-cspn') setTimeout(()=>{ try{ ctcAbrir(); }catch(e){} }, 60);
   if(id==='adm') setTimeout(()=>{
     const login=document.getElementById('adm-login');
     if(login&&login.style.display!=='none') admLogin();
@@ -57150,6 +57219,451 @@ function fqAbrir(){
   if (ent) try { ent.focus(); } catch (e) {}
 }
 
+// ══════════════════════════════════════════════════════════════════
+//  PATEC / CSPN — CONTATOS POR CENTRO   (tópico do PATEC, 25/11)
+//
+//  André: "preciso também criar um outro tópico chamado PATEC/CSPN...
+//  e tb um campo para eu subir um upload, pois esta planilha ela é
+//  atualizada de tempo em tempo. CENTRO: eu vou digitar o centro que
+//  eu preciso e ele vai buscar as informações. TIPO: TODOS, ponto
+//  focal, Patec (no caso de patec, vc precisa trazer tudo que esta
+//  como distribuidor patec ou analista de patec)".
+//
+//  A planilha que ele mandou tem 3.011 linhas e nove colunas: Chave,
+//  Nome, Centro, Gerência, Especialidade, Tipo contato, Tipo demanda,
+//  Ativo do Centro e Observação. Cada linha é um par pessoa × centro —
+//  a mesma pessoa aparece em vários centros, e é por isso que a busca
+//  é por centro e não por nome.
+//
+//  Onde mora: no endereço único das duas frentes (o mesmo projeto do
+//  cadastro de usuários, via fbSetGeral/fbGetGeral). É tabela de
+//  consulta, não demanda — a demanda do ADLV continua no ADLV e a do
+//  FAST no FAST. Assim ele sobe a planilha UMA vez e as duas frentes
+//  enxergam a mesma base, em vez de duas cópias que divergem.
+//
+//  Quem sobe é só o ADM geral. Quem consulta é todo mundo.
+// ══════════════════════════════════════════════════════════════════
+
+var CTC_CHUNK = 600;               // ~115 KB por documento; o teto é 1 MB
+var _ctc = { itens:[], porCentro:{}, arquivo:'', total:0,
+             atualizadoEm:'', atualizadoPor:'', posUsadas:[], carregada:false };
+var _ctcRes = { linhas:[], termos:[], tipo:'todos', porConter:false };
+var _ctcOrd = { col:'n', asc:true };
+var _ctcTudo = false;
+
+// As colunas que a tela mostra. As cinco primeiras são as da foto; as
+// outras quatro existem na planilha e ficam atrás do "mostrar todas"
+// em vez de serem jogadas fora na leitura.
+var CTC_COLS = [
+  { k:'k', rot:'CHAVE',         extra:false, forte:true },
+  { k:'n', rot:'NOME',          extra:false },
+  { k:'c', rot:'CENTRO',        extra:false },
+  { k:'e', rot:'ESPECIALIDADE', extra:false },
+  { k:'t', rot:'TIPO CONTATO',  extra:false },
+  { k:'g', rot:'GERÊNCIA',      extra:true },
+  { k:'d', rot:'TIPO DEMANDA',  extra:true },
+  { k:'a', rot:'ATIVO DO CENTRO', extra:true },
+  { k:'o', rot:'OBSERVAÇÃO',    extra:true }
+];
+
+function ctcEsc(v){
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+function ctcNorm(v){
+  return String(v == null ? '' : v)
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toUpperCase().replace(/\s+/g, ' ').trim();
+}
+// O centro vem como número na planilha e como texto digitado. "4142",
+// " 4142 " e 4142 têm de bater; zeros à esquerda não podem separar.
+function ctcCentroChave(v){
+  var t = String(v == null ? '' : v).trim().replace(/\.0+$/, '');
+  t = t.replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+  return t.replace(/^0+(?=.)/, '');
+}
+
+// ── o filtro de tipo, que é o coração do pedido ───────────────────
+// "Ponto focal" é toda a família: Demandante, PN titular, PN suplente
+// e Bens. "PATEC" são os dois que ele nomeou — Distribuidor e Analista
+// — e nada mais.
+function ctcEhFocal(t){ return ctcNorm(t).indexOf('PONTO FOCAL') === 0; }
+function ctcEhPatec(t){
+  var n = ctcNorm(t);
+  return n.indexOf('DISTRIBUIDOR DE PATEC') !== -1 || n.indexOf('ANALISTA DE PATEC') !== -1;
+}
+function ctcCasaTipo(tipo, t){
+  if (tipo === 'focal') return ctcEhFocal(t);
+  if (tipo === 'patec') return ctcEhPatec(t);
+  return true;
+}
+// 25/11 — André: "Liderança, Comissão e Orçamentista pode deixar,
+// apenas coloca um selo (não contactar) na chave".
+//
+// Eles continuam na lista em Todos — some ninguém. O que muda é que a
+// chave leva o selo, para a pessoa não sair ligando para quem não é
+// ponto de contato do PATEC.
+//
+// A regra tem uma fonte só: quem NÃO é ponto focal e NÃO é PATEC leva
+// o selo. Assim um tipo novo na planilha já nasce sinalizado, em vez
+// de passar batido porque não estava numa lista escrita à mão.
+function ctcNaoContactar(t){
+  return !ctcEhFocal(t) && !ctcEhPatec(t);
+}
+
+// ── busca ─────────────────────────────────────────────────────────
+function ctcTermos(txt){
+  return String(txt == null ? '' : txt).split(/[\s,;|]+/)
+    .map(ctcCentroChave).filter(function(s){ return s.length > 0; });
+}
+// Primeiro o centro exato — é o que ele digita. Não achando nada, tenta
+// de novo por "contém", e a tela DIZ que foi por aí: resultado de uma
+// regra diferente da pedida não pode chegar disfarçado de exato.
+function ctcFiltrar(centro, tipo){
+  var termos = ctcTermos(centro);
+  var achaExato = function(){
+    var out = [];
+    termos.forEach(function(t){ (_ctc.porCentro[t] || []).forEach(function(i){ out.push(i); }); });
+    return out;
+  };
+  var achaConter = function(){
+    return _ctc.itens.filter(function(i){
+      return termos.some(function(t){ return ctcCentroChave(i.c).indexOf(t) !== -1; });
+    });
+  };
+  var base, porConter = false;
+  if (!termos.length) { base = _ctc.itens.slice(); }
+  else {
+    base = achaExato();
+    if (!base.length) { base = achaConter(); porConter = base.length > 0; }
+  }
+  var linhas = base.filter(function(i){ return ctcCasaTipo(tipo, i.t); });
+  return { linhas:linhas, termos:termos, tipo:tipo, porConter:porConter,
+           semFiltroTipo:base.length };
+}
+
+function ctcOrdenar(col){
+  if (_ctcOrd.col === col) _ctcOrd.asc = !_ctcOrd.asc;
+  else { _ctcOrd.col = col; _ctcOrd.asc = true; }
+  ctcDesenhar();
+}
+function _ctcOrdenaLinhas(linhas){
+  var c = _ctcOrd.col, s = _ctcOrd.asc ? 1 : -1;
+  return linhas.slice().sort(function(a, b){
+    var x = ctcNorm(a[c]), y = ctcNorm(b[c]);
+    // centro é número: 90 antes de 1250, não depois
+    if (c === 'c') {
+      var nx = parseInt(x, 10), ny = parseInt(y, 10);
+      if (!isNaN(nx) && !isNaN(ny) && nx !== ny) return (nx - ny) * s;
+    }
+    if (x === y) return ctcNorm(a.n) < ctcNorm(b.n) ? -1 : 1;
+    return (x < y ? -1 : 1) * s;
+  });
+}
+
+function ctcBuscar(){
+  var centro = (document.getElementById('ctc-centro') || {}).value || '';
+  var tipo   = (document.getElementById('ctc-tipo') || {}).value || 'todos';
+  if (!_ctc.carregada) {
+    var el = document.getElementById('ctc-resultado');
+    if (el) el.innerHTML = '<div style="padding:.9rem 1rem;background:var(--amc);'
+      + 'border-radius:8px;color:var(--am);font-size:12.5px">⏳ Carregando a base de '
+      + 'contatos...</div>';
+    ctcCarregar().then(function(){ ctcBuscar(); });
+    return;
+  }
+  _ctcRes = ctcFiltrar(centro, tipo);
+  ctcDesenhar();
+}
+
+function ctcLimpar(){
+  var c = document.getElementById('ctc-centro');
+  var t = document.getElementById('ctc-tipo');
+  if (c) c.value = '';
+  if (t) t.value = 'todos';
+  _ctcRes = { linhas:[], termos:[], tipo:'todos', porConter:false };
+  var el = document.getElementById('ctc-resultado');
+  if (el) el.innerHTML = '';
+  if (c) try { c.focus(); } catch (e) {}
+}
+
+function ctcVerTudo(v){ _ctcTudo = !!v; ctcDesenhar(); }
+
+function ctcDesenhar(){
+  var el = document.getElementById('ctc-resultado');
+  if (!el) return;
+  var r = _ctcRes;
+  if (!r.termos.length && !r.linhas.length) { el.innerHTML = ''; return; }
+
+  // Base vazia não é "centro não encontrado": são coisas diferentes e a
+  // tela precisa dizer qual das duas é.
+  if (!_ctc.itens.length) {
+    el.innerHTML = '<div style="padding:.9rem 1rem;background:var(--amc);border-radius:8px;'
+      + 'color:var(--am);font-size:12.5px">⚠️ Ainda não há planilha de contatos carregada'
+      + (_isAdmGeral() ? ' — suba o arquivo no card acima.'
+                       : '. Peça ao ADM para subir a planilha.') + '</div>';
+    return;
+  }
+
+  if (!r.linhas.length) {
+    var porque = r.semFiltroTipo
+      ? 'O centro existe na base, mas nenhum contato dele é <strong>'
+        + (r.tipo === 'patec' ? 'PATEC' : 'Ponto focal') + '</strong>. '
+        + 'Troque o tipo para <em>Todos</em> para ver quem atende esse centro.'
+      : 'Não achei esse centro na base. Confira o número — ou a planilha pode estar desatualizada.';
+    el.innerHTML = '<div style="padding:.9rem 1rem;background:var(--amc);border-radius:8px;'
+      + 'color:var(--am);font-size:12.5px">⚠️ Nenhum registro para <strong>'
+      + ctcEsc(r.termos.join(', ')) + '</strong>. ' + porque + '</div>';
+    return;
+  }
+
+  var cols = CTC_COLS.filter(function(c){ return _ctcTudo || !c.extra; });
+  var linhas = _ctcOrdenaLinhas(r.linhas);
+  // \uFE0E força o desenho de TEXTO: sem ele, parte dos navegadores
+  // troca a seta por um emoji colorido e o cabeçalho fica com dois
+  // bichinhos em vez de uma seta.
+  var SOBE = '\u2191\uFE0E', DESCE = '\u2193\uFE0E';
+  var seta = function(k){
+    if (_ctcOrd.col !== k) return '<span style="opacity:.35">' + SOBE + DESCE + '</span>';
+    return '<span style="color:var(--az)">' + (_ctcOrd.asc ? SOBE : DESCE) + '</span>';
+  };
+
+  var h = '<div style="display:flex;align-items:center;justify-content:space-between;'
+    + 'gap:10px;flex-wrap:wrap;margin-bottom:.6rem">'
+    + '<div style="font-size:12.5px;font-weight:700;color:var(--az)">Foram encontrados '
+    + linhas.length + ' registro(s).'
+    + (function(){
+        var n = linhas.filter(function(i){ return ctcNaoContactar(i.t); }).length;
+        return n ? '<span style="font-weight:400;color:var(--tx2)"> · ' + n
+                 + ' com selo <span style="color:var(--vm);font-weight:700">🚫 não contactar</span>'
+                 + ' (não é ponto focal nem PATEC)</span>' : '';
+      })()
+    + '</div>'
+    + '<label style="font-size:11px;color:var(--tx2);display:flex;align-items:center;gap:6px;cursor:pointer">'
+    + '<input type="checkbox" ' + (_ctcTudo ? 'checked' : '')
+    + ' onchange="ctcVerTudo(this.checked)"> mostrar todas as colunas da planilha</label>'
+    + '</div>';
+
+  if (r.porConter) {
+    h += '<div style="font-size:11.5px;color:var(--am);background:var(--amc);padding:7px 11px;'
+      + 'border-radius:7px;margin-bottom:.6rem">ℹ️ Nenhum centro é exatamente <strong>'
+      + ctcEsc(r.termos.join(', ')) + '</strong> — estes são os que <strong>contêm</strong> o que você digitou.</div>';
+  }
+
+  h += '<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+    + '<thead><tr style="background:var(--cin)">';
+  cols.forEach(function(c){
+    h += '<th onclick="ctcOrdenar(\'' + c.k + '\')" style="text-align:left;padding:9px 10px;'
+      + 'font-size:10.5px;letter-spacing:.4px;color:var(--tx2);white-space:nowrap;cursor:pointer;'
+      + 'border-bottom:1.5px solid var(--brd)">' + c.rot + ' ' + seta(c.k) + '</th>';
+  });
+  h += '</tr></thead><tbody>';
+  linhas.forEach(function(i){
+    h += '<tr style="border-bottom:1px solid var(--brd)">';
+    cols.forEach(function(c){
+      var v = ctcEsc(i[c.k] || '');
+      var est = 'padding:8px 10px;vertical-align:top';
+      if (c.forte) est += ';font-weight:700;color:var(--az);white-space:nowrap';
+      if (c.k === 'c') est += ';white-space:nowrap';
+      var selo = '';
+      if (c.forte && ctcNaoContactar(i.t)) {
+        selo = '<div style="margin-top:3px;display:inline-block;font-size:9.5px;font-weight:700;'
+             + 'letter-spacing:.3px;color:var(--vm);background:var(--vmc);border:1px solid var(--vm);'
+             + 'border-radius:5px;padding:1px 6px;white-space:nowrap" '
+             + 'title="Não é ponto focal nem PATEC — procure o contato PATEC do centro">'
+             + '🚫 NÃO CONTACTAR</div>';
+      }
+      h += '<td style="' + est + '">' + (v || '<span style="opacity:.35">—</span>')
+         + (selo ? '<br>' + selo : '') + '</td>';
+    });
+    h += '</tr>';
+  });
+  h += '</tbody></table></div>';
+  el.innerHTML = h;
+}
+
+// ── leitura da planilha ───────────────────────────────────────────
+function ctcLer(linhas){
+  var r = { itens:[], lidas:0, aviso:'', posUsadas:[], cabecalho:[] };
+  if (!linhas || !linhas.length) { r.aviso = 'Arquivo vazio.'; return r; }
+  var iCab = -1, cabs = [];
+  for (var k = 0; k < Math.min(linhas.length, 15); k++) {
+    var c = (linhas[k] || []).map(cpNormCab);
+    if (c.indexOf('CHAVE') !== -1 && c.indexOf('CENTRO') !== -1) { iCab = k; cabs = c; break; }
+  }
+  if (iCab === -1) {
+    r.aviso = 'Não achei as colunas Chave e Centro — isto é a planilha de contatos?';
+    return r;
+  }
+  r.cabecalho = (linhas[iCab] || []).map(function(x){ return String(x == null ? '' : x).trim(); });
+  var ix = function(n){ return _cpAchaCol(cabs, n); };
+  var col = { k:ix(['CHAVE']), n:ix(['NOME','CONTATO']), c:ix(['CENTRO']),
+              g:ix(['GERENCIA']), e:ix(['ESPECIALIDADE']),
+              t:ix(['TIPO_CONTATO','TIPO_DE_CONTATO']),
+              d:ix(['TIPO_DEMANDA','TIPO_DE_DEMANDA']),
+              a:ix(['ATIVO_DO_CENTRO','ATIVO']), o:ix(['OBSERVACAO','OBS']) };
+  // O que não vier na planilha fica vazio e é AVISADO — nunca chutado
+  // por posição, que é como uma coluna vira outra sem ninguém ver.
+  ['t','e','n'].forEach(function(x){
+    if (col[x] === -1) r.posUsadas.push('coluna "' + x + '" não encontrada no arquivo');
+  });
+  var pega = function(l, j){ return j === -1 ? '' : String(l[j] == null ? '' : l[j]).trim(); };
+  for (var b = iCab + 1; b < linhas.length; b++) {
+    var l = linhas[b] || [];
+    var cen = pega(l, col.c), cha = pega(l, col.k), nom = pega(l, col.n);
+    if (!cen && !cha && !nom) continue;
+    r.lidas++;
+    r.itens.push({ k:cha, n:nom, c:cen.replace(/\.0+$/, ''), g:pega(l, col.g),
+                   e:pega(l, col.e), t:pega(l, col.t), d:pega(l, col.d),
+                   a:pega(l, col.a), o:pega(l, col.o) });
+  }
+  if (!r.lidas) r.aviso = 'Nenhuma linha com conteúdo — confira a planilha.';
+  return r;
+}
+
+function ctcIndexar(){
+  var ix = {};
+  _ctc.itens.forEach(function(i){
+    var c = ctcCentroChave(i.c);
+    if (!c) return;
+    if (!ix[c]) ix[c] = [];
+    ix[c].push(i);
+  });
+  _ctc.porCentro = ix;
+}
+
+function _ctcSt(html){
+  var el = document.getElementById('ctc-upload-status');
+  if (el) el.innerHTML = html;
+}
+
+async function ctcUpload(file){
+  if (!file) return;
+  if (!_isAdmGeral()) { _ctcSt('<span style="color:var(--vm)">Só o ADM atualiza esta base.</span>'); return; }
+  try {
+    _ctcSt('⏳ Lendo a planilha...');
+    var buf = await file.arrayBuffer();
+    var wb = _lerWorkbookBR(buf, file.name);
+    var linhas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],
+                                          { header:1, defval:'', raw:true });
+    var r = ctcLer(linhas);
+    if (!r.lidas) { _ctcSt('<span style="color:var(--vm)">❌ ' + ctcEsc(r.aviso) + '</span>'); return; }
+
+    _ctc.itens = r.itens;
+    _ctc.total = r.lidas;
+    _ctc.arquivo = file.name;
+    _ctc.atualizadoEm = new Date().toISOString();
+    _ctc.atualizadoPor = cpQuem();
+    _ctc.posUsadas = r.posUsadas;
+    _ctc.carregada = true;
+    ctcIndexar();
+
+    _ctcSt('⏳ Gravando ' + r.lidas + ' linhas...');
+    var ok = await ctcGravar(r.cabecalho);
+    ctcInfo();
+    var cent = Object.keys(_ctc.porCentro).length;
+    var nPat = r.itens.filter(function(i){ return ctcEhPatec(i.t); }).length;
+    var nFoc = r.itens.filter(function(i){ return ctcEhFocal(i.t); }).length;
+    _ctcSt((ok ? '<span style="color:var(--vd)">✅ Base atualizada.</span>'
+               : '<span style="color:var(--am)">⚠ Li o arquivo, mas não consegui gravar na nuvem — '
+                 + 'vale só nesta sessão. Tente de novo.</span>')
+      + ' <span style="color:var(--tx2)">' + r.lidas + ' linhas · ' + cent + ' centros · '
+      + nFoc + ' ponto focal · ' + nPat + ' PATEC</span>'
+      + (r.posUsadas.length ? '<div style="color:var(--am);margin-top:5px">⚠ '
+          + ctcEsc(r.posUsadas.join(' · ')) + '</div>' : ''));
+    if (_ctcRes.termos.length) ctcBuscar();
+  } catch (e) {
+    console.warn('ctcUpload:', e);
+    _ctcSt('<span style="color:var(--vm)">❌ Não consegui ler o arquivo: ' + ctcEsc(e.message || e) + '</span>');
+  }
+}
+
+async function ctcGravar(cabecalho){
+  try {
+    var itens = _ctc.itens;
+    var chunks = Math.ceil(itens.length / CTC_CHUNK) || 1;
+    for (var c = 0; c < chunks; c++) {
+      var ok = await fbSetGeral('config', 'contatos_' + c,
+        { itens:itens.slice(c * CTC_CHUNK, (c + 1) * CTC_CHUNK) });
+      if (!ok) return false;
+    }
+    // Sobrou pedaço de uma base maior? Esvazia, senão a busca acharia
+    // gente que já saiu da planilha.
+    var antes = +(_ctc.chunksGravados || 0);
+    for (var d = chunks; d < antes; d++) await fbSetGeral('config', 'contatos_' + d, { itens:[] });
+    _ctc.chunksGravados = chunks;
+    return await fbSetGeral('config', 'contatos_meta', {
+      arquivo:_ctc.arquivo, total:_ctc.total, chunks:chunks,
+      cabecalho:cabecalho || [], posUsadas:_ctc.posUsadas || [],
+      atualizadoEm:_ctc.atualizadoEm, atualizadoPor:_ctc.atualizadoPor
+    });
+  } catch (e) { console.warn('ctcGravar:', e); return false; }
+}
+
+async function ctcCarregar(forcar){
+  if (_ctc.carregada && !forcar) return true;
+  try {
+    var m = await fbGetGeral('config', 'contatos_meta');
+    if (!m) { _ctc.carregada = true; ctcInfo(); return false; }
+    var n = +m.chunks || 1, pedidos = [];
+    for (var c = 0; c < n; c++) pedidos.push(fbGetGeral('config', 'contatos_' + c));
+    var partes = await Promise.all(pedidos);
+    var itens = [];
+    partes.forEach(function(p){ ((p || {}).itens || []).forEach(function(i){ itens.push(i); }); });
+    _ctc.itens = itens;
+    _ctc.total = +m.total || itens.length;
+    _ctc.arquivo = m.arquivo || '';
+    _ctc.atualizadoEm = m.atualizadoEm || '';
+    _ctc.atualizadoPor = m.atualizadoPor || '';
+    _ctc.posUsadas = m.posUsadas || [];
+    _ctc.chunksGravados = n;
+    _ctc.carregada = true;
+    ctcIndexar();
+    ctcInfo();
+    return true;
+  } catch (e) {
+    console.warn('ctcCarregar:', e);
+    _ctc.carregada = true; ctcInfo(); return false;
+  }
+}
+
+async function ctcRecarregar(){
+  _ctcSt('⏳ Recarregando...');
+  _ctc.carregada = false;
+  var ok = await ctcCarregar(true);
+  _ctcSt(ok ? '<span style="color:var(--vd)">✅ Base recarregada — ' + _ctc.total + ' linhas.</span>'
+            : '<span style="color:var(--am)">Nenhuma base na nuvem ainda.</span>');
+  if (_ctcRes.termos.length) ctcBuscar();
+}
+
+function ctcInfo(){
+  var el = document.getElementById('ctc-base-info');
+  if (!el) return;
+  if (!_ctc.itens.length) { el.textContent = 'Nenhuma planilha carregada'; return; }
+  var q = Object.keys(_ctc.porCentro).length;
+  var d = '';
+  try {
+    if (_ctc.atualizadoEm) {
+      var dt = new Date(_ctc.atualizadoEm);
+      d = ' · atualizada em ' + dt.toLocaleDateString('pt-BR') + ' '
+        + dt.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' })
+        + (_ctc.atualizadoPor ? ' por ' + _ctc.atualizadoPor : '');
+    }
+  } catch (e) {}
+  el.textContent = _ctc.total + ' contatos · ' + q + ' centros'
+    + (_ctc.arquivo ? ' · ' + _ctc.arquivo : '') + d;
+}
+
+function ctcAbrir(){
+  var up = document.getElementById('ctc-card-upload');
+  if (up) up.style.display = _isAdmGeral() ? '' : 'none';
+  ctcInfo();
+  if (!_ctc.carregada) ctcCarregar().then(ctcInfo);
+  var c = document.getElementById('ctc-centro');
+  if (c) try { c.focus(); } catch (e) {}
+}
+
 </script>
 
 <!-- ══ MODAL AÇÃO RC ══ -->
@@ -57659,6 +58173,9 @@ const PERMS_SIDEBAR = {
   // 25/11: tópico do PATEC, ADLV e FAST. Tela sem dado: só formata o
   // texto que a pessoa colar, então não há base para separar por frente.
   'formatacao-query':{ icon:'🧾', label:'Formatação de Query',     mod:'EXECUÇÃO' },
+  // 25/11: consulta dos contatos por centro. A base vive no endereço
+  // único das duas frentes — tabela de consulta, não demanda.
+  'patec-cspn':     { icon:'📇', label:'PATEC / CSPN',              mod:'EXECUÇÃO' },
   'pr-bancoferias': { icon:'🗓', label:'Gestão de Jornada',        mod:'EXECUÇÃO',
                       labelPerm:'Gestão de Jornada (PATEC)' },
   // Só existem dentro do módulo Pedidos, que tem Firebase próprio
