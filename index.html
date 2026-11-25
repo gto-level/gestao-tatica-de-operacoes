@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 15:30';
+var GTO_BUILD = '25/11 16:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1104,10 +1104,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
   <div class="sb-it" onclick="go('direcionamento',this)" style="display:none">📣 Direcionamento da Equipe</div>
   <div class="sb-it active" onclick="go('governanca',this)">⚖️ Governança</div>
   <div class="sb-it" id="sb-aa-it" onclick="go('analista-auto',this)">🤖 Analista Automático</div>
-  <div class="sb-it" id="sb-q18-it" onclick="go('consulta-q18',this)">🚫 Consulta Q18</div>
-  <div class="sb-it" id="sb-fq-it" onclick="go('formatacao-query',this)">🧾 Formatação de Query</div>
   <div class="sb-it" id="sb-ctc-it" onclick="go('patec-cspn',this)">📇 PATEC / CSPN</div>
   <div class="sb-it" id="sb-cpn-it" onclick="go('comparativo-pn',this)">🔍 Comparativo de PN</div>
+  <div class="sb-it" id="sb-q18-it" onclick="go('consulta-q18',this)">🚫 Consulta Q18</div>
+  <div class="sb-it" id="sb-fq-it" onclick="go('formatacao-query',this)">🧾 Formatação de Query</div>
 
   <!-- Gestão de Produção movida para ADM. O item do PCP é montado por
        authMontarSidebar (PERMS_SIDEBAR.pcp), e só na frente ADLV · PCP. -->
@@ -58361,15 +58361,19 @@ const PERMS_SIDEBAR = {
   'governanca':     { icon:'⚖️', label:'Governança',               mod:'EXECUÇÃO' },
   'planilha-critica':{ icon:'🔴', label:'Planilha Crítica',        mod:'EXECUÇÃO', redirect:'governanca', hidden:true },
   'analista-auto':  { icon:'🤖', label:'Analista Automático',      mod:'EXECUÇÃO', hiddenFast:true },
-  'consulta-q18':   { icon:'🚫', label:'Consulta Q18',             mod:'EXECUÇÃO', hiddenFast:true },
-  // 25/11: tópico do PATEC, ADLV e FAST. Tela sem dado: só formata o
-  // texto que a pessoa colar, então não há base para separar por frente.
-  'formatacao-query':{ icon:'🧾', label:'Formatação de Query',     mod:'EXECUÇÃO' },
   // 25/11: consulta dos contatos por centro. A base vive no endereço
   // único das duas frentes — tabela de consulta, não demanda.
   'patec-cspn':     { icon:'📇', label:'PATEC / CSPN',              mod:'EXECUÇÃO' },
   // 25/11: compara dois PN caractere a caractere. Tela sem dado.
   'comparativo-pn': { icon:'🔍', label:'Comparativo de PN',          mod:'EXECUÇÃO' },
+  'consulta-q18':   { icon:'🚫', label:'Consulta Q18',             mod:'EXECUÇÃO', hiddenFast:true },
+  // 25/11: tópico do PATEC, ADLV e FAST. Tela sem dado: só formata o
+  // texto que a pessoa colar, então não há base para separar por frente.
+  'formatacao-query':{ icon:'🧾', label:'Formatação de Query',     mod:'EXECUÇÃO' },
+  // 25/11: o Fechamento do Dia era declarado mais abaixo, junto do
+  // código da tela, e por isso caía no FIM do menu — a ordem daqui é a
+  // ordem do menu. Agora ele nasce no lugar que o André pediu.
+  'fechamento-dia': { icon:'🔒', label:'Fechamento do Dia',        mod:'EXECUÇÃO' },
   'pr-bancoferias': { icon:'🗓', label:'Gestão de Jornada',        mod:'EXECUÇÃO',
                       labelPerm:'Gestão de Jornada (PATEC)' },
   // Só existem dentro do módulo Pedidos, que tem Firebase próprio
@@ -66526,7 +66530,11 @@ if(_goOrig){
 }
 
 // Adicionar Fechamento do Dia ao PERMS_SIDEBAR e navegação
-PERMS_SIDEBAR['fechamento-dia'] = { icon:'🔒', label:'Fechamento do Dia', mod:'EXECUÇÃO' };
+// 25/11: o Fechamento do Dia passou a ser declarado dentro do próprio
+// PERMS_SIDEBAR, na posição em que aparece no menu. Declarar aqui o
+// jogava para o fim da lista, porque a ordem das chaves é a ordem dos
+// tópicos — e duas declarações da mesma coisa é uma divergir da outra
+// no primeiro ajuste.
 
 // ═══════════════════════════════════════════════════════════════
 //  APRESENTAÇÃO — FAST (derivada da do ADLV; bases nunca se misturam)
