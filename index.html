@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 05:00';
+var GTO_BUILD = '25/11 09:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -28323,10 +28323,17 @@ function monPerRedesenhar(k){
 // ── emitidos x convertidos ────────────────────────────────────────
 function monConvLinhas(k){
   k = k || 'conv';
-  var por = {};
+  var por = {}, fora = {};
   (_monConv.conv || []).forEach(function(c){
     if (!monPerDentro(k, c.dia)) return;
-    if (cpEstaFora(c.nome)) return;
+    // 25/11: quem está na lista "fora da conta" sumia daqui sem aviso —
+    // o André procurou a chave FRL7 e não achou. Continua fora da soma,
+    // mas agora a tela diz o nome e oferece o caminho de volta.
+    if (cpEstaFora(c.nome)) {
+      var f = fora[c.nome] || (fora[c.nome] = { nome:c.nome, emi:0, mem:0 });
+      f.emi += +c.emi || 0; f.mem += +c.mem || 0;
+      return;
+    }
     var o = por[c.nome] || (por[c.nome] =
       { nome:c.nome, mem:0, emi:0, lib:0, aguard:0, rej:0, outro:0 });
     o.mem += +c.mem || 0; o.emi += +c.emi || 0; o.lib += +c.lib || 0;
@@ -28334,11 +28341,13 @@ function monConvLinhas(k){
   });
   var lista = Object.keys(por).map(function(k){ return por[k]; })
     .sort(function(a, b){ return b.emi - a.emi || a.nome.localeCompare(b.nome); });
+  var listaFora = Object.keys(fora).map(function(n){ return fora[n]; })
+    .sort(function(a, b){ return b.emi - a.emi || a.nome.localeCompare(b.nome); });
   var tot = lista.reduce(function(t, p){
     t.mem += p.mem; t.emi += p.emi; t.lib += p.lib;
     t.aguard += p.aguard; t.rej += p.rej; t.outro += p.outro; return t;
   }, { mem:0, emi:0, lib:0, aguard:0, rej:0, outro:0 });
-  return { lista:lista, total:tot, per:monPerAtual(k) };
+  return { lista:lista, fora:listaFora, total:tot, per:monPerAtual(k) };
 }
 
 function monRenderConversao(k, idBox, idPer){
@@ -28366,12 +28375,31 @@ function monRenderConversao(k, idBox, idPer){
     + (_monConv.arquivo ? '<br>Última medição: <strong>' + cpEsc(_monConv.arquivo) + '</strong>'
         + (_monConv.atualizadoEm ? ' — ' + cpDataBR(String(_monConv.atualizadoEm).slice(0, 10)) : '') + '.' : '')
     + '</div>';
+  // quem foi tirado da conta: fica à vista, com o número que ele fez e
+  // o botão de devolver. Nome que some sem explicação vira meia hora
+  // procurando na planilha.
+  var rodapeFora = (r.fora && r.fora.length)
+    ? '<div style="margin-top:10px;font-size:11px;color:var(--tx2)">'
+      + '⚠ Fora da conta neste recorte: '
+      + r.fora.map(function(x){
+          var nomeJs = "'" + String(x.nome).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+          return '<span style="display:inline-flex;align-items:center;gap:5px;background:var(--cin);'
+            + 'border:1px solid var(--brd);border-radius:20px;padding:2px 4px 2px 10px;'
+            + 'margin:2px 4px 2px 0">' + cpEsc(x.nome)
+            + ' <strong>' + cpNum(x.emi) + '</strong> emitido(s)'
+            + '<button class="btn btn-s" style="padding:1px 7px;font-size:10px"'
+            + ' title="Voltar para a conta" onclick="cpVoltarComprador(' + nomeJs
+            + ').then(function(){ monRenderConversao(); })">↩</button></span>';
+        }).join('')
+      + '<div style="margin-top:4px">A produção deles está gravada e continua na medição — '
+      + 'só não entra nesta soma. Devolvendo, os números voltam em todos os dias.</div></div>'
+    : '';
   if (!r.lista.length) {
     box.innerHTML = cab + '<div style="font-size:12px;color:var(--tx2)">'
       + (_monConv.arquivo
           ? 'Nenhum pedido emitido neste recorte. Troque o período aí em cima para abrir a janela.'
           : 'Nada aqui ainda. Suba a medição de momento em <strong>Controle de Pedidos</strong> '
-            + 'que esta tabela se monta sozinha.') + '</div>';
+            + 'que esta tabela se monta sozinha.') + '</div>' + rodapeFora;
     return;
   }
   var pctT = r.total.emi ? Math.round(r.total.lib * 100 / r.total.emi) : 0;
@@ -28418,7 +28446,7 @@ function monRenderConversao(k, idBox, idPer){
     + '<td style="text-align:right;font-weight:800;color:var(--vm)">' + cpNum(r.total.rej) + '</td>'
     + '<td style="text-align:right;font-weight:800">' + pctT + '%</td><td></td>'
     + '</tr></tfoot></table></div>';
-  box.innerHTML = h;
+  box.innerHTML = h + rodapeFora;
 }
 
 // ── rejeites por comprador — os DOIS lados ───────────────────────
