@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 11:00';
+var GTO_BUILD = '25/11 12:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1105,6 +1105,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
   <div class="sb-it active" onclick="go('governanca',this)">⚖️ Governança</div>
   <div class="sb-it" id="sb-aa-it" onclick="go('analista-auto',this)">🤖 Analista Automático</div>
   <div class="sb-it" id="sb-q18-it" onclick="go('consulta-q18',this)">🚫 Consulta Q18</div>
+  <div class="sb-it" id="sb-fq-it" onclick="go('formatacao-query',this)">🧾 Formatação de Query</div>
 
   <!-- Gestão de Produção movida para ADM. O item do PCP é montado por
        authMontarSidebar (PERMS_SIDEBAR.pcp), e só na frente ADLV · PCP. -->
@@ -2467,6 +2468,67 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
     </div>
   </div>
   <!-- ══ fim CONSULTA Q18 ══ -->
+
+  <!-- ══ FORMATAÇÃO DE QUERY ══
+       25/11 — André: "preciso criar dentro do módulo PATEC um tópico
+       chamado formatação de query, igual às fotos".
+       Tela sem dado nenhum: não lê nem grava no Firebase, não guarda
+       nada. É só a transformação do texto que está na caixa. ══ -->
+  <div id="p-formatacao-query" class="page">
+    <div class="cd" style="margin-bottom:1rem">
+      <div class="cd-t">🧾 Formatação Query SQL</div>
+      <p style="font-size:12px;color:var(--tx2);margin-bottom:1.1rem">
+        Transforme uma lista de números em formato pronto para cláusula <strong>IN (...)</strong>.
+      </p>
+
+      <label style="display:block;font-size:12px;font-weight:700;color:var(--tx);margin-bottom:6px">
+        Cole sua lista aqui:
+      </label>
+      <textarea id="fq-entrada" rows="9" spellcheck="false"
+        placeholder="7004688234&#10;7004688235&#10;7004688236"
+        oninput="fqContar()"
+        style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.55;padding:10px 12px;border:1.5px solid var(--brd);border-radius:8px;resize:vertical;background:var(--bg);color:var(--tx)"></textarea>
+      <div id="fq-contagem" style="font-size:11px;color:var(--tx2);margin-top:5px">
+        Aceita um por linha, separado por vírgula, ponto e vírgula ou espaço.
+      </div>
+
+      <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-top:1rem">
+        <div>
+          <label style="display:block;font-size:12px;font-weight:700;color:var(--tx);margin-bottom:6px">
+            Adicionar zeros à esquerda (qtd.):
+          </label>
+          <input type="number" id="fq-zeros" min="0" max="30" value="0"
+            placeholder="Ex.: 3 (adiciona 000 no início)"
+            onkeydown="if(event.key==='Enter') fqFormatar()"
+            style="width:300px;font-size:13px;padding:9px 12px;border:1.5px solid var(--brd);border-radius:8px;font-weight:600;background:var(--bg);color:var(--tx)">
+        </div>
+        <button class="btn btn-p" onclick="fqFormatar()">⚙️ FORMATAR</button>
+        <button class="btn btn-s" onclick="fqLimpar()">✕ LIMPAR</button>
+      </div>
+      <div style="font-size:11px;color:var(--tx2);margin-top:7px">
+        Os zeros entram <strong>na frente</strong> de cada número, do jeito que você pedir:
+        <code>22</code> com 5 vira <code>'0000022'</code>. Deixe <strong>0</strong> para não mexer.
+      </div>
+
+      <div id="fq-aviso" style="display:none;margin-top:1rem;font-size:12px;padding:9px 12px;border-radius:8px"></div>
+
+      <div style="margin-top:1.25rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;flex-wrap:wrap">
+          <label style="font-size:12px;font-weight:700;color:var(--tx)">Resultado formatado:</label>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span id="fq-res-info" style="font-size:11px;color:var(--tx2)"></span>
+            <button class="btn btn-s" onclick="fqCopiar()" title="Copiar o resultado"
+              style="font-size:11px;padding:5px 11px">📋 Copiar</button>
+          </div>
+        </div>
+        <textarea id="fq-saida" rows="11" readonly spellcheck="false"
+          placeholder="O resultado aparece aqui depois de clicar em FORMATAR."
+          style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;line-height:1.55;padding:12px;border:1.5px solid #1e293b;border-radius:8px;resize:vertical;background:#0f172a;color:#7dd3fc"></textarea>
+        <div id="fq-copia-msg" style="font-size:11px;margin-top:5px;min-height:14px"></div>
+      </div>
+    </div>
+  </div>
+  <!-- ══ fim FORMATAÇÃO DE QUERY ══ -->
 
   <div id="p-adm" class="page">
 
@@ -10292,6 +10354,7 @@ function go(id, el) {
     else renderAbrirPatecCascata();
   }, 100);
   if(id==='consulta-q18') setTimeout(()=>{ if(!_q18Impedidos.size) q18CarregarFirebase(); }, 100);
+  if(id==='formatacao-query') setTimeout(()=>{ try{ fqAbrir(); }catch(e){} }, 60);
   if(id==='adm') setTimeout(()=>{
     const login=document.getElementById('adm-login');
     if(login&&login.style.display!=='none') admLogin();
@@ -56906,6 +56969,187 @@ function q18Consultar(valor){
   }
 }
 
+
+// ══════════════════════════════════════════════════════════════════
+//  FORMATAÇÃO DE QUERY  (tópico do PATEC, 25/11)
+//
+//  André: "preciso criar dentro do módulo patec um topico chamado
+//  formatação de query... igual as foto em anexo".
+//
+//  Pega a lista que a pessoa colou e devolve uma linha por número no
+//  formato 'numero', com vírgula em todas menos a última — pronto para
+//  colar dentro de um IN (...). O campo de zeros PREFIXA a quantidade
+//  pedida: 22 com 5 vira '0000022' (é o que a foto mostra), e não um
+//  completar até cinco dígitos.
+//
+//  Não toca em dado nenhum: nada de Firebase, nada de localStorage.
+//  O que entra e o que sai vive só nas duas caixas de texto.
+// ══════════════════════════════════════════════════════════════════
+
+var FQ_ZEROS_MAX = 30;
+
+// Separadores aceitos: linha, vírgula, ponto e vírgula, tab, espaço e
+// barra — é o que vem quando se copia de Excel, de e-mail ou do SAP.
+// Aspas e parênteses que vierem presos no número saem fora, para dar
+// certo também quando a pessoa cola uma query antiga inteira.
+function fqPedacos(txt){
+  return String(txt == null ? '' : txt)
+    .split(/[\s,;|]+/)
+    .map(function(s){ return s.replace(/^[('"\[\]]+|[)'"\[\]]+$/g, '').trim(); })
+    .filter(function(s){ return s.length > 0; });
+}
+// Palavra sem nenhum dígito não é item de lista: é o IN, o VALUES, o
+// AND que vieram junto quando se cola uma query inteira. Fica de fora
+// da saída — e fqMontar conta quantas foram, para a tela dizer.
+function fqSeparar(txt){
+  return fqPedacos(txt).filter(function(s){ return /\d/.test(s); });
+}
+
+function fqZeros(v){
+  var n = parseInt(v, 10);
+  if (isNaN(n) || n < 0) return 0;
+  return Math.min(n, FQ_ZEROS_MAX);
+}
+
+function fqPrefixo(qtd){
+  var z = '';
+  for (var i = 0; i < fqZeros(qtd); i++) z += '0';
+  return z;
+}
+
+// O miolo, separado da tela para poder ser testado sozinho.
+function fqMontar(txt, zeros){
+  var todos  = fqPedacos(txt);
+  var brutos = todos.filter(function(s){ return /\d/.test(s); });
+  var fora   = todos.filter(function(s){ return !/\d/.test(s); });
+  var pref   = fqPrefixo(zeros);
+  var vistos = {}, unicos = [], naoNumero = [];
+  brutos.forEach(function(b){
+    if (!/^\d+$/.test(b) && naoNumero.indexOf(b) === -1) naoNumero.push(b);
+    var v = pref + b;
+    if (!vistos[v]) { vistos[v] = 1; unicos.push(v); }
+  });
+  var texto = unicos.map(function(v, i){
+    return "'" + v + "'" + (i < unicos.length - 1 ? ',' : '');
+  }).join('\n');
+  return { lidos:brutos.length, itens:unicos, total:unicos.length,
+           repetidos:brutos.length - unicos.length,
+           naoNumero:naoNumero, semDigito:fora, texto:texto };
+}
+
+function fqContar(){
+  var el = document.getElementById('fq-contagem');
+  if (!el) return;
+  var n = fqSeparar((document.getElementById('fq-entrada') || {}).value).length;
+  el.textContent = n
+    ? n + (n === 1 ? ' número na caixa.' : ' números na caixa.')
+    : 'Aceita um por linha, separado por vírgula, ponto e vírgula ou espaço.';
+}
+
+function _fqAviso(html, cor, fundo){
+  var el = document.getElementById('fq-aviso');
+  if (!el) return;
+  if (!html) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display    = 'block';
+  el.style.color      = cor;
+  el.style.background = fundo;
+  el.innerHTML        = html;
+}
+
+function fqFormatar(){
+  var ent = document.getElementById('fq-entrada');
+  var sai = document.getElementById('fq-saida');
+  var inf = document.getElementById('fq-res-info');
+  var msg = document.getElementById('fq-copia-msg');
+  if (!ent || !sai) return;
+  if (msg) msg.innerHTML = '';
+
+  var r = fqMontar(ent.value, (document.getElementById('fq-zeros') || {}).value);
+  fqContar();
+
+  if (!r.total) {
+    sai.value = '';
+    if (inf) inf.textContent = '';
+    _fqAviso('⚠️ Não achei nenhum número na caixa de cima — cole a lista e clique em FORMATAR.',
+             'var(--am)', 'var(--amc)');
+    return;
+  }
+
+  sai.value = r.texto;
+  if (inf) inf.textContent = r.total + (r.total === 1 ? ' número' : ' números');
+
+  // O que mudou em relação ao que ela colou fica escrito na tela, em vez
+  // de o número sumir sem explicação.
+  var recados = [];
+  if (r.repetidos) {
+    recados.push('<strong>' + r.repetidos + '</strong> repetido'
+                 + (r.repetidos === 1 ? '' : 's') + ' entrou uma vez só');
+  }
+  if (r.semDigito.length) {
+    recados.push('<strong>' + r.semDigito.length + '</strong> palavra'
+                 + (r.semDigito.length === 1 ? '' : 's') + ' sem número ficou de fora ('
+                 + r.semDigito.slice(0, 3).map(function(x){ return '<code>' + x + '</code>'; }).join(', ')
+                 + (r.semDigito.length > 3 ? '…' : '') + ')');
+  }
+  if (r.naoNumero.length) {
+    recados.push('<strong>' + r.naoNumero.length + '</strong> item'
+                 + (r.naoNumero.length === 1 ? '' : 'ns') + ' sem ser número puro ('
+                 + r.naoNumero.slice(0, 3).map(function(x){ return '<code>' + x + '</code>'; }).join(', ')
+                 + (r.naoNumero.length > 3 ? '…' : '') + ') — saiu do mesmo jeito, confira');
+  }
+  if (recados.length) {
+    _fqAviso('ℹ️ ' + r.lidos + ' lido' + (r.lidos === 1 ? '' : 's') + ', ' + r.total
+             + ' no resultado: ' + recados.join(' · ') + '.',
+             'var(--az)', 'var(--azc)');
+  } else {
+    _fqAviso('✅ ' + r.total + (r.total === 1 ? ' número formatado.' : ' números formatados.'),
+             'var(--vd)', 'var(--vdc)');
+  }
+}
+
+function fqLimpar(){
+  var ent = document.getElementById('fq-entrada');
+  var sai = document.getElementById('fq-saida');
+  var inf = document.getElementById('fq-res-info');
+  var msg = document.getElementById('fq-copia-msg');
+  if (ent) ent.value = '';
+  if (sai) sai.value = '';
+  if (inf) inf.textContent = '';
+  if (msg) msg.innerHTML = '';
+  _fqAviso('', '', '');
+  fqContar();
+  if (ent) try { ent.focus(); } catch (e) {}
+}
+
+function fqCopiar(){
+  var sai = document.getElementById('fq-saida');
+  var msg = document.getElementById('fq-copia-msg');
+  var txt = sai ? sai.value : '';
+  var diz = function(t, c){ if (msg) msg.innerHTML = '<span style="color:' + c + '">' + t + '</span>'; };
+  if (!txt) { diz('Nada para copiar ainda — clique em FORMATAR primeiro.', 'var(--am)'); return; }
+  // Copiar pela seleção também: em file:// o clipboard do navegador
+  // costuma recusar, e aí o resultado já fica selecionado para o Ctrl+C.
+  var manual = function(){
+    try { sai.focus(); sai.setSelectionRange(0, txt.length); } catch (e) {}
+    diz('Selecionei o resultado — use Ctrl+C.', 'var(--am)');
+  };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function(){
+        diz('✓ Copiado.', 'var(--vd)');
+      }, manual);
+      return;
+    }
+  } catch (e) {}
+  manual();
+}
+
+function fqAbrir(){
+  fqContar();
+  var ent = document.getElementById('fq-entrada');
+  if (ent) try { ent.focus(); } catch (e) {}
+}
+
 </script>
 
 <!-- ══ MODAL AÇÃO RC ══ -->
@@ -57412,6 +57656,9 @@ const PERMS_SIDEBAR = {
   'planilha-critica':{ icon:'🔴', label:'Planilha Crítica',        mod:'EXECUÇÃO', redirect:'governanca', hidden:true },
   'analista-auto':  { icon:'🤖', label:'Analista Automático',      mod:'EXECUÇÃO', hiddenFast:true },
   'consulta-q18':   { icon:'🚫', label:'Consulta Q18',             mod:'EXECUÇÃO', hiddenFast:true },
+  // 25/11: tópico do PATEC, ADLV e FAST. Tela sem dado: só formata o
+  // texto que a pessoa colar, então não há base para separar por frente.
+  'formatacao-query':{ icon:'🧾', label:'Formatação de Query',     mod:'EXECUÇÃO' },
   'pr-bancoferias': { icon:'🗓', label:'Gestão de Jornada',        mod:'EXECUÇÃO',
                       labelPerm:'Gestão de Jornada (PATEC)' },
   // Só existem dentro do módulo Pedidos, que tem Firebase próprio
