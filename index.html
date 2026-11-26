@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '26/11 11:40';
+var GTO_BUILD = '26/11 13:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -19422,13 +19422,21 @@ async function stbUpload(file){
     });
     r.reaproveitados = reaproveitados;
 
-    // os que não vieram nesta BU e ainda não têm conclusão continuam na
-    // lista — é a regra do André: o item sai pela conclusão, não pela
-    // ausência na planilha de hoje
+    // 26/11 — O item que some da BU INTEIRA não volta mais para a fila
+    // de trabalho. Olhando a BU de 24/11 contra a de 26/11, os 12 que
+    // sumiram sumiram porque deixaram de existir: em 6 a RC saiu da
+    // base e nos outros 6 o item foi apagado de uma RC que continua lá
+    // (a RC 36518714 perdeu o item 100 e ficou com 10 a 70). Pedir
+    // "duplicar a linha" de uma linha que não existe mais não leva a
+    // lugar nenhum — e eram 111 deles empilhados no card.
+    //
+    // Mas também não somem calados, que era o medo dele: vão para uma
+    // lista à parte, "saíram sem conclusão", com RC e a data em que
+    // foram vistos pela última vez.
     var naBU = {};
     r.itens.forEach(function(i){ naBU[i.rc + '|' + i.seq] = 1; });
     var pend = await stbPendentesAnteriores(stbDataSel());
-    r.semBU = 0;
+    r.semBU = 0; r.sumidos = [];
     r.resolvidos = 0; r.resolvidosLista = []; r.resolvidosPor = { fin:0, status:0, pedido:0 };
     Object.keys(pend).forEach(function(k){
       var i = pend[k];
@@ -19440,13 +19448,16 @@ async function stbUpload(file){
         return;
       }
       if (d.destino !== 'arrasta') return;
-      var c = Object.assign({}, i, { foraDaBU:true });
-      r.itens.push(c);
+      r.sumidos.push(Object.assign({}, i, { foraDaBU:true }));
       r.semBU++;
+    });
+    r.sumidos.sort(function(a, b){
+      return String(b.visto || '').localeCompare(String(a.visto || ''));
     });
 
     _stbDia = { data: stbDataSel(), arquivo: file.name, aba: nome,
-                itens: r.itens, lidas: r.lidas, reaproveitados: r.reaproveitados || 0,
+                itens: r.itens, sumidos: r.sumidos || [],
+                lidas: r.lidas, reaproveitados: r.reaproveitados || 0,
                 emTratativa: r.emTratativa, statusB: r.statusB, eliminado: r.eliminado,
                 atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem() };
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ <strong>' + cpEsc(file.name) + '</strong> — aba '
@@ -19455,8 +19466,9 @@ async function stbUpload(file){
       + (r.reaproveitados ? ' <span style="color:var(--az)">' + cpNum(r.reaproveitados)
           + ' já vinham com comentário ou marcação de antes.</span>' : '') + '</span>'
       + (r.semBU ? '<div style="color:var(--am);margin-top:4px">↩ ' + cpNum(r.semBU)
-          + ' item(ns) não vieram nesta BU e continuam na lista porque ainda não têm '
-          + 'conclusão — eles saem quando você escolher a conclusão no dash.</div>' : '')
+          + ' item(ns) não vieram em nenhuma linha desta BU e ficaram SEM conclusão. '
+          + 'Eles saíram da fila de trabalho e estão na lista <strong>Saíram sem '
+          + 'conclusão</strong>, no fim da tela.</div>' : '')
       + (r.resolvidos ? '<div style="color:var(--vd);margin-top:4px">✓ ' + cpNum(r.resolvidos)
           + ' item(ns) saíram da lista porque a própria BU já os resolveu'
           + (function(){
@@ -19708,6 +19720,48 @@ function _stbHtmlLista(suf){
     + 'O arquivo sai no mesmo formato do script de RPA: cabeçalho na linha 7 e as colunas '
     + '<strong>RC · Item · Grupo Comprador · Número de Acompanhamento · Título · Texto</strong>. '
     + 'O <strong>nome e o comentário ficam só aqui</strong> — não entram no arquivo.</div>'
+    + '</div>'
+    + _stbHtmlSumidos();
+  return h;
+}
+
+// ── SAÍRAM SEM CONCLUSÃO (26/11) ─────────────────────────────────
+// Item que deixou de existir na BU — a RC saiu da base, ou o item foi
+// apagado de uma RC que continua lá. Não dá para duplicar uma linha que
+// não existe, então ele sai da fila de trabalho; mas sair da fila não
+// é sumir: fica aqui, com a data em que foi visto pela última vez, para
+// conferência.
+function _stbHtmlSumidos(){
+  var s = ((_stbDia || {}).sumidos) || [];
+  if (!s.length) return '';
+  var h = '<div class="cd" style="margin-top:1rem">'
+    + '<div class="cd-t">↩ Saíram sem conclusão — ' + cpNum(s.length) + ' item(ns)</div>'
+    + '<p style="font-size:11.5px;color:var(--tx2);margin-bottom:.7rem">'
+    + 'Estes estiveram no card e a BU não traz mais nenhuma linha deles: a RC saiu da base '
+    + 'ou o item foi apagado da RC. Como a linha não existe mais, não há o que duplicar — '
+    + 'por isso saíram da fila de trabalho e não contam no número do card. '
+    + 'Se algum ainda precisar de tratativa, ele volta sozinho na próxima BU que o trouxer.</p>'
+    + '<div style="overflow:auto;max-height:340px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    + '<thead><tr style="background:var(--cin)">'
+    + ['RC','Item','Pedido','Texto breve','Quem estava com ele','Visto pela última vez']
+        .map(function(t){ return '<th style="text-align:left;padding:7px 9px;font-size:10px;'
+          + 'color:var(--tx2);border-bottom:1.5px solid var(--brd);white-space:nowrap">'
+          + t + '</th>'; }).join('')
+    + '</tr></thead><tbody>';
+  s.slice(0, 500).forEach(function(i){
+    h += '<tr style="border-bottom:1px solid var(--brd)">'
+      + '<td style="padding:6px 9px;font-weight:700;color:var(--az);white-space:nowrap">' + cpEsc(i.rc) + '</td>'
+      + '<td style="padding:6px 9px;white-space:nowrap">' + cpEsc(i.seq) + '</td>'
+      + '<td style="padding:6px 9px;white-space:nowrap">' + cpEsc(i.pedido || '—') + '</td>'
+      + '<td style="padding:6px 9px">' + cpEsc(i.textoBreve || '—') + '</td>'
+      + '<td style="padding:6px 9px">' + cpEsc(i.nome || '—') + '</td>'
+      + '<td style="padding:6px 9px;white-space:nowrap">'
+      +   (i.visto ? cpDataBR(i.visto) : '—') + '</td>'
+      + '</tr>';
+  });
+  h += '</tbody></table></div>'
+    + (s.length > 500 ? '<div style="font-size:11px;color:var(--tx2);margin-top:6px">'
+        + 'Mostrando os 500 mais recentes de ' + cpNum(s.length) + '.</div>' : '')
     + '</div>';
   return h;
 }
@@ -19940,6 +19994,11 @@ async function stbSalvar(){
     await db.collection(STB_COL).doc(d.data).set({
       data: d.data, arquivo: d.arquivo || '', lidas: +d.lidas || 0,
       reaproveitados: +d.reaproveitados || 0,
+      sumidos: (d.sumidos || []).slice(0, 2000).map(function(i){
+        return { rc:String(i.rc||''), seq:String(i.seq||''), nome:String(i.nome||''),
+                 comentario:String(i.comentario||''), textoBreve:String(i.textoBreve||''),
+                 pedido:String(i.pedido||''), visto:String(i.visto||'') };
+      }),
       emTratativa: +d.emTratativa || 0, statusB: +d.statusB || 0, eliminado: +d.eliminado || 0,
       // 26/11 — esta lista de campos é um FILTRO: o que não está aqui
       // não é gravado. Três campos ficavam de fora e isso explicava o
@@ -20069,6 +20128,7 @@ async function stbCarregar(data){
     if (!doc || !doc.exists) { _stbDia = null; return; }
     var d = doc.data() || {};
     _stbDia = { data:d.data || data, arquivo:d.arquivo || '', itens:d.itens || [],
+                sumidos:d.sumidos || [],
                 reaproveitados:+d.reaproveitados || 0,
                 lidas:+d.lidas || 0, emTratativa:+d.emTratativa || 0, statusB:+d.statusB || 0,
                 eliminado:+d.eliminado || 0,
@@ -20976,7 +21036,7 @@ async function gpCarregarStatusB(){
     dias.sort(function(a, b){ return a.data < b.data ? -1 : (a.data > b.data ? 1 : 0); });
     var desde = _stbDesdeDeDias(dias);
     var d = melhor.d;
-    _gpSB = { itens:d.itens || [], data:melhor.data, arquivo:d.arquivo || '',
+    _gpSB = { itens:d.itens || [], sumidos:d.sumidos || [], data:melhor.data, arquivo:d.arquivo || '',
               lidas:+d.lidas || 0, emTratativa:+d.emTratativa || 0, statusB:+d.statusB || 0,
               desde: desde, primeiroDia: dias.length ? dias[0].data : '',
               atualizadoEm:d.atualizadoEm || '', atualizadoPor:d.atualizadoPor || '' };
@@ -22609,10 +22669,10 @@ function gpRender(){
               // cresce e ninguém sabe de onde veio — então ele passa a
               // dizer, embaixo, quanto é de cada.
               var p = gpSBPendentes();
-              var fora = p.filter(function(i){ return i.foraDaBU; }).length;
+              var sum = ((_gpSB || {}).sumidos || []).length;
               return '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
-                + cpNum(p.length - fora) + ' na BU de ' + cpDataBR(_gpSB.data)
-                + (fora ? ' · ' + cpNum(fora) + ' arrastado(s) sem conclusão' : '')
+                + 'na BU de ' + cpDataBR(_gpSB.data)
+                + (sum ? ' · ' + cpNum(sum) + ' saíram sem conclusão' : '')
                 + '</div>';
             })()
           : '')
@@ -22640,13 +22700,17 @@ async function gpAbrirCard(ch){
   // o índice pedido → RC/item/oportunidade pesa 5 documentos: só é lido
   // quando alguém abre o card que precisa dele, e uma vez por sessão
   if (_gpCard === 'rejeitados' || _gpCard === 'rejsup') {
+    // o motivo e a conclusão que o comprador escreveu têm marca
+    // própria: estavam presos ao if do índice e, com ele já carregado,
+    // a grade abria vazia
+    var _lido = _rjTrat.carregado;
     if (!_rjPedIx.itens) {
       await rjCarregarBuIx();
       await rjCarregarPedIx();
       await rjCarregarItemOp();
-      await rjCarregarTratativas();
-      gpRender();
     }
+    if (!_lido) await rjCarregarTratativas();
+    if (!_rjPedIx.itens || !_lido) gpRender();
   }
   // os três cards de emissão precisam do mesmo índice: é dele que sai a
   // coluna Pedido, virada pela chave RC + item
@@ -23244,7 +23308,7 @@ function rjLinhasItens(itens){
 // de conclusão fica travado — foi o que o André pediu.
 // 11/11: PATEC saiu e Status B entrou, a pedido do André.
 var RJ_CONCLUSOES = ['Ajustado', 'Republicado', 'Devolvido', 'Status B'];
-var _rjTrat = { itens:{}, atualizadoEm:'', atualizadoPor:'' };
+var _rjTrat = { itens:{}, atualizadoEm:'', atualizadoPor:'', carregado:false };
 
 // A chave era pedido|RC|item. Desde 12/11 é o PEDIDO: a linha é o
 // pedido, e tratar o pedido trata o rejeite inteiro.
@@ -23268,24 +23332,48 @@ function rjTrat(l){
   return { motivo:'', conclusao:'' };
 }
 
-async function rjCarregarTratativas(){
+// 26/11 — "o card de rejeite fornecedor não está salvando os
+// comentários (motivo) e conclusão; toda vez que atualiza a página ele
+// perde os dados".
+//
+// Eram duas coisas somadas, e a segunda apagava o trabalho de todo
+// mundo:
+//
+//   1. em gpAbrirCard, a leitura das tratativas estava DENTRO do
+//      "if (!_rjPedIx.itens)". Quem abrisse antes um dos cards de
+//      emissão já deixava esse índice carregado, o if não entrava, e
+//      as tratativas nunca eram lidas — a grade abria com os campos
+//      vazios;
+//   2. a gravação usava set() sem merge, e set() SUBSTITUI o
+//      documento inteiro. Com _rjTrat vazio na memória, escrever um
+//      motivo apagava todos os outros que já estavam gravados.
+//
+// Agora: a leitura tem a marca própria dela (carregado), acontece fora
+// daquele if, e NADA é gravado antes de ler — e a gravação é merge, que
+// acrescenta a chave em vez de trocar o documento.
+async function rjCarregarTratativas(forcar){
+  if (_rjTrat.carregado && !forcar) return true;
   try {
-    var db = getDB(); if (!db) return;
+    var db = getDB(); if (!db) return false;
     var d = await db.collection('config').doc('rejeite_tratativa').get();
-    if (d && d.exists) {
-      var T = d.data() || {};
-      _rjTrat = { itens:T.itens || {}, atualizadoEm:T.atualizadoEm || '',
-                  atualizadoPor:T.atualizadoPor || '' };
-    }
-  } catch (e) { console.warn('rjCarregarTratativas:', e); }
+    var T = (d && d.exists) ? (d.data() || {}) : {};
+    _rjTrat = { itens:T.itens || {}, atualizadoEm:T.atualizadoEm || '',
+                atualizadoPor:T.atualizadoPor || '', carregado:true };
+    return true;
+  } catch (e) { console.warn('rjCarregarTratativas:', e); return false; }
 }
 
 async function rjGravarTratativas(){
   try {
     var db = getDB(); if (!db) return false;
+    // trava de segurança: gravar sem ter lido é o caminho para apagar
+    // o que já estava lá
+    if (!_rjTrat.carregado) return false;
     _rjTrat.atualizadoEm = new Date().toISOString();
     _rjTrat.atualizadoPor = cpQuem();
-    await db.collection('config').doc('rejeite_tratativa').set(_rjTrat);
+    await db.collection('config').doc('rejeite_tratativa').set(
+      { itens:_rjTrat.itens || {}, atualizadoEm:_rjTrat.atualizadoEm,
+        atualizadoPor:_rjTrat.atualizadoPor }, { merge:true });
     return true;
   } catch (e) { console.warn('rjGravarTratativas:', e); return false; }
 }
@@ -23333,6 +23421,10 @@ function rjMotivoDigitando(pref, idx, el){
 async function rjSalvarTrat(pref, idx, campo, valor){
   var l = _rjLinhaDe(pref, idx);
   if (!l) return;
+  // ler antes de escrever: sem isto, o primeiro motivo digitado numa
+  // sessão que não leu as tratativas levava junto tudo o que já estava
+  // gravado
+  if (!_rjTrat.carregado) await rjCarregarTratativas();
   var k = rjChaveTrat(l);
   var o = _rjTrat.itens[k] || (_rjTrat.itens[k] = { motivo:'', conclusao:'' });
   o[campo] = String(valor == null ? '' : valor).trim();
@@ -23625,11 +23717,9 @@ async function rjAbrir(){
         // o que o comprador já escreveu em Motivo e Conclusão
         db.collection('config').doc('rejeite_tratativa').get()
       ]);
-      if (docs[4] && docs[4].exists) {
-        var T = docs[4].data() || {};
-        _rjTrat = { itens:T.itens || {}, atualizadoEm:T.atualizadoEm || '',
-                    atualizadoPor:T.atualizadoPor || '' };
-      }
+      var T = (docs[4] && docs[4].exists) ? (docs[4].data() || {}) : {};
+      _rjTrat = { itens:T.itens || {}, atualizadoEm:T.atualizadoEm || '',
+                  atualizadoPor:T.atualizadoPor || '', carregado:true };
       // o que faz o rejeite nascer com dono: quem emitiu cada pedido e
       // o índice pedido → RC, item e oportunidade
       await gpCarregarResp();
@@ -26101,14 +26191,14 @@ function gpHtmlStatusB(){
             + ', então item mais antigo que isso aparece como dessa data.' : '.')
     +   (_gpSB.data ? (function(){
           var todos = _gpSB.itens || [];
-          var fora = todos.filter(function(i){ return i.foraDaBU; }).length;
+          var sum = (_gpSB.sumidos || []).length;
           return '<br>BU de <strong>' + cpDataBR(_gpSB.data) + '</strong>'
             + (_gpSB.arquivo ? ' (' + cpEsc(_gpSB.arquivo) + ')' : '')
             + ' · ' + cpNum(_gpSB.lidas) + ' linhas lidas · '
-            + '<strong>' + cpNum(todos.length - fora) + '</strong> entraram pelo filtro desta BU'
-            + (fora ? ' · <strong>' + cpNum(fora) + '</strong> são de dias anteriores, que a BU '
-                + 'não traz mais e ninguém concluiu no dash (marcados como <em>fora da BU</em>)' : '')
-            + ' · ' + cpNum(feitos.length) + ' já duplicada(s).'
+            + '<strong>' + cpNum(todos.length) + '</strong> entraram pelo filtro desta BU · '
+            + cpNum(feitos.length) + ' já duplicada(s)'
+            + (sum ? ' · <strong>' + cpNum(sum) + '</strong> saíram sem conclusão (lista no fim)' : '')
+            + '.'
             // Esta lista é fotografada no upload: ela não se refaz ao
             // abrir a tela. Sem dizer isso, um número velho passa por
             // número de hoje.
