@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '26/11 11:00';
+var GTO_BUILD = '26/11 11:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -19941,6 +19941,16 @@ async function stbSalvar(){
       data: d.data, arquivo: d.arquivo || '', lidas: +d.lidas || 0,
       reaproveitados: +d.reaproveitados || 0,
       emTratativa: +d.emTratativa || 0, statusB: +d.statusB || 0, eliminado: +d.eliminado || 0,
+      // 26/11 — esta lista de campos é um FILTRO: o que não está aqui
+      // não é gravado. Três campos ficavam de fora e isso explicava o
+      // card inchado:
+      //   foraDaBU → depois de recarregar, o item arrastado passava a
+      //              se parecer com item da BU, e o card somava os dois
+      //              sem dizer;
+      //   visto    → sem a data em que o item foi visto pela última
+      //              vez, o corte de STB_GUARDA_SEM_BU dias nunca
+      //              acontecia: nada envelhecia, nada saía;
+      //   patec    → o selo de parecer em andamento sumia no recarregar.
       itens: (d.itens || []).slice(0, 5000).map(function(i){
         return { rc:String(i.rc||''), seq:String(i.seq||''), novoItem:String(i.novoItem||''),
                  acomp:String(i.acomp||''), nome:String(i.nome||''),
@@ -19948,7 +19958,8 @@ async function stbSalvar(){
                  textoBreve:String(i.textoBreve||''), pedido:String(i.pedido||''),
                  oport:String(i.oport||''), itemOp:String(i.itemOp||''),
                  conclusao:String(i.conclusao||''),
-                 conclusaoEm:String(i.conclusaoEm||'') };
+                 conclusaoEm:String(i.conclusaoEm||''),
+                 foraDaBU:!!i.foraDaBU, visto:String(i.visto||''), patec:!!i.patec };
       }),
       atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem()
     });
@@ -26097,7 +26108,15 @@ function gpHtmlStatusB(){
             + '<strong>' + cpNum(todos.length - fora) + '</strong> entraram pelo filtro desta BU'
             + (fora ? ' · <strong>' + cpNum(fora) + '</strong> são de dias anteriores, que a BU '
                 + 'não traz mais e ninguém concluiu no dash (marcados como <em>fora da BU</em>)' : '')
-            + ' · ' + cpNum(feitos.length) + ' já duplicada(s).';
+            + ' · ' + cpNum(feitos.length) + ' já duplicada(s).'
+            // Esta lista é fotografada no upload: ela não se refaz ao
+            // abrir a tela. Sem dizer isso, um número velho passa por
+            // número de hoje.
+            + '<br><span style="color:var(--am)">A lista é montada no upload da BU'
+            + (_gpSB.atualizadoEm ? ' — este foi em ' + cpEsc(_gpSB.atualizadoEm.slice(8,10)
+                + '/' + _gpSB.atualizadoEm.slice(5,7) + ' ' + _gpSB.atualizadoEm.slice(11,16)) : '')
+            + '. Para recalcular com a situação de agora, suba a BU de novo em '
+            + '<strong>Controle de Pedidos › Status B</strong>.</span>';
         })() : '')
     + '</div>';
   if (!(_gpSB.itens || []).length) {
