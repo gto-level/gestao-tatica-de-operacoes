@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '26/11 09:30';
+var GTO_BUILD = '26/11 11:00';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -22589,9 +22589,21 @@ function gpRender(){
           ? '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
             + 'suba a medição no Controle de Pedidos</div>'
           : '')
-      + (x.chave === 'statusb' && !_gpSB.data
-          ? '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
-            + 'suba a BU em Controle de Pedidos › Status B</div>'
+      + (x.chave === 'statusb'
+          ? (function(){
+              if (!_gpSB.data) return '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
+                + 'suba a BU em Controle de Pedidos › Status B</div>';
+              // 26/11: o número do card é a BU MAIS o que foi arrastado
+              // de dias anteriores. Com os dois somados calados, o card
+              // cresce e ninguém sabe de onde veio — então ele passa a
+              // dizer, embaixo, quanto é de cada.
+              var p = gpSBPendentes();
+              var fora = p.filter(function(i){ return i.foraDaBU; }).length;
+              return '<div style="font-size:10px;color:var(--tx2);margin-top:4px">'
+                + cpNum(p.length - fora) + ' na BU de ' + cpDataBR(_gpSB.data)
+                + (fora ? ' · ' + cpNum(fora) + ' arrastado(s) sem conclusão' : '')
+                + '</div>';
+            })()
           : '')
       + '</div>';
   });
@@ -26076,10 +26088,17 @@ function gpHtmlStatusB(){
     +   (_gpSB.primeiroDia
           ? ' — a base começa em ' + cpDataBR(_gpSB.primeiroDia)
             + ', então item mais antigo que isso aparece como dessa data.' : '.')
-    +   (_gpSB.data ? '<br>BU de <strong>' + cpDataBR(_gpSB.data) + '</strong>'
-        + (_gpSB.arquivo ? ' (' + cpEsc(_gpSB.arquivo) + ')' : '')
-        + ' · ' + cpNum(_gpSB.lidas) + ' linhas lidas · ' + cpNum((_gpSB.itens || []).length)
-        + ' no filtro · ' + cpNum(feitos.length) + ' já duplicada(s).' : '')
+    +   (_gpSB.data ? (function(){
+          var todos = _gpSB.itens || [];
+          var fora = todos.filter(function(i){ return i.foraDaBU; }).length;
+          return '<br>BU de <strong>' + cpDataBR(_gpSB.data) + '</strong>'
+            + (_gpSB.arquivo ? ' (' + cpEsc(_gpSB.arquivo) + ')' : '')
+            + ' · ' + cpNum(_gpSB.lidas) + ' linhas lidas · '
+            + '<strong>' + cpNum(todos.length - fora) + '</strong> entraram pelo filtro desta BU'
+            + (fora ? ' · <strong>' + cpNum(fora) + '</strong> são de dias anteriores, que a BU '
+                + 'não traz mais e ninguém concluiu no dash (marcados como <em>fora da BU</em>)' : '')
+            + ' · ' + cpNum(feitos.length) + ' já duplicada(s).';
+        })() : '')
     + '</div>';
   if (!(_gpSB.itens || []).length) {
     h += '<div style="font-size:12px;color:var(--tx2)">'
