@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '25/11 16:00';
+var GTO_BUILD = '26/11 09:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -19288,6 +19288,9 @@ function stbLerBU(linhas){
   // oportunidade e item da OP. Vale para TODA linha da BU que tenha
   // pedido, não só as de Status B.
   r.pedIx = {}; r.pedIxLinhas = 0;
+  // veredito de cada RC|item desta BU: 'ok' (está no card) ou o motivo
+  // de ter saído. É o que separa "sumiu da planilha" de "foi resolvido".
+  r.naBU = {};
   for (var b = iCab + 1; b < linhas.length; b++) {
     var l = linhas[b] || [];
     if (col.rc !== -1 && !String(l[col.rc] == null ? '' : l[col.rc]).trim()) continue;
@@ -19317,6 +19320,29 @@ function stbLerBU(linhas){
     if (cart.indexOf('TRATATIVA') !== -1) r.emTratativa++;
     if (st === 'B') r.statusB++;
     if (ehEliminado) r.eliminado++;
+
+    // 26/11 — O card estava inchando. Motivo: o item que some da BU
+    // continua na lista até alguém concluir no dash (regra do André de
+    // 25/11), mas quem sai da regra porque o caso FOI RESOLVIDO no SAP
+    // também "some" — e ficava preso aqui para sempre.
+    //
+    // Nesta BU, 3.032 itens já tiveram o pedido eliminado e 2.904
+    // deles estão FINALIZADOS hoje: é esse monte que vinha sendo
+    // arrastado. Então a BU precisa dizer não só quem ENTRA, mas
+    // também quem a própria BU já resolveu — o que não dá para saber
+    // olhando só a lista de quem entra.
+    //
+    // Guardo o veredito de TODA linha da BU, com o motivo de ter
+    // saído. Isto não é gravado: morre no fim do upload.
+    (function(){
+      var _k = stbInt(l[col.rc]) + '|' + stbInt(l[col.seq]);
+      var _v = 'ok';
+      if (cart.indexOf('TRATATIVA') === -1) _v = 'fin';       // saiu de EM TRATATIVA
+      else if (st !== 'B')                  _v = 'status';    // status da RC mudou
+      else if (!ehEliminado)                _v = 'pedido';    // pedido já não está eliminado
+      r.naBU[_k] = _v;
+    })();
+
     if (cart.indexOf('TRATATIVA') === -1) continue;
     if (st !== 'B') continue;
     if (!ehEliminado) continue;
@@ -19403,13 +19429,17 @@ async function stbUpload(file){
     r.itens.forEach(function(i){ naBU[i.rc + '|' + i.seq] = 1; });
     var pend = await stbPendentesAnteriores(stbDataSel());
     r.semBU = 0;
+    r.resolvidos = 0; r.resolvidosLista = []; r.resolvidosPor = { fin:0, status:0, pedido:0 };
     Object.keys(pend).forEach(function(k){
-      if (naBU[k]) return;
       var i = pend[k];
-      if (String(i.conclusao || '').trim()) return;     // já foi tratado
-      // item que sumiu há muito tempo e ninguém concluiu para de ser
-      // arrastado: fica no histórico do dia em que apareceu
-      if (i.visto && stbDiasEntre(i.visto, stbDataSel()) > STB_GUARDA_SEM_BU) return;
+      var d = stbDestinoPendente(i, !!naBU[k], r.naBU || {}, stbDataSel());
+      if (d.destino === 'resolvido') {
+        r.resolvidos++;
+        r.resolvidosPor[d.motivo] = (r.resolvidosPor[d.motivo] || 0) + 1;
+        if (r.resolvidosLista.length < 10) r.resolvidosLista.push(i.rc + '-' + i.seq);
+        return;
+      }
+      if (d.destino !== 'arrasta') return;
       var c = Object.assign({}, i, { foraDaBU:true });
       r.itens.push(c);
       r.semBU++;
@@ -19427,6 +19457,17 @@ async function stbUpload(file){
       + (r.semBU ? '<div style="color:var(--am);margin-top:4px">↩ ' + cpNum(r.semBU)
           + ' item(ns) não vieram nesta BU e continuam na lista porque ainda não têm '
           + 'conclusão — eles saem quando você escolher a conclusão no dash.</div>' : '')
+      + (r.resolvidos ? '<div style="color:var(--vd);margin-top:4px">✓ ' + cpNum(r.resolvidos)
+          + ' item(ns) saíram da lista porque a própria BU já os resolveu'
+          + (function(){
+              var p = r.resolvidosPor || {}, t = [];
+              if (p.fin)    t.push(cpNum(p.fin) + ' saiu de EM TRATATIVA');
+              if (p.status) t.push(cpNum(p.status) + ' mudou o status da RC');
+              if (p.pedido) t.push(cpNum(p.pedido) + ' o pedido não está mais eliminado');
+              return t.length ? ' (' + t.join(' · ') + ')' : '';
+            })()
+          + '. Ex.: ' + cpEsc((r.resolvidosLista || []).join(', '))
+          + ((r.resolvidos > (r.resolvidosLista || []).length) ? '…' : '') + '</div>' : '')
       + (r.porPedidoReal ? '<div style="color:var(--az);margin-top:4px">ℹ ' + cpNum(r.porPedidoReal)
           + ' entrou(entraram) pela coluna STATUS_PEDIDO_REAL (pedido eliminado), e não pela '
           + 'classificação do Analista Automático.</div>' : '')
@@ -19935,6 +19976,29 @@ function stbDiasEntre(de, ate){
     if (isNaN(a.getTime()) || isNaN(b.getTime())) return 0;
     return Math.max(0, Math.round((b - a) / 86400000));
   } catch (e) { return 0; }
+}
+
+// O que fazer com um item que veio de um dia anterior. A regra inteira
+// num lugar só, porque ela tem quatro saídas e cada uma significa uma
+// coisa diferente para quem olha o card:
+//
+//   ja-na-lista → a BU de hoje trouxe ele; quem manda é a BU
+//   concluido   → já tem conclusão no dash; saiu por onde devia sair
+//   resolvido   → a BU AINDA tem este RC|item, mas fora da regra: o
+//                 caso foi resolvido no SAP (26/11 — era isso que
+//                 estava inchando o card)
+//   velho       → sumiu da BU há mais de STB_GUARDA_SEM_BU dias e
+//                 ninguém concluiu; para de ser arrastado
+//   arrasta     → sumiu da BU e continua em aberto: é a regra que o
+//                 André pediu em 25/11
+function stbDestinoPendente(item, naLista, naBU, data){
+  if (naLista) return { destino:'ja-na-lista' };
+  if (String((item || {}).conclusao || '').trim()) return { destino:'concluido' };
+  var v = (naBU || {})[item.rc + '|' + item.seq];
+  if (v && v !== 'ok') return { destino:'resolvido', motivo:v };
+  if (item.visto && stbDiasEntre(item.visto, data) > STB_GUARDA_SEM_BU)
+    return { destino:'velho' };
+  return { destino:'arrasta' };
 }
 
 async function stbPendentesAnteriores(data){
