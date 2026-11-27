@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '27/11 20:30';
+var GTO_BUILD = '27/11 20:55';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -58762,13 +58762,38 @@ async function cfmBuscar(){
     return;
   }
   if (achou.length > 1) {
+    var semMapa = achou.filter(function(k){ return !(_cfm.mapa || {})[k]; }).length;
     el.innerHTML = '<div style="font-size:12.5px;font-weight:700;color:var(--az);margin-bottom:.5rem">'
-      + achou.length + ' famílias encontradas — escolha uma:</div>'
+      + achou.length + ' famílias encontradas — escolha uma:'
+      + (semMapa ? '<span style="font-weight:400;color:var(--tx2)"> · ' + cpNum(semMapa)
+          + ' sem segmento/tipo (nenhum mapa diário trouxe ainda)</span>' : '')
+      + '</div>'
+      + '<div style="display:flex;gap:12px;padding:0 14px 4px;font-size:10px;'
+      + 'letter-spacing:.4px;color:var(--tx2);font-weight:700">'
+      +   '<span style="flex:0 0 86px">CÓDIGO</span>'
+      +   '<span style="flex:1 1 auto">FAMÍLIA</span>'
+      +   '<span style="flex:0 0 130px">SEGMENTO</span>'
+      +   '<span style="flex:0 0 34px">TIPO</span>'
+      + '</div>'
       + '<div style="display:flex;flex-direction:column;gap:5px;max-height:320px;overflow:auto">'
+      // 27/11 — o segmento e o tipo também aqui: na lista é que ele
+      // escolhe, e escolher sem ver os dois é escolher no escuro.
       + achou.slice(0, 80).map(function(k){
+          var mp = (_cfm.mapa || {})[k] || null;
+          var _c = function(txt, cor, larg){
+            return '<span style="flex:0 0 ' + larg + ';color:' + cor + ';overflow:hidden;'
+              + 'text-overflow:ellipsis;white-space:nowrap">' + txt + '</span>';
+          };
           return '<button class="btn btn-s" onclick="cfmAbrir(\'' + k + '\')" '
-            + 'style="justify-content:flex-start;font-size:12px;text-align:left">'
-            + '<strong>' + cfmEsc(k) + '</strong> &nbsp;' + cfmEsc(_cfm.fam[k][1] || '') + '</button>';
+            + 'style="justify-content:flex-start;font-size:12px;text-align:left;gap:12px">'
+            + _c('<strong>' + cfmEsc(k) + '</strong>', 'var(--az)', '86px')
+            + '<span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;'
+            + 'white-space:nowrap">' + cfmEsc(_cfm.fam[k][1] || '') + '</span>'
+            + _c(mp && mp[0] ? cfmEsc(mp[0]) : '<span style="opacity:.4">—</span>',
+                 'var(--vm)', '130px')
+            + _c(mp && mp[1] ? cfmEsc(mp[1]) : '<span style="opacity:.4">—</span>',
+                 'var(--vd)', '34px')
+            + '</button>';
         }).join('')
       + '</div>'
       + (achou.length > 80 ? '<div style="font-size:11px;color:var(--tx2);margin-top:6px">'
