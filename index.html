@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '26/11 13:00';
+var GTO_BUILD = '27/11 18:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -1106,6 +1106,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
   <div class="sb-it" id="sb-aa-it" onclick="go('analista-auto',this)">🤖 Analista Automático</div>
   <div class="sb-it" id="sb-ctc-it" onclick="go('patec-cspn',this)">📇 PATEC / CSPN</div>
   <div class="sb-it" id="sb-cpn-it" onclick="go('comparativo-pn',this)">🔍 Comparativo de PN</div>
+  <div class="sb-it" id="sb-cfm-it" onclick="go('consulta-familia',this)">🧬 Consulta Família</div>
   <div class="sb-it" id="sb-q18-it" onclick="go('consulta-q18',this)">🚫 Consulta Q18</div>
   <div class="sb-it" id="sb-fq-it" onclick="go('formatacao-query',this)">🧾 Formatação de Query</div>
 
@@ -2635,6 +2636,63 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
     </div>
   </div>
   <!-- ══ fim COMPARATIVO DE PN ══ -->
+
+  <!-- ══ CONSULTA FAMÍLIA ══
+       27/11 — André: "preciso criar um tópico chamado consulta família;
+       crie um campo de upload para eu subir esta mesma planilha
+       (famílias) — alguns cruzamentos a gente faz na sequência". ══ -->
+  <div id="p-consulta-familia" class="page">
+    <div class="cd" style="margin-bottom:1rem">
+      <div class="cd-t">🧬 Consulta Família</div>
+      <p style="font-size:12px;color:var(--tx2);margin-bottom:1rem">
+        Digite o <strong>código da família</strong> para ver a família e os fornecedores
+        cadastrados nela. Também dá para procurar por parte do nome.
+      </p>
+
+      <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">
+        <div>
+          <label style="display:block;font-size:12px;font-weight:700;color:var(--tx);margin-bottom:6px">
+            Código ou nome da família
+          </label>
+          <input type="text" id="cfm-busca" placeholder="Ex.: 98011446 ou válvula esfera"
+            onkeydown="if(event.key==='Enter') cfmBuscar()"
+            style="width:330px;font-size:14px;padding:9px 13px;border:1.5px solid var(--brd);border-radius:8px;font-weight:600;background:var(--bg);color:var(--tx)">
+        </div>
+        <button class="btn btn-p" onclick="cfmBuscar()">🔍 BUSCAR</button>
+        <button class="btn btn-s" onclick="cfmLimpar()">✕ LIMPAR</button>
+      </div>
+
+      <div id="cfm-resultado" style="margin-top:1.25rem"></div>
+    </div>
+
+    <!-- Só o ADM sobe a planilha. A consulta é de todo mundo. -->
+    <div class="cd" id="cfm-card-upload" style="display:none;margin-bottom:1rem">
+      <div class="cd-t">⬆ Subir a planilha de famílias</div>
+      <p style="font-size:12px;color:var(--tx2);margin-bottom:.9rem">
+        A planilha <em>Fornecedores × Famílias Cadastradas</em> (<code>.csv</code>,
+        <code>.xlsx</code> ou <code>.xlsb</code>). Depois de ler o arquivo eu mostro o que tem
+        dentro e <strong>quanto cada opção ocupa na nuvem</strong> — você escolhe o que gravar
+        antes de qualquer coisa ir para o Firebase.
+        <br>Arquivo grande? <strong>Salvar como .csv no Excel deixa a leitura muito mais leve</strong>
+        — o .xlsx de 38 MB precisa abrir inteiro na memória do navegador.
+      </p>
+      <input type="file" id="cfm-file" accept=".csv,.xlsx,.xls,.xlsb" style="display:none"
+        onchange="cfmLerArquivo(this.files[0]); this.value='';">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-p" onclick="document.getElementById('cfm-file').click()">📁 Escolher planilha</button>
+        <button class="btn btn-s" onclick="cfmRecarregar()">🔄 Recarregar base</button>
+      </div>
+      <div id="cfm-upload-status" style="margin-top:.8rem;font-size:12px"></div>
+      <div id="cfm-upload-plano" style="margin-top:.8rem"></div>
+    </div>
+
+    <div class="cd" style="background:var(--cin)">
+      <div style="font-size:12px;color:var(--tx2)">
+        📋 <strong>Base carregada:</strong> <span id="cfm-base-info">Nenhuma planilha carregada</span>
+      </div>
+    </div>
+  </div>
+  <!-- ══ fim CONSULTA FAMÍLIA ══ -->
 
   <div id="p-adm" class="page">
 
@@ -10463,6 +10521,7 @@ function go(id, el) {
   if(id==='formatacao-query') setTimeout(()=>{ try{ fqAbrir(); }catch(e){} }, 60);
   if(id==='patec-cspn') setTimeout(()=>{ try{ ctcAbrir(); }catch(e){} }, 60);
   if(id==='comparativo-pn') setTimeout(()=>{ try{ cpnAbrir(); }catch(e){} }, 60);
+  if(id==='consulta-familia') setTimeout(()=>{ try{ cfmAbrirTopico(); }catch(e){} }, 60);
   if(id==='adm') setTimeout(()=>{
     const login=document.getElementById('adm-login');
     if(login&&login.style.display!=='none') admLogin();
@@ -52793,8 +52852,11 @@ var AAG_MODELOS = {
     'GRUPO_MERCADORIAS','URGENCIA_NECESSIDADE','DATA_ENCERRAMENTO_OPORTUNIDADE',
     'QTD_IDAS_LEVEL','Status_Desc','SLA_Dias'] },
   trat:    { aba:'RC em tratamento', cab:['Analista PATEC','RC','SEQ','OPORTUNIDADE','Item'] },
+  // 27/11 — o mapa diário passou a trazer família, segmento e tipo.
+  // Por enquanto é só leitura: a base de saída continua pegando família
+  // do levelboard e o layout dela não mudou.
   mapa:    { aba:'Mapa diario', cab:['ANALISTA_AUTOMATICO','RC','SEQ','NUMERO_OPORTUNIDADE',
-    'ITEM_OPORTUNIDADE'] },
+    'ITEM_OPORTUNIDADE','FAMILIA','SEGMENTO_FAMILIA','TIPO_FAMILIA'] },
   pid:     { aba:'PID', cab:['DOCUMENTO','ITEM','PID'] },
   obrig:   { aba:'PATEC obrigatorio', cab:['Grupo de Mercadorias','Patec Obrigatorio',
     'Denominação do Grupo de mercadoria'] },
@@ -55454,7 +55516,12 @@ var AAG_CONFERE = {
     ['SEQ',          ['SEQ','ITEM_RC','LINHAREQUISICAO'], true],
     ['oportunidade', ['NUMERO_OPORTUNIDADE','OPORTUNIDADE'], true],
     ['item da op.',  ['ITEM_OPORTUNIDADE','ITEM OP','ITEM'], true],
-    ['STATUS MAPA',  ['ANALISTA_AUTOMATICO','STATUS MAPA','ANALISTA AUTOMATICO'], true]
+    ['STATUS MAPA',  ['ANALISTA_AUTOMATICO','STATUS MAPA','ANALISTA AUTOMATICO'], true],
+    // 27/11: as três novas. Não são críticas — mapa antigo, sem elas,
+    // continua subindo e funcionando igual.
+    ['FAMILIA',          ['FAMILIA','FAMÍLIA']],
+    ['SEGMENTO_FAMILIA', ['SEGMENTO_FAMILIA','SEGMENTO FAMILIA','SEGMENTO']],
+    ['TIPO_FAMILIA',     ['TIPO_FAMILIA','TIPO FAMILIA']]
   ],
   pid: [
     ['DOCUMENTO (a RC)', ['DOCUMENTO','RC'], true],
@@ -58033,6 +58100,541 @@ function cpnLimpar(){
   if (a) try { a.focus(); } catch (e) {}
 }
 
+
+// ══════════════════════════════════════════════════════════════════
+//  CONSULTA FAMÍLIA   (tópico do PATEC, 27/11)
+//
+//  André: "preciso criar um tópico chamado consulta família... crie um
+//  campo de upload para eu subir esta mesma planilha (famílias) —
+//  alguns cruzamentos a gente faz na sequência".
+//
+//  A planilha é "Fornecedores × Famílias Cadastradas": 943.715 linhas,
+//  1.961 famílias, 44.843 fornecedores distintos. Nove colunas: código
+//  do fornecedor, CNPJ, país, status do fornecedor, código da família,
+//  família, registro, status do fornecimento e código SAP.
+//
+//  Duas preocupações reais dele, e o que cada uma pede:
+//
+//  ESPAÇO NA NUVEM — "se eu subir um arquivo deste tamanho acaba com o
+//  espaço da minha nuvem". O arquivo tem 38 MB, mas isso é XML do
+//  Excel: o conteúdo compacta muito. Mesmo assim, nada é gravado sem
+//  ele ver antes: a leitura acontece no navegador, a tela mostra o que
+//  tem dentro e o TAMANHO ESTIMADO de cada recorte, e só então ele
+//  escolhe o que gravar.
+//
+//  MEMÓRIA DO NAVEGADOR — 943 mil linhas não cabem com folga num .xlsx
+//  aberto inteiro. Por isso o .csv é lido em STREAMING, pedaço a
+//  pedaço: só a estrutura compacta fica na memória. O .xlsx continua
+//  aceito, com aviso.
+//
+//  Como fica gravado: um índice com as famílias (código → descrição e
+//  em que bloco ela está) e os blocos com os fornecedores de cada
+//  família. Consultar uma família lê o índice e UM bloco — não a base
+//  inteira.
+// ══════════════════════════════════════════════════════════════════
+
+var CFM_BLOCO = 600000;        // ~600 KB por documento; o teto é 1 MB
+var CFM_STATUS = { 'A':'Aprovado', 'Q':'Qualificado tecnicamente',
+                   'D':'Declaração de Interesse', 'R':'Reprovado',
+                   'X':'Cancelado', '?':'(sem status)' };
+// Status do FORNECEDOR (outra coluna, outro conjunto de letras). Sem
+// isto a tela mostrava um "I" sozinho, que não diz nada a ninguém.
+var CFM_ST_FORN = { 'I':'Identificado', 'D':'Desistente', 'B':'Bloqueado',
+                    'V':'Visitante', 'R':'Registrado' };
+var CFM_FILTROS = [
+  { k:'aq',   rot:'Aprovado + Qualificado',        sts:['A','Q'],
+    dica:'quem realmente pode fornecer' },
+  { k:'aqd',  rot:'Sem reprovado e sem cancelado', sts:['A','Q','D'],
+    dica:'inclui quem declarou interesse' },
+  { k:'tudo', rot:'Tudo, sem filtro',              sts:null,
+    dica:'inclui reprovado e cancelado' }
+];
+
+var _cfm = { fam:{}, blocos:{}, arquivo:'', total:0, filtro:'',
+             fornecedores:0, atualizadoEm:'', atualizadoPor:'', carregada:false };
+var _cfmLido = null;           // o arquivo lido, ainda não gravado
+
+function cfmEsc(v){
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+function cfmCod(v){
+  return String(v == null ? '' : v).trim().replace(/\.0+$/, '')
+    .replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+}
+function cfmLetra(st){
+  var n = cpNormCab(st);
+  if (n.indexOf('APROVADO') === 0) return 'A';
+  if (n.indexOf('QUALIFICADO') === 0) return 'Q';
+  if (n.indexOf('DECLARACAO') === 0) return 'D';
+  if (n.indexOf('REPROVADO') === 0) return 'R';
+  if (n.indexOf('CANCELADO') === 0) return 'X';
+  var l = n.charAt(0);
+  return 'AQDRX'.indexOf(l) !== -1 ? l : '?';
+}
+// A descrição vem como "Válvula esfera para instrumentação (98010694)".
+// O código no fim é o mesmo da coluna ao lado — tiro para não repetir.
+function cfmNome(v){
+  return String(v == null ? '' : v).trim().replace(/\s*\(\d{4,12}\)\s*$/, '');
+}
+function cfmMB(bytes){ return (bytes / 1048576).toFixed(bytes < 1048576 ? 2 : 1) + ' MB'; }
+
+// ── leitura ───────────────────────────────────────────────────────
+// Devolve a estrutura compacta: famílias, e por família a lista de
+// fornecedores. Nada daqui vai para a nuvem sem ele mandar.
+function cfmNovoAcumulador(){
+  return { fam:{}, pares:{}, total:0, porStatus:{}, fornec:{}, aviso:'', cols:null };
+}
+function cfmColunas(cab){
+  var c = (cab || []).map(cpNormCab);
+  var ix = function(n){ return _cpAchaCol(c, n); };
+  return {
+    cod:  ix(['CODIGO_DO_FORNECEDOR','COD_FORNECEDOR','CODIGO_FORNECEDOR']),
+    cnpj: ix(['CNPJ']),
+    pais: ix(['PAIS_DO_FORNECEDOR','PAIS']),
+    stF:  ix(['STATUS_DO_FORNECEDOR']),
+    fam:  ix(['CODIGO_DA_FAMILIA','COD_FAMILIA','CODIGO_FAMILIA','FAMILIA']),
+    nome: ix(['FAMILIA_1','FAMILIA','NOME_DA_FAMILIA','DESCRICAO']),
+    reg:  ix(['REGISTRO']),
+    stS:  ix(['STATUS_DO_FORNECIMENTO']),
+    sap:  ix(['CODIGO_DO_FORNECEDOR_SAP','COD_SAP','ID_SAP_FORNECEDOR'])
+  };
+}
+function cfmAchaColunas(cab){
+  var c = (cab || []).map(cpNormCab);
+  var col = cfmColunas(cab);
+  // "Código da Família" e "Família" normalizam para nomes diferentes,
+  // mas num arquivo com outro cabeçalho podem colidir: se caíram na
+  // mesma coluna, o nome é a coluna seguinte.
+  if (col.nome === col.fam) col.nome = col.fam + 1 < c.length ? col.fam + 1 : -1;
+  return col;
+}
+function cfmLinha(ac, col, l){
+  var fam = cfmCod(l[col.fam]);
+  if (!fam) return;
+  var cod = String(l[col.cod] == null ? '' : l[col.cod]).trim().replace(/\.0+$/, '');
+  ac.total++;
+  if (!ac.fam[fam]) ac.fam[fam] = cfmNome(col.nome === -1 ? '' : l[col.nome]);
+  var st = cfmLetra(col.stS === -1 ? '' : l[col.stS]);
+  ac.porStatus[st] = (ac.porStatus[st] || 0) + 1;
+  if (cod) ac.fornec[cod] = 1;
+  (ac.pares[fam] || (ac.pares[fam] = [])).push({
+    c: cod,
+    s: String(col.sap === -1 ? '' : (l[col.sap] == null ? '' : l[col.sap])).trim(),
+    j: String(col.cnpj === -1 ? '' : (l[col.cnpj] == null ? '' : l[col.cnpj])).trim(),
+    p: String(col.pais === -1 ? '' : (l[col.pais] == null ? '' : l[col.pais])).trim(),
+    f: String(col.stF === -1 ? '' : (l[col.stF] == null ? '' : l[col.stF])).trim().charAt(0),
+    t: st,
+    r: String(col.reg === -1 ? '' : (l[col.reg] == null ? '' : l[col.reg])).trim()
+  });
+}
+
+// CSV lido aos pedaços: o arquivo nunca existe inteiro na memória.
+function _cfmCampos(linha){
+  var out = [], campo = '', aspas = false;
+  for (var i = 0; i < linha.length; i++) {
+    var ch = linha.charAt(i);
+    if (aspas) {
+      if (ch === '"') { if (linha.charAt(i+1) === '"') { campo += '"'; i++; } else aspas = false; }
+      else campo += ch;
+    } else if (ch === '"') aspas = true;
+    else if (ch === ';' || ch === ',') { out.push(campo); campo = ''; }
+    else campo += ch;
+  }
+  out.push(campo);
+  return out;
+}
+async function cfmLerCSV(file, aviso){
+  var ac = cfmNovoAcumulador();
+  var dec = new TextDecoder('utf-8');
+  var reader = file.stream().getReader();
+  var resto = '', col = null, lidos = 0, bytes = 0;
+  while (true) {
+    var r = await reader.read();
+    if (r.done) break;
+    bytes += r.value.length;
+    var txt = resto + dec.decode(r.value, { stream:true });
+    var linhas = txt.split(/\r?\n/);
+    resto = linhas.pop();
+    for (var i = 0; i < linhas.length; i++) {
+      var l = linhas[i];
+      if (!l.trim()) continue;
+      var campos = _cfmCampos(l);
+      if (!col) { col = cfmAchaColunas(campos); if (col.fam === -1) { ac.aviso =
+        'Não achei a coluna "Código da Família" no cabeçalho.'; return ac; } continue; }
+      cfmLinha(ac, col, campos);
+      lidos++;
+    }
+    if (aviso) await aviso(lidos, bytes);
+  }
+  if (resto.trim() && col) cfmLinha(ac, col, _cfmCampos(resto));
+  if (!col) ac.aviso = 'Arquivo vazio.';
+  ac.cols = col;
+  return ac;
+}
+
+async function cfmLerArquivo(file){
+  if (!file) return;
+  if (!_isAdmGeral()) { _cfmSt('<span style="color:var(--vm)">Só o ADM atualiza esta base.</span>'); return; }
+  _cfmPlano('');
+  var t0 = Date.now();
+  try {
+    var ac;
+    if (/\.csv$/i.test(file.name)) {
+      _cfmSt('⏳ Lendo o CSV em streaming (o arquivo não é carregado inteiro)...');
+      ac = await cfmLerCSV(file, async function(lidos, bytes){
+        _cfmSt('⏳ Lendo... ' + cpNum(lidos) + ' linhas (' + cfmMB(bytes) + ')');
+        await new Promise(function(ok){ setTimeout(ok, 0); });
+      });
+    } else {
+      _cfmSt('⏳ Abrindo a planilha. Arquivo grande pode levar um minuto e pesa na memória — '
+        + 'salvar como .csv no Excel deixa isso muito mais leve.');
+      await new Promise(function(ok){ setTimeout(ok, 50); });
+      var buf = await file.arrayBuffer();
+      var wb = _lerWorkbookBR(buf, file.name);
+      var aba = wb.SheetNames[0], melhor = -1;
+      (wb.SheetNames || []).forEach(function(n){
+        var ref = (wb.Sheets[n] || {})['!ref'] || '';
+        var m = /\d+$/.exec(ref);
+        var q = m ? +m[0] : 0;
+        if (q > melhor) { melhor = q; aba = n; }
+      });
+      var linhas = XLSX.utils.sheet_to_json(wb.Sheets[aba],
+                     { header:1, defval:'', raw:true, blankrows:false });
+      ac = cfmNovoAcumulador();
+      var col = cfmAchaColunas(linhas[0] || []);
+      if (col.fam === -1) { ac.aviso = 'Não achei a coluna "Código da Família" no cabeçalho.'; }
+      else for (var i = 1; i < linhas.length; i++) cfmLinha(ac, col, linhas[i] || []);
+      ac.cols = col;
+    }
+    if (ac.aviso) { _cfmSt('<span style="color:var(--vm)">❌ ' + cfmEsc(ac.aviso) + '</span>'); return; }
+    if (!ac.total) { _cfmSt('<span style="color:var(--vm)">❌ Nenhuma linha com código de família.</span>'); return; }
+    ac.arquivo = file.name;
+    _cfmLido = ac;
+    _cfmSt('<span style="color:var(--vd)">✅ Li ' + cpNum(ac.total) + ' linha(s) em '
+      + Math.round((Date.now() - t0) / 1000) + 's.</span> <span style="color:var(--tx2)">'
+      + cpNum(Object.keys(ac.fam).length) + ' famílias · '
+      + cpNum(Object.keys(ac.fornec).length) + ' fornecedores distintos. '
+      + '<strong>Nada foi gravado ainda.</strong></span>');
+    cfmRenderPlano();
+  } catch (e) {
+    console.warn('cfmLerArquivo:', e);
+    _cfmSt('<span style="color:var(--vm)">❌ Não consegui ler: ' + cfmEsc(e.message || e)
+      + (/\.csv$/i.test(file.name) ? '' : '<br>Se o arquivo for muito grande, salve como '
+        + '<strong>.csv</strong> no Excel e suba de novo: a leitura passa a ser em streaming.')
+      + '</span>');
+  }
+}
+
+// ── o que vai ser gravado: ele escolhe, vendo o tamanho ───────────
+function cfmSelecionar(ac, sts){
+  var fam = {}, pares = {}, linhas = 0, bytes = 0;
+  Object.keys(ac.pares).forEach(function(f){
+    var sel = ac.pares[f].filter(function(p){ return !sts || sts.indexOf(p.t) !== -1; });
+    if (!sel.length) return;
+    fam[f] = ac.fam[f] || '';
+    pares[f] = sel;
+    linhas += sel.length;
+    bytes += JSON.stringify(sel).length + f.length + 8;
+  });
+  bytes += JSON.stringify(fam).length;
+  return { fam:fam, pares:pares, linhas:linhas, bytes:bytes,
+           familias:Object.keys(fam).length };
+}
+
+function cfmRenderPlano(){
+  var el = document.getElementById('cfm-upload-plano');
+  if (!el || !_cfmLido) return;
+  var ac = _cfmLido;
+  var h = '<div style="border:1px solid var(--brd);border-radius:10px;padding:12px 14px;background:var(--bg)">'
+    + '<div style="font-size:12.5px;font-weight:700;color:var(--az);margin-bottom:6px">'
+    + 'O que tem no arquivo</div>'
+    + '<div style="font-size:11.5px;color:var(--tx2);margin-bottom:10px">'
+    + Object.keys(CFM_STATUS).filter(function(k){ return ac.porStatus[k]; })
+        .map(function(k){ return cpNum(ac.porStatus[k]) + ' ' + CFM_STATUS[k]; }).join(' · ')
+    + '</div>'
+    + '<div style="font-size:12.5px;font-weight:700;color:var(--az);margin-bottom:6px">'
+    + 'O que gravar</div>'
+    + '<div style="font-size:11.5px;color:var(--tx2);margin-bottom:8px">'
+    + 'O tamanho abaixo é o que vai ocupar no Firebase — calculado neste arquivo, não é chute.</div>';
+  CFM_FILTROS.forEach(function(f){
+    var s = cfmSelecionar(ac, f.sts);
+    h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
+      + 'padding:7px 0;border-top:1px solid var(--brd)">'
+      + '<button class="btn ' + (f.k === 'aq' ? 'btn-p' : 'btn-s') + '" '
+      + 'onclick="cfmGravar(\'' + f.k + '\')" style="font-size:11.5px">⬆ ' + f.rot + '</button>'
+      + '<span style="font-size:11.5px;color:var(--tx2)">' + cpNum(s.linhas)
+      + ' linha(s) · ' + cpNum(s.familias) + ' famílias · <strong>~' + cfmMB(s.bytes)
+      + '</strong> <span style="opacity:.75">— ' + f.dica + '</span></span></div>';
+  });
+  h += '</div>';
+  el.innerHTML = h;
+}
+
+function _cfmSt(html){ var e = document.getElementById('cfm-upload-status'); if (e) e.innerHTML = html; }
+function _cfmPlano(html){ var e = document.getElementById('cfm-upload-plano'); if (e) e.innerHTML = html; }
+
+// ── gravação: índice pequeno + blocos por família ─────────────────
+async function cfmGravar(chave){
+  if (!_cfmLido) return;
+  var f = CFM_FILTROS.filter(function(x){ return x.k === chave; })[0];
+  if (!f) return;
+  var sel = cfmSelecionar(_cfmLido, f.sts);
+  if (!sel.linhas) { _cfmSt('<span style="color:var(--am)">Esse recorte ficou sem nenhuma linha.</span>'); return; }
+  if (!confirm('Gravar ' + cpNum(sel.linhas) + ' linha(s) (~' + cfmMB(sel.bytes) + ') no Firebase?\n\n'
+      + 'Isso substitui a base de famílias que estiver lá.')) return;
+  try {
+    // Blocos de ~600 KB, cada um com famílias inteiras: consultar uma
+    // família lê o índice e UM bloco, nunca a base toda.
+    var codigos = Object.keys(sel.pares).sort();
+    var blocos = [], atual = {}, tam = 0, idx = {};
+    codigos.forEach(function(c){
+      var t = JSON.stringify(sel.pares[c]).length + c.length + 8;
+      if (tam && tam + t > CFM_BLOCO) { blocos.push(atual); atual = {}; tam = 0; }
+      idx[c] = [blocos.length, sel.fam[c] || ''];
+      atual[c] = sel.pares[c];
+      tam += t;
+    });
+    if (Object.keys(atual).length) blocos.push(atual);
+
+    for (var b = 0; b < blocos.length; b++) {
+      _cfmSt('⏳ Gravando bloco ' + (b + 1) + ' de ' + blocos.length + '...');
+      var ok = await fbSetGeral('config', 'familias_b' + b, { fams: blocos[b] });
+      if (!ok) { _cfmSt('<span style="color:var(--vm)">❌ Parou no bloco ' + (b+1) + '.</span>'); return; }
+    }
+    // o índice também pode passar de 1 MB: vai em pedaços
+    var chaves = Object.keys(idx).sort(), partes = [], parte = {}, pt = 0;
+    chaves.forEach(function(c){
+      var t = c.length + String(idx[c][1]).length + 16;
+      if (pt && pt + t > CFM_BLOCO) { partes.push(parte); parte = {}; pt = 0; }
+      parte[c] = idx[c]; pt += t;
+    });
+    if (Object.keys(parte).length) partes.push(parte);
+    for (var p = 0; p < partes.length; p++) {
+      await fbSetGeral('config', 'familias_i' + p, { fams: partes[p] });
+    }
+    var meta = { arquivo:_cfmLido.arquivo, total:sel.linhas, familias:sel.familias,
+                 fornecedores:Object.keys(_cfmLido.fornec).length,
+                 filtro:f.rot, blocos:blocos.length, indices:partes.length,
+                 bytes:sel.bytes,
+                 atualizadoEm:new Date().toISOString(), atualizadoPor:cpQuem() };
+    await fbSetGeral('config', 'familias_meta', meta);
+    // blocos sobrando de uma base maior: esvazia, senão a consulta
+    // acharia fornecedor que já saiu da planilha
+    for (var z = blocos.length; z < (_cfm.blocosGravados || 0); z++)
+      await fbSetGeral('config', 'familias_b' + z, { fams:{} });
+    _cfm.blocosGravados = blocos.length;
+    _cfmLido = null;
+    _cfmPlano('');
+    _cfm.carregada = false;
+    await cfmCarregar(true);
+    cfmInfo();
+    _cfmSt('<span style="color:var(--vd)">✅ Base gravada: ' + cpNum(sel.linhas)
+      + ' linha(s), ' + cpNum(sel.familias) + ' famílias, ~' + cfmMB(sel.bytes) + '.</span>');
+  } catch (e) {
+    console.warn('cfmGravar:', e);
+    _cfmSt('<span style="color:var(--vm)">❌ Não consegui gravar: ' + cfmEsc(e.message || e) + '</span>');
+  }
+}
+
+// ── consulta ──────────────────────────────────────────────────────
+async function cfmCarregar(forcar){
+  if (_cfm.carregada && !forcar) return true;
+  try {
+    var m = await fbGetGeral('config', 'familias_meta');
+    if (!m) { _cfm.carregada = true; return false; }
+    var fam = {};
+    var pedidos = [];
+    for (var i = 0; i < (+m.indices || 1); i++) pedidos.push(fbGetGeral('config', 'familias_i' + i));
+    (await Promise.all(pedidos)).forEach(function(p){
+      var f = (p || {}).fams || {};
+      Object.keys(f).forEach(function(k){ fam[k] = f[k]; });
+    });
+    _cfm = { fam:fam, blocos:{}, arquivo:m.arquivo || '', total:+m.total || 0,
+             filtro:m.filtro || '', familias:+m.familias || Object.keys(fam).length,
+             fornecedores:+m.fornecedores || 0, bytes:+m.bytes || 0,
+             blocosGravados:+m.blocos || 0, indices:+m.indices || 1,
+             atualizadoEm:m.atualizadoEm || '', atualizadoPor:m.atualizadoPor || '',
+             carregada:true };
+    return true;
+  } catch (e) { console.warn('cfmCarregar:', e); _cfm.carregada = true; return false; }
+}
+// o bloco só é lido quando alguém pergunta por uma família dele
+async function cfmBloco(n){
+  if (_cfm.blocos[n]) return _cfm.blocos[n];
+  var d = await fbGetGeral('config', 'familias_b' + n);
+  _cfm.blocos[n] = (d || {}).fams || {};
+  return _cfm.blocos[n];
+}
+
+async function cfmRecarregar(){
+  _cfmSt('⏳ Recarregando...');
+  _cfm.carregada = false;
+  var ok = await cfmCarregar(true);
+  cfmInfo();
+  _cfmSt(ok ? '<span style="color:var(--vd)">✅ Base recarregada — '
+                + cpNum(_cfm.familias || 0) + ' famílias.</span>'
+            : '<span style="color:var(--am)">Nenhuma base de famílias na nuvem ainda.</span>');
+}
+
+function cfmProcurar(termo){
+  var t = String(termo || '').trim();
+  if (!t) return [];
+  var cod = cfmCod(t);
+  if (cod && _cfm.fam[cod]) return [cod];
+  var n = cpNormNome(t), out = [];
+  Object.keys(_cfm.fam).forEach(function(k){
+    if (k.indexOf(cod) === 0 && cod) { out.push(k); return; }
+    if (n.length >= 3 && cpNormNome(_cfm.fam[k][1] || '').indexOf(n) !== -1) out.push(k);
+  });
+  return out;
+}
+
+async function cfmBuscar(){
+  var el = document.getElementById('cfm-resultado');
+  if (!el) return;
+  var termo = (document.getElementById('cfm-busca') || {}).value || '';
+  if (!termo.trim()) { el.innerHTML = ''; return; }
+  if (!_cfm.carregada) {
+    el.innerHTML = '<div style="padding:.9rem 1rem;background:var(--amc);border-radius:8px;'
+      + 'color:var(--am);font-size:12.5px">⏳ Carregando o índice de famílias...</div>';
+    await cfmCarregar();
+  }
+  if (!Object.keys(_cfm.fam).length) {
+    el.innerHTML = '<div style="padding:.9rem 1rem;background:var(--amc);border-radius:8px;'
+      + 'color:var(--am);font-size:12.5px">⚠️ Ainda não há planilha de famílias carregada'
+      + (_isAdmGeral() ? ' — suba o arquivo no card acima.' : '. Peça ao ADM para subir.') + '</div>';
+    return;
+  }
+  var achou = cfmProcurar(termo);
+  if (!achou.length) {
+    el.innerHTML = '<div style="padding:.9rem 1rem;background:var(--amc);border-radius:8px;'
+      + 'color:var(--am);font-size:12.5px">⚠️ Não achei nenhuma família com <strong>'
+      + cfmEsc(termo) + '</strong>.</div>';
+    return;
+  }
+  if (achou.length > 1) {
+    el.innerHTML = '<div style="font-size:12.5px;font-weight:700;color:var(--az);margin-bottom:.5rem">'
+      + achou.length + ' famílias encontradas — escolha uma:</div>'
+      + '<div style="display:flex;flex-direction:column;gap:5px;max-height:320px;overflow:auto">'
+      + achou.slice(0, 80).map(function(k){
+          return '<button class="btn btn-s" onclick="cfmAbrir(\'' + k + '\')" '
+            + 'style="justify-content:flex-start;font-size:12px;text-align:left">'
+            + '<strong>' + cfmEsc(k) + '</strong> &nbsp;' + cfmEsc(_cfm.fam[k][1] || '') + '</button>';
+        }).join('')
+      + '</div>'
+      + (achou.length > 80 ? '<div style="font-size:11px;color:var(--tx2);margin-top:6px">'
+          + 'Mostrando 80 de ' + achou.length + ' — refine a busca.</div>' : '');
+    return;
+  }
+  await cfmAbrir(achou[0]);
+}
+
+async function cfmAbrir(cod){
+  var el = document.getElementById('cfm-resultado');
+  if (!el) return;
+  var reg = _cfm.fam[cod];
+  if (!reg) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div style="font-size:12.5px;color:var(--tx2)">⏳ Abrindo a família '
+    + cfmEsc(cod) + '...</div>';
+  var lista = [];
+  try { lista = (await cfmBloco(reg[0]))[cod] || []; } catch (e) { console.warn('cfmAbrir:', e); }
+
+  var porSt = {};
+  lista.forEach(function(p){ porSt[p.t] = (porSt[p.t] || 0) + 1; });
+
+  var h = '<div style="border:1px solid var(--brd);border-left:4px solid var(--vd);'
+    + 'border-radius:11px;padding:14px 16px;background:var(--bg);margin-bottom:1rem">'
+    + '<div style="font-size:10px;letter-spacing:.5px;color:var(--tx2);font-weight:700">'
+    + 'CÓDIGO DA FAMÍLIA</div>'
+    + '<div style="font-size:26px;font-weight:800;color:var(--azm);line-height:1.2">'
+    + cfmEsc(cod) + '</div>'
+    + '<div style="font-size:10px;letter-spacing:.5px;color:var(--tx2);font-weight:700;margin-top:10px">'
+    + 'FAMÍLIA</div>'
+    + '<div style="font-size:15px;color:var(--tx)">' + cfmEsc(reg[1] || '—') + '</div>'
+    + '<div style="font-size:11.5px;color:var(--tx2);margin-top:10px">'
+    + '<strong>' + cpNum(lista.length) + '</strong> fornecedor(es) cadastrado(s)'
+    + (Object.keys(porSt).length
+        ? ' · ' + Object.keys(CFM_STATUS).filter(function(k){ return porSt[k]; })
+            .map(function(k){ return cpNum(porSt[k]) + ' ' + CFM_STATUS[k]; }).join(' · ')
+        : '')
+    + '</div></div>';
+
+  if (!lista.length) {
+    el.innerHTML = h + '<div style="font-size:12.5px;color:var(--tx2)">Nenhum fornecedor '
+      + 'cadastrado nesta família dentro do recorte gravado'
+      + (_cfm.filtro ? ' (' + cfmEsc(_cfm.filtro) + ')' : '') + '.</div>';
+    return;
+  }
+
+  var ordem = { 'A':0, 'Q':1, 'D':2, 'R':3, 'X':4, '?':5 };
+  lista = lista.slice().sort(function(a, b){
+    var d = (ordem[a.t] == null ? 9 : ordem[a.t]) - (ordem[b.t] == null ? 9 : ordem[b.t]);
+    return d || String(a.c).localeCompare(String(b.c));
+  });
+  h += '<div style="overflow:auto;max-height:520px"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+    + '<thead><tr style="background:var(--cin)">'
+    + ['CÓD. FORNECEDOR','CÓD. SAP','CNPJ','PAÍS','STATUS DO FORNECEDOR',
+       'STATUS DO FORNECIMENTO','REGISTRO']
+        .map(function(t){ return '<th style="text-align:left;padding:8px 10px;font-size:10px;'
+          + 'color:var(--tx2);border-bottom:1.5px solid var(--brd);white-space:nowrap">'
+          + t + '</th>'; }).join('')
+    + '</tr></thead><tbody>';
+  lista.forEach(function(p){
+    var cor = (p.t === 'A' || p.t === 'Q') ? 'var(--vd)'
+            : (p.t === 'R' || p.t === 'X') ? 'var(--vm)' : 'var(--am)';
+    h += '<tr style="border-bottom:1px solid var(--brd)">'
+      + '<td style="padding:7px 10px;font-weight:700;color:var(--az);white-space:nowrap">' + cfmEsc(p.c || '—') + '</td>'
+      + '<td style="padding:7px 10px;white-space:nowrap">' + cfmEsc(p.s || '—') + '</td>'
+      + '<td style="padding:7px 10px;white-space:nowrap">' + cfmEsc(p.j || '—') + '</td>'
+      + '<td style="padding:7px 10px">' + cfmEsc(p.p || '—') + '</td>'
+      + '<td style="padding:7px 10px;white-space:nowrap">'
+      +   cfmEsc(CFM_ST_FORN[p.f] || p.f || '—') + '</td>'
+      + '<td style="padding:7px 10px;white-space:nowrap;color:' + cor + ';font-weight:700">'
+      +   cfmEsc(CFM_STATUS[p.t] || p.t || '—') + '</td>'
+      + '<td style="padding:7px 10px;font-size:11px">' + cfmEsc(p.r || '—') + '</td>'
+      + '</tr>';
+  });
+  h += '</tbody></table></div>';
+  el.innerHTML = h;
+}
+
+function cfmLimpar(){
+  var b = document.getElementById('cfm-busca');
+  if (b) b.value = '';
+  var el = document.getElementById('cfm-resultado');
+  if (el) el.innerHTML = '';
+  if (b) try { b.focus(); } catch (e) {}
+}
+
+function cfmInfo(){
+  var el = document.getElementById('cfm-base-info');
+  if (!el) return;
+  if (!Object.keys(_cfm.fam || {}).length) { el.textContent = 'Nenhuma planilha carregada'; return; }
+  var d = '';
+  try {
+    if (_cfm.atualizadoEm) {
+      var dt = new Date(_cfm.atualizadoEm);
+      d = ' · ' + dt.toLocaleDateString('pt-BR') + ' '
+        + dt.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' })
+        + (_cfm.atualizadoPor ? ' por ' + _cfm.atualizadoPor : '');
+    }
+  } catch (e) {}
+  el.textContent = cpNum(_cfm.familias || 0) + ' famílias · ' + cpNum(_cfm.total || 0)
+    + ' linhas' + (_cfm.filtro ? ' (' + _cfm.filtro + ')' : '')
+    + (_cfm.arquivo ? ' · ' + _cfm.arquivo : '') + d;
+}
+
+function cfmAbrirTopico(){
+  var up = document.getElementById('cfm-card-upload');
+  if (up) up.style.display = _isAdmGeral() ? '' : 'none';
+  cfmInfo();
+  if (!_cfm.carregada) cfmCarregar().then(cfmInfo);
+  var b = document.getElementById('cfm-busca');
+  if (b) try { b.focus(); } catch (e) {}
+}
+
 function cpnAbrir(){
   var a = document.getElementById('cpn-a');
   if (a) try { a.focus(); } catch (e) {}
@@ -58558,6 +59160,8 @@ const PERMS_SIDEBAR = {
   'patec-cspn':     { icon:'📇', label:'PATEC / CSPN',              mod:'EXECUÇÃO' },
   // 25/11: compara dois PN caractere a caractere. Tela sem dado.
   'comparativo-pn': { icon:'🔍', label:'Comparativo de PN',          mod:'EXECUÇÃO' },
+  // 27/11: consulta das famílias e dos fornecedores cadastrados nelas.
+  'consulta-familia':{ icon:'🧬', label:'Consulta Família',          mod:'EXECUÇÃO' },
   'consulta-q18':   { icon:'🚫', label:'Consulta Q18',             mod:'EXECUÇÃO', hiddenFast:true },
   // 25/11: tópico do PATEC, ADLV e FAST. Tela sem dado: só formata o
   // texto que a pessoa colar, então não há base para separar por frente.
