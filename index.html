@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '27/11 18:30';
+var GTO_BUILD = '27/11 19:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -2673,13 +2673,17 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         <code>.xlsx</code> ou <code>.xlsb</code>). Depois de ler o arquivo eu mostro o que tem
         dentro e <strong>quanto cada opção ocupa na nuvem</strong> — você escolhe o que gravar
         antes de qualquer coisa ir para o Firebase.
-        <br>Arquivo grande? <strong>Salvar como .csv no Excel deixa a leitura muito mais leve</strong>
-        — o .xlsx de 38 MB precisa abrir inteiro na memória do navegador.
+        <br><strong>Baixe o modelo</strong>, cole os valores embaixo do cabeçalho (apagando a
+        linha de exemplo) e salve como <strong>CSV UTF-8</strong>: aí o arquivo já nasce no
+        formato certo para todos os uploads seguintes.
+        <br>Arquivo grande? O <code>.csv</code> é lido em streaming e aguenta as 900 mil linhas —
+        o <code>.xlsx</code> precisa abrir inteiro na memória do navegador.
       </p>
       <input type="file" id="cfm-file" accept=".csv,.xlsx,.xls,.xlsb" style="display:none"
         onchange="cfmLerArquivo(this.files[0]); this.value='';">
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
         <button class="btn btn-p" onclick="document.getElementById('cfm-file').click()">📁 Escolher planilha</button>
+        <button class="btn btn-s" onclick="cfmBaixarModelo(event)">⬇ Baixar modelo</button>
         <button class="btn btn-s" onclick="cfmRecarregar()">🔄 Recarregar base</button>
       </div>
       <div id="cfm-upload-status" style="margin-top:.8rem;font-size:12px"></div>
@@ -58133,6 +58137,13 @@ function cpnLimpar(){
 //  inteira.
 // ══════════════════════════════════════════════════════════════════
 
+// O cabeçalho oficial do arquivo de famílias. Uma fonte só: é ele que
+// o modelo para baixar usa e é por ele que a leitura procura as
+// colunas. Mudou aqui, muda nos dois lugares.
+var CFM_CABECALHO = ['Código do Fornecedor','CNPJ','Pais do Fornecedor',
+  'Status do Fornecedor','Código da Família','Família','Registro',
+  'Status do Fornecimento','Código do Fornecedor SAP'];
+
 var CFM_BLOCO = 600000;        // ~600 KB por documento; o teto é 1 MB
 var CFM_STATUS = { 'A':'Aprovado', 'Q':'Qualificado tecnicamente',
                    'D':'Declaração de Interesse', 'R':'Reprovado',
@@ -58153,6 +58164,30 @@ var CFM_FILTROS = [
 var _cfm = { fam:{}, blocos:{}, arquivo:'', total:0, filtro:'',
              fornecedores:0, atualizadoEm:'', atualizadoPor:'', carregada:false };
 var _cfmLido = null;           // o arquivo lido, ainda não gravado
+
+// 27/11 — "coloca o modelo correto, para eu apenas colar valores".
+// A planilha sai com o cabeçalho certo e uma linha de exemplo que
+// mostra o formato de cada coluna; é só apagar o exemplo, colar os
+// valores e salvar.
+function cfmBaixarModelo(ev){
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  try {
+    var exemplo = ['1000000078','10704920155','Itália','I - Identificado','98010694',
+                   'Válvula esfera para instrumentação (98010694)',
+                   'CORP- CADASTRO CORPORATIVO','D - Declaração de Interesse','0030018739'];
+    var ws = XLSX.utils.aoa_to_sheet([CFM_CABECALHO, exemplo]);
+    ws['!cols'] = [{wch:22},{wch:20},{wch:18},{wch:22},{wch:18},{wch:52},{wch:34},{wch:28},{wch:24}];
+    // tudo como TEXTO: código de família e CNPJ com zero à esquerda
+    // viram número no Excel e perdem o zero — e aí nada cruza
+    CFM_CABECALHO.forEach(function(_, i){
+      var c = XLSX.utils.encode_cell({ r:1, c:i });
+      if (ws[c]) { ws[c].t = 's'; ws[c].z = '@'; }
+    });
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Familias');
+    XLSX.writeFile(wb, 'Modelo_Familias.xlsx');
+  } catch (e) { console.warn('cfmBaixarModelo:', e); }
+}
 
 function cfmEsc(v){
   return String(v == null ? '' : v)
@@ -58194,7 +58229,7 @@ function cfmColunas(cab){
     cnpj: ix(['CNPJ']),
     pais: ix(['PAIS_DO_FORNECEDOR','PAIS']),
     stF:  ix(['STATUS_DO_FORNECEDOR']),
-    fam:  ix(['CODIGO_DA_FAMILIA','COD_FAMILIA','CODIGO_FAMILIA','FAMILIA']),
+    fam:  ix(['CODIGO_DA_FAMILIA','COD_FAMILIA','CODIGO_FAMILIA','FAMILIA']),   // CFM_CABECALHO[4]
     nome: ix(['FAMILIA_1','FAMILIA','NOME_DA_FAMILIA','DESCRICAO']),
     reg:  ix(['REGISTRO']),
     stS:  ix(['STATUS_DO_FORNECIMENTO']),
@@ -58204,10 +58239,27 @@ function cfmColunas(cab){
 function cfmAchaColunas(cab){
   var c = (cab || []).map(cpNormCab);
   var col = cfmColunas(cab);
-  // "Código da Família" e "Família" normalizam para nomes diferentes,
-  // mas num arquivo com outro cabeçalho podem colidir: se caíram na
-  // mesma coluna, o nome é a coluna seguinte.
-  if (col.nome === col.fam) col.nome = col.fam + 1 < c.length ? col.fam + 1 : -1;
+  // Rede de segurança: cabeçalho escrito de outro jeito ainda é achado
+  // pelo que a palavra CONTÉM. O código da família é a coluna que fala
+  // de família e de código; o nome é a que fala só de família.
+  if (col.fam === -1) {
+    for (var i = 0; i < c.length; i++) {
+      if (c[i].indexOf('FAMILIA') !== -1 && /COD/.test(c[i])) { col.fam = i; break; }
+    }
+  }
+  if (col.fam === -1) {
+    for (var j = 0; j < c.length; j++) {
+      if (c[j].indexOf('FAMILIA') !== -1) { col.fam = j; break; }
+    }
+  }
+  if (col.nome === -1 || col.nome === col.fam) {
+    col.nome = -1;
+    for (var k = 0; k < c.length; k++) {
+      if (k !== col.fam && c[k].indexOf('FAMILIA') !== -1 && !/COD/.test(c[k])) { col.nome = k; break; }
+    }
+    // último recurso: a coluna logo depois do código
+    if (col.nome === -1 && col.fam + 1 < c.length) col.nome = col.fam + 1;
+  }
   return col;
 }
 function cfmLinha(ac, col, l){
@@ -58231,7 +58283,25 @@ function cfmLinha(ac, col, l){
 }
 
 // CSV lido aos pedaços: o arquivo nunca existe inteiro na memória.
-function _cfmCampos(linha){
+// 27/11 — "Não achei a coluna Código da Família no cabeçalho".
+// Era o CSV salvo pelo Excel em português: ele sai separado por PONTO E
+// VÍRGULA e em ANSI (windows-1252), não em UTF-8. Lido como UTF-8,
+// "Código da Família" chega como "C?digo da Fam?lia" e nenhum nome
+// bate. Agora o separador é descoberto na linha do cabeçalho e a
+// codificação é testada antes de valer.
+function _cfmSeparador(linha){
+  var fora = true, pv = 0, vi = 0, tab = 0;
+  for (var i = 0; i < linha.length; i++) {
+    var ch = linha.charAt(i);
+    if (ch === '"') { fora = !fora; continue; }
+    if (!fora) continue;
+    if (ch === ';') pv++; else if (ch === ',') vi++; else if (ch === '\t') tab++;
+  }
+  if (tab > pv && tab > vi) return '\t';
+  return (pv >= vi) ? ';' : ',';
+}
+function _cfmCampos(linha, sep){
+  sep = sep || ';';
   var out = [], campo = '', aspas = false;
   for (var i = 0; i < linha.length; i++) {
     var ch = linha.charAt(i);
@@ -58239,44 +58309,91 @@ function _cfmCampos(linha){
       if (ch === '"') { if (linha.charAt(i+1) === '"') { campo += '"'; i++; } else aspas = false; }
       else campo += ch;
     } else if (ch === '"') aspas = true;
-    else if (ch === ';' || ch === ',') { out.push(campo); campo = ''; }
+    else if (ch === sep) { out.push(campo); campo = ''; }
     else campo += ch;
   }
   out.push(campo);
   return out;
 }
+// Acento quebrado em excesso = o arquivo não é UTF-8. Um ou outro byte
+// ruim num arquivo grande não condena o arquivo inteiro.
+function _cfmEhUtf8(bytes){
+  try {
+    var t = new TextDecoder('utf-8', { fatal:false }).decode(bytes);
+    var ruins = (t.match(/\ufffd/g) || []).length;
+    return !(ruins && ruins / Math.max(1, t.length) > 0.0002);
+  } catch (e) { return false; }
+}
+// O cabeçalho costuma ser a 1ª linha, mas pode vir depois de um título.
+// Procuro nas 12 primeiras a que tem a coluna da família.
+function cfmCabecalho(linhas, sep){
+  for (var i = 0; i < Math.min(linhas.length, 12); i++) {
+    var campos = Array.isArray(linhas[i]) ? linhas[i] : _cfmCampos(linhas[i], sep);
+    var col = cfmAchaColunas(campos);
+    if (col.fam !== -1) return { i:i, col:col, campos:campos };
+  }
+  return null;
+}
 async function cfmLerCSV(file, aviso){
   var ac = cfmNovoAcumulador();
-  var dec = new TextDecoder('utf-8');
   var reader = file.stream().getReader();
-  var resto = '', col = null, lidos = 0, bytes = 0;
+  var dec = null, sep = null, col = null;
+  var resto = '', lidos = 0, bytes = 0, cabCru = null, pulou = 0;
+  var pendentes = [];      // linhas antes de o cabeçalho ser achado
   while (true) {
     var r = await reader.read();
     if (r.done) break;
     bytes += r.value.length;
+    if (!dec) {
+      ac.codificacao = _cfmEhUtf8(r.value) ? 'utf-8' : 'windows-1252';
+      dec = new TextDecoder(ac.codificacao, { fatal:false });
+    }
     var txt = resto + dec.decode(r.value, { stream:true });
+    if (!cabCru) txt = txt.replace(/^\ufeff/, '');
     var linhas = txt.split(/\r?\n/);
     resto = linhas.pop();
     for (var i = 0; i < linhas.length; i++) {
       var l = linhas[i];
       if (!l.trim()) continue;
-      var campos = _cfmCampos(l);
-      if (!col) { col = cfmAchaColunas(campos); if (col.fam === -1) { ac.aviso =
-        'Não achei a coluna "Código da Família" no cabeçalho.'; return ac; } continue; }
-      cfmLinha(ac, col, campos);
+      if (!col) {
+        if (sep === null) sep = _cfmSeparador(l);
+        pendentes.push(l);
+        if (pendentes.length <= 12) {
+          var ach = cfmCabecalho(pendentes, sep);
+          if (!ach) continue;
+          col = ach.col;
+          cabCru = ach.campos;
+          pulou = pendentes.length;
+          pendentes = [];
+          continue;
+        }
+        ac.aviso = 'Não achei a coluna do código da família no cabeçalho.';
+        ac.cabecalho = _cfmCampos(pendentes[0] || '', sep);
+        ac.separador = sep; ac.pulou = 0;
+        return ac;
+      }
+      cfmLinha(ac, col, _cfmCampos(l, sep));
       lidos++;
     }
     if (aviso) await aviso(lidos, bytes);
   }
-  if (resto.trim() && col) cfmLinha(ac, col, _cfmCampos(resto));
-  if (!col) ac.aviso = 'Arquivo vazio.';
-  ac.cols = col;
+  if (resto.trim() && col) cfmLinha(ac, col, _cfmCampos(resto, sep));
+  if (!col) {
+    ac.aviso = pendentes.length ? 'Não achei a coluna do código da família no cabeçalho.'
+                                : 'Arquivo vazio.';
+    ac.cabecalho = pendentes.length ? _cfmCampos(pendentes[0], sep) : [];
+  }
+  ac.cols = col; ac.cabecalho = ac.cabecalho || cabCru || [];
+  ac.separador = sep; ac.pulou = pulou > 1 ? pulou - 1 : 0;
   return ac;
 }
 
 async function cfmLerArquivo(file){
   if (!file) return;
   if (!_isAdmGeral()) { _cfmSt('<span style="color:var(--vm)">Só o ADM atualiza esta base.</span>'); return; }
+  // o arquivo anterior sai de cena agora: se esta leitura falhar, não
+  // pode sobrar um "gravar" apontando para a planilha de antes
+  _cfmLido = null;
   _cfmPlano('');
   var t0 = Date.now();
   try {
@@ -58303,12 +58420,34 @@ async function cfmLerArquivo(file){
       var linhas = XLSX.utils.sheet_to_json(wb.Sheets[aba],
                      { header:1, defval:'', raw:true, blankrows:false });
       ac = cfmNovoAcumulador();
-      var col = cfmAchaColunas(linhas[0] || []);
-      if (col.fam === -1) { ac.aviso = 'Não achei a coluna "Código da Família" no cabeçalho.'; }
-      else for (var i = 1; i < linhas.length; i++) cfmLinha(ac, col, linhas[i] || []);
-      ac.cols = col;
+      ac.codificacao = 'planilha';
+      var ach = cfmCabecalho(linhas, null);
+      if (!ach) {
+        ac.aviso = 'Não achei a coluna do código da família no cabeçalho.';
+        ac.cabecalho = (linhas[0] || []).map(function(x){ return String(x == null ? '' : x); });
+      } else {
+        for (var i = ach.i + 1; i < linhas.length; i++) cfmLinha(ac, col0(ach), linhas[i] || []);
+        ac.cols = ach.col; ac.cabecalho = ach.campos; ac.pulou = ach.i;
+      }
+      function col0(a){ return a.col; }
     }
-    if (ac.aviso) { _cfmSt('<span style="color:var(--vm)">❌ ' + cfmEsc(ac.aviso) + '</span>'); return; }
+    if (ac.aviso) {
+      // Dizer o que eu li. "Não achei a coluna" sem mostrar o cabeçalho
+      // não dá a ninguém como resolver.
+      _cfmSt('<span style="color:var(--vm)">❌ ' + cfmEsc(ac.aviso) + '</span>'
+        + ((ac.cabecalho || []).length
+            ? '<div style="color:var(--tx2);margin-top:5px">O cabeçalho que eu li foi: '
+              + (ac.cabecalho || []).slice(0, 14).map(function(x){
+                  return '<code>' + cfmEsc(x) + '</code>'; }).join(' · ')
+              + ((ac.cabecalho || []).length > 14 ? ' …' : '')
+              + (ac.separador ? '<br>Separador: <code>'
+                  + cfmEsc(ac.separador === '\t' ? 'TAB' : ac.separador) + '</code>' : '')
+              + (ac.codificacao ? ' · codificação: <code>' + cfmEsc(ac.codificacao) + '</code>' : '')
+              + '<br>Se os acentos acima estiverem quebrados, o arquivo veio em outra '
+              + 'codificação — salve de novo como <strong>CSV UTF-8</strong> no Excel.</div>'
+            : ''));
+      return;
+    }
     if (!ac.total) { _cfmSt('<span style="color:var(--vm)">❌ Nenhuma linha com código de família.</span>'); return; }
     ac.arquivo = file.name;
     _cfmLido = ac;
@@ -58316,7 +58455,16 @@ async function cfmLerArquivo(file){
       + Math.round((Date.now() - t0) / 1000) + 's.</span> <span style="color:var(--tx2)">'
       + cpNum(Object.keys(ac.fam).length) + ' famílias · '
       + cpNum(Object.keys(ac.fornec).length) + ' fornecedores distintos. '
-      + '<strong>Nada foi gravado ainda.</strong></span>');
+      + '<strong>Nada foi gravado ainda.</strong></span>'
+      // de onde o leitor tirou cada coisa — se algo vier torto, dá para
+      // ver aqui em vez de descobrir depois de gravar
+      + '<div style="color:var(--tx2);margin-top:4px">Li como <code>'
+      + cfmEsc(ac.codificacao || '—') + '</code>'
+      + (ac.separador ? ', separador <code>'
+          + cfmEsc(ac.separador === '\t' ? 'TAB' : ac.separador) + '</code>' : '')
+      + (ac.pulou ? ', cabeçalho na linha ' + (ac.pulou + 1) : '')
+      + '. Exemplo de família lida: <code>' + cfmEsc(Object.keys(ac.fam)[0] || '')
+      + ' — ' + cfmEsc(ac.fam[Object.keys(ac.fam)[0]] || '') + '</code></div>');
     cfmRenderPlano();
   } catch (e) {
     console.warn('cfmLerArquivo:', e);
