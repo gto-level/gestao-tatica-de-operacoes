@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '27/11 19:40';
+var GTO_BUILD = '27/11 20:30';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -52986,6 +52986,13 @@ async function aagUpload(chave, file){
     aagPintarUploads();
     aagRenderPassos();
     if (chave === 'mapa') pnrRender();
+    // 27/11 — o mapa também alimenta o SEGMENTO e o TIPO da Consulta
+    // Família (colunas F, G e H). É um documento pequeno à parte, e
+    // falhar aqui não pode derrubar o upload do mapa.
+    var _fam = null;
+    if (chave === 'mapa') {
+      try { _fam = await cfmGuardarDoMapa(novo); } catch (e) { console.warn('mapa/familia:', e); }
+    }
     if (AAG_GUARDADAS.indexOf(chave) !== -1) aagGuardar(chave);
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ ' + cpEsc(file.name) + ' — '
       + cpNum(_aagArq[chave].linhas.length) + ' linhas na aba <strong>'
@@ -52997,7 +53004,22 @@ async function aagUpload(chave, file){
       + (novo.repetidas
           ? ' <span style="color:var(--am)">⚠ ' + cpNum(novo.repetidas) + ' linha(s) vinham '
             + 'repetidas no arquivo; fiquei com a última de cada uma.</span>'
-          : '') + '.</span>';
+          : '') + '.</span>'
+      + (_fam
+          ? '<div style="color:var(--az);margin-top:4px">🧬 Segmento e tipo de <strong>'
+            + cpNum(_fam.total) + '</strong> família(s) ficaram disponíveis na '
+            + '<strong>Consulta Família</strong>'
+            + (_fam.novas ? ' (' + cpNum(_fam.novas) + ' nova(s) neste mapa)' : '')
+            + '.'
+            + ((_fam.porLetra || []).length
+                ? ' <span style="color:var(--am)">⚠ Li por posição: '
+                  + cpEsc(_fam.porLetra.join(' · ')) + '.</span>' : '')
+            + '</div>'
+          : (chave === 'mapa'
+              ? '<div style="color:var(--am);margin-top:4px">🧬 Este mapa não trouxe segmento '
+                + 'nem tipo de família (colunas F, G e H) — a Consulta Família segue com o que '
+                + 'já tinha.</div>'
+              : ''));
   } catch (e) {
     if (st) {
       st.innerHTML = e && e.protegido
@@ -58189,6 +58211,72 @@ function cfmBaixarModelo(ev){
   } catch (e) { console.warn('cfmBaixarModelo:', e); }
 }
 
+// ══ SEGMENTO E TIPO: o cruzamento com o MAPA DIÁRIO (27/11) ══════
+//
+// André: "no upload onde eu subo o mapa (analista automático · montar
+// base · mapa diário) vamos precisar ler as colunas F família, G
+// segmento da família, H tipo de família, e colocar os dados de
+// segmento e tipo de família [na ficha]. Ou seja, preciso confrontar
+// os dados do tópico consulta família com os dados do mapa. A consulta
+// deve ser pelo número da família: no mapa, coluna F; na consulta
+// família, coluna E (código da família)."
+//
+// O mapa é a fonte do segmento e do tipo; a planilha de famílias é a
+// fonte do nome e dos fornecedores. Cada um manda no que tem, e a
+// ficha diz de onde veio cada parte.
+//
+// O de-para fica num documento só, pequeno (uma linha por família), e
+// ACUMULA: cada mapa que sobe acrescenta as famílias que trouxe, em
+// vez de apagar as de antes. Assim o mapa do ADLV e o do FAST somam.
+var CFM_MAPA_DOC = 'familias_mapa';
+
+function cfmDoMapa(d){
+  var r = { fam:{}, lidas:0, porLetra:[] };
+  if (!d || !d.cab || !d.linhas) return r;
+  var iF = aagCol(d.cab, ['FAMILIA','FAMÍLIA','COD_FAMILIA','CODIGO_FAMILIA']);
+  var iG = aagCol(d.cab, ['SEGMENTO_FAMILIA','SEGMENTO FAMILIA','SEGMENTO']);
+  var iH = aagCol(d.cab, ['TIPO_FAMILIA','TIPO FAMILIA','TIPO DE FAMILIA']);
+  // as letras que ele passou são a rede de segurança, e ficam
+  // registradas para a tela poder avisar que foi por posição
+  if (iF === -1) { iF = 5; r.porLetra.push('Família pela coluna F'); }
+  if (iG === -1) { iG = 6; r.porLetra.push('Segmento pela coluna G'); }
+  if (iH === -1) { iH = 7; r.porLetra.push('Tipo pela coluna H'); }
+  d.linhas.forEach(function(l){
+    var cod = cfmCod((l || [])[iF]);
+    if (!cod) return;
+    var seg = aagTxt((l || [])[iG]), tip = aagTxt((l || [])[iH]);
+    if (!seg && !tip) return;
+    r.lidas++;
+    if (!r.fam[cod]) r.fam[cod] = [seg, tip];
+  });
+  return r;
+}
+
+// Chamado logo depois de o mapa diário entrar. Falhar aqui não pode
+// atrapalhar o upload do mapa — é informação a mais, não a principal.
+async function cfmGuardarDoMapa(d){
+  try {
+    var r = cfmDoMapa(d);
+    if (!Object.keys(r.fam).length) return false;
+    var antes = (await fbGetGeral('config', CFM_MAPA_DOC)) || {};
+    var juntas = Object.assign({}, antes.fam || {});
+    var novas = 0;
+    Object.keys(r.fam).forEach(function(k){
+      if (!juntas[k]) novas++;
+      juntas[k] = r.fam[k];
+    });
+    await fbSetGeral('config', CFM_MAPA_DOC, {
+      fam: juntas, familias: Object.keys(juntas).length,
+      arquivo: (d && d.nome) || '', porLetra: r.porLetra,
+      atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem()
+    });
+    _cfm.mapa = juntas;
+    _cfm.mapaArquivo = (d && d.nome) || '';
+    _cfm.mapaEm = new Date().toISOString();
+    return { novas:novas, total:Object.keys(juntas).length, porLetra:r.porLetra };
+  } catch (e) { console.warn('cfmGuardarDoMapa:', e); return false; }
+}
+
 function cfmEsc(v){
   return String(v == null ? '' : v)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -58591,7 +58679,15 @@ async function cfmCarregar(forcar){
   if (_cfm.carregada && !forcar) return true;
   try {
     var m = await fbGetGeral('config', 'familias_meta');
-    if (!m) { _cfm.carregada = true; return false; }
+    if (!m) {
+      // o de-para do mapa vale sozinho: dá para ver segmento e tipo
+      // antes de a planilha de famílias existir
+      var so = (await fbGetGeral('config', CFM_MAPA_DOC)) || {};
+      _cfm.mapa = so.fam || {}; _cfm.mapaArquivo = so.arquivo || '';
+      _cfm.mapaEm = so.atualizadoEm || ''; _cfm.mapaPorLetra = so.porLetra || [];
+      _cfm.carregada = true;
+      return false;
+    }
     var fam = {};
     var pedidos = [];
     for (var i = 0; i < (+m.indices || 1); i++) pedidos.push(fbGetGeral('config', 'familias_i' + i));
@@ -58599,7 +58695,10 @@ async function cfmCarregar(forcar){
       var f = (p || {}).fams || {};
       Object.keys(f).forEach(function(k){ fam[k] = f[k]; });
     });
-    _cfm = { fam:fam, blocos:{}, arquivo:m.arquivo || '', total:+m.total || 0,
+    var mp = (await fbGetGeral('config', CFM_MAPA_DOC)) || {};
+    _cfm = { fam:fam, blocos:{}, mapa:mp.fam || {}, mapaArquivo:mp.arquivo || '',
+             mapaEm:mp.atualizadoEm || '', mapaPorLetra:mp.porLetra || [],
+             arquivo:m.arquivo || '', total:+m.total || 0,
              filtro:m.filtro || '', familias:+m.familias || Object.keys(fam).length,
              fornecedores:+m.fornecedores || 0, bytes:+m.bytes || 0,
              blocosGravados:+m.blocos || 0, indices:+m.indices || 1,
@@ -58692,16 +58791,42 @@ async function cfmAbrir(cod){
   var porSt = {};
   lista.forEach(function(p){ porSt[p.t] = (porSt[p.t] || 0) + 1; });
 
+  // segmento e tipo vêm do MAPA DIÁRIO, cruzando pelo número da
+  // família; nome e fornecedores vêm da planilha de famílias. A ficha
+  // diz de onde veio cada parte para ninguém somar duas fontes achando
+  // que é uma só.
+  var mp = (_cfm.mapa || {})[cod] || null;
+  var _campo = function(rot, val, cor){
+    return '<div style="min-width:150px">'
+      + '<div style="font-size:10px;letter-spacing:.5px;color:var(--tx2);font-weight:700">'
+      + rot + '</div>'
+      + '<div style="font-size:15px;font-weight:700;color:' + (val ? cor : 'var(--tx2)') + '">'
+      + (val ? cfmEsc(val) : '—') + '</div></div>';
+  };
   var h = '<div style="border:1px solid var(--brd);border-left:4px solid var(--vd);'
     + 'border-radius:11px;padding:14px 16px;background:var(--bg);margin-bottom:1rem">'
-    + '<div style="font-size:10px;letter-spacing:.5px;color:var(--tx2);font-weight:700">'
-    + 'CÓDIGO DA FAMÍLIA</div>'
-    + '<div style="font-size:26px;font-weight:800;color:var(--azm);line-height:1.2">'
-    + cfmEsc(cod) + '</div>'
-    + '<div style="font-size:10px;letter-spacing:.5px;color:var(--tx2);font-weight:700;margin-top:10px">'
-    + 'FAMÍLIA</div>'
-    + '<div style="font-size:15px;color:var(--tx)">' + cfmEsc(reg[1] || '—') + '</div>'
-    + '<div style="font-size:11.5px;color:var(--tx2);margin-top:10px">'
+    + '<div style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start">'
+    + '<div style="flex:1;min-width:240px">'
+    +   '<div style="font-size:10px;letter-spacing:.5px;color:var(--tx2);font-weight:700">'
+    +   'CÓDIGO DA FAMÍLIA</div>'
+    +   '<div style="font-size:26px;font-weight:800;color:var(--azm);line-height:1.2">'
+    +   cfmEsc(cod) + '</div>'
+    +   '<div style="font-size:10px;letter-spacing:.5px;color:var(--tx2);font-weight:700;margin-top:10px">'
+    +   'FAMÍLIA</div>'
+    +   '<div style="font-size:15px;color:var(--tx)">' + cfmEsc(reg[1] || '—') + '</div>'
+    + '</div>'
+    + '<div style="display:flex;gap:24px;flex-wrap:wrap;padding-top:2px">'
+    +   _campo('SEGMENTO', mp ? mp[0] : '', 'var(--vm)')
+    +   _campo('TIPO DE FAMÍLIA', mp ? mp[1] : '', 'var(--vd)')
+    + '</div></div>'
+    + '<div style="font-size:11px;color:var(--tx2);margin-top:10px">'
+    + (mp ? 'Segmento e tipo vieram do <strong>mapa diário</strong>'
+            + (_cfm.mapaArquivo ? ' (' + cfmEsc(_cfm.mapaArquivo) + ')' : '')
+            + ', cruzados pelo número da família.'
+          : 'Segmento e tipo aparecem quando um <strong>mapa diário</strong> trouxer esta '
+            + 'família nas colunas F, G e H — suba o mapa em Analista Automático › Montar base.')
+    + '</div>'
+    + '<div style="font-size:11.5px;color:var(--tx2);margin-top:6px">'
     + '<strong>' + cpNum(lista.length) + '</strong> fornecedor(es) cadastrado(s)'
     + (Object.keys(porSt).length
         ? ' · ' + Object.keys(CFM_STATUS).filter(function(k){ return porSt[k]; })
