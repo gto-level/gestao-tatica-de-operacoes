@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '27/11 20:55';
+var GTO_BUILD = '27/11 21:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -2660,6 +2660,16 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
         </div>
         <button class="btn btn-p" onclick="cfmBuscar()">🔍 BUSCAR</button>
         <button class="btn btn-s" onclick="cfmLimpar()">✕ LIMPAR</button>
+        <div style="width:1px;align-self:stretch;background:var(--brd);margin:0 4px"></div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:700;color:var(--tx);margin-bottom:6px">
+            Código do fornecedor SAP
+          </label>
+          <input type="text" id="cfm-sap" placeholder="Ex.: 0030018739"
+            onkeydown="if(event.key==='Enter') cfmBuscarSap()"
+            style="width:210px;font-size:14px;padding:9px 13px;border:1.5px solid var(--brd);border-radius:8px;font-weight:600;background:var(--bg);color:var(--tx)">
+        </div>
+        <button class="btn btn-p" onclick="cfmBuscarSap()">🏭 BUSCAR FORNECEDOR</button>
       </div>
 
       <div id="cfm-resultado" style="margin-top:1.25rem"></div>
@@ -52989,9 +52999,15 @@ async function aagUpload(chave, file){
     // 27/11 — o mapa também alimenta o SEGMENTO e o TIPO da Consulta
     // Família (colunas F, G e H). É um documento pequeno à parte, e
     // falhar aqui não pode derrubar o upload do mapa.
-    var _fam = null;
+    var _fam = null, _frn = null;
     if (chave === 'mapa') {
       try { _fam = await cfmGuardarDoMapa(novo); } catch (e) { console.warn('mapa/familia:', e); }
+    }
+    // 27/11 — o backlog é quem sabe o NOME de cada fornecedor (coluna L,
+    // pelo ID SAP da coluna K). A Consulta Família usa isso na coluna
+    // "nome do fornecedor".
+    if (chave === 'backlog') {
+      try { _frn = await cfmGuardarDoBacklog(novo); } catch (e) { console.warn('backlog/forn:', e); }
     }
     if (AAG_GUARDADAS.indexOf(chave) !== -1) aagGuardar(chave);
     if (st) st.innerHTML = '<span style="color:var(--vd)">✓ ' + cpEsc(file.name) + ' — '
@@ -53019,7 +53035,17 @@ async function aagUpload(chave, file){
               ? '<div style="color:var(--am);margin-top:4px">🧬 Este mapa não trouxe segmento '
                 + 'nem tipo de família (colunas F, G e H) — a Consulta Família segue com o que '
                 + 'já tinha.</div>'
-              : ''));
+              : ''))
+      + (_frn
+          ? '<div style="color:var(--az);margin-top:4px">🏭 <strong>' + cpNum(_frn.total)
+            + '</strong> fornecedor(es) com nome para a <strong>Consulta Família</strong>'
+            + (_frn.novas ? ' (' + cpNum(_frn.novas) + ' novo(s) neste backlog)' : '')
+            + '.'
+            + ((_frn.porLetra || []).length
+                ? ' <span style="color:var(--am)">⚠ Li por posição: '
+                  + cpEsc(_frn.porLetra.join(' · ')) + '.</span>' : '')
+            + '</div>'
+          : '');
   } catch (e) {
     if (st) {
       st.innerHTML = e && e.protegido
@@ -58229,6 +58255,66 @@ function cfmBaixarModelo(ev){
 // ACUMULA: cada mapa que sobe acrescenta as famílias que trouxe, em
 // vez de apagar as de antes. Assim o mapa do ADLV e o do FAST somam.
 var CFM_MAPA_DOC = 'familias_mapa';
+var CFM_FORN_DOC = 'familias_forn';
+
+// O mesmo fornecedor aparece com zeros à esquerda numa planilha e sem
+// eles na outra: "0030018739" na de famílias e 30018739 no backlog.
+// Sem tirar os zeros dos dois lados, nenhum cruzamento fecha.
+function cfmSap(v){
+  var t = String(v == null ? '' : v).trim().replace(/\.0+$/, '').replace(/[^0-9A-Za-z]/g, '');
+  return t.replace(/^0+(?=.)/, '').toUpperCase();
+}
+
+// 27/11 — André: "vamos precisar criar uma coluna entre cód SAP e CNPJ
+// chamada nome do fornecedor. Os dados desta coluna devem ser o
+// cruzamento: da planilha consulta família a coluna I (código do
+// fornecedor SAP) com a planilha do backlog a coluna K (id sap
+// fornecedor); o dado que eu preciso é a coluna L (nome do
+// fornecedor) do backlog."
+//
+// A planilha de famílias não traz o nome de ninguém — só códigos. O
+// nome vem do backlog, e é por isso que ele é cruzado aqui e não
+// gravado junto com os pares: backlog novo, nomes novos, sem refazer
+// a base de famílias.
+function cfmDoBacklog(d){
+  var r = { forn:{}, lidas:0, porLetra:[] };
+  if (!d || !d.cab || !d.linhas) return r;
+  var iSap = aagCol(d.cab, ['ID_SAP_FORNECEDOR','COD_SAP','CODIGO_FORNECEDOR_SAP']);
+  var iNom = aagCol(d.cab, ['NOME_FORNECEDOR','FORNECEDOR','RAZAO_SOCIAL']);
+  if (iSap === -1) { iSap = 10; r.porLetra.push('ID SAP pela coluna K'); }
+  if (iNom === -1) { iNom = 11; r.porLetra.push('Nome do fornecedor pela coluna L'); }
+  d.linhas.forEach(function(l){
+    var k = cfmSap((l || [])[iSap]);
+    if (!k) return;
+    var nome = aagTxt((l || [])[iNom]);
+    if (!nome) return;
+    r.lidas++;
+    if (!r.forn[k]) r.forn[k] = nome;
+  });
+  return r;
+}
+
+async function cfmGuardarDoBacklog(d){
+  try {
+    var r = cfmDoBacklog(d);
+    if (!Object.keys(r.forn).length) return false;
+    var antes = (await fbGetGeral('config', CFM_FORN_DOC)) || {};
+    var juntas = Object.assign({}, antes.forn || {});
+    var novas = 0;
+    Object.keys(r.forn).forEach(function(k){
+      if (!juntas[k]) novas++;
+      juntas[k] = r.forn[k];
+    });
+    await fbSetGeral('config', CFM_FORN_DOC, {
+      forn: juntas, fornecedores: Object.keys(juntas).length,
+      arquivo: (d && d.nome) || '', porLetra: r.porLetra,
+      atualizadoEm: new Date().toISOString(), atualizadoPor: cpQuem()
+    });
+    _cfm.forn = juntas;
+    _cfm.fornArquivo = (d && d.nome) || '';
+    return { novas:novas, total:Object.keys(juntas).length, porLetra:r.porLetra };
+  } catch (e) { console.warn('cfmGuardarDoBacklog:', e); return false; }
+}
 
 function cfmDoMapa(d){
   var r = { fam:{}, lidas:0, porLetra:[] };
@@ -58301,6 +58387,13 @@ function cfmLetra(st){
 function cfmNome(v){
   return String(v == null ? '' : v).trim().replace(/\s*\(\d{4,12}\)\s*$/, '');
 }
+// O nome sai do backlog, pelo código SAP. Não achando, fica o traço —
+// e o rodapé da ficha explica por quê, em vez de um vazio sem motivo.
+function cfmNomeForn(sap){
+  var n = (_cfm.forn || {})[cfmSap(sap)];
+  return n ? cfmEsc(n) : '<span style="opacity:.4">—</span>';
+}
+
 function cfmMB(bytes){ return (bytes / 1048576).toFixed(bytes < 1048576 ? 2 : 1) + ' MB'; }
 
 // ── leitura ───────────────────────────────────────────────────────
@@ -58564,6 +58657,21 @@ async function cfmLerArquivo(file){
 }
 
 // ── o que vai ser gravado: ele escolhe, vendo o tamanho ───────────
+// fornecedor (SAP) → "familia:status,familia:status". Compacto de
+// propósito: é o mesmo volume de pares visto do outro lado, e cada
+// byte aqui é espaço na nuvem dele.
+function cfmInverso(sel){
+  var rev = {};
+  Object.keys(sel.pares).forEach(function(f){
+    sel.pares[f].forEach(function(p){
+      var k = cfmSap(p.s) || ('C' + cfmSap(p.c));
+      if (!k) return;
+      rev[k] = (rev[k] ? rev[k] + ',' : '') + f + ':' + (p.t || '?');
+    });
+  });
+  return rev;
+}
+
 function cfmSelecionar(ac, sts){
   var fam = {}, pares = {}, linhas = 0, bytes = 0;
   Object.keys(ac.pares).forEach(function(f){
@@ -58575,8 +58683,18 @@ function cfmSelecionar(ac, sts){
     bytes += JSON.stringify(sel).length + f.length + 8;
   });
   bytes += JSON.stringify(fam).length;
-  return { fam:fam, pares:pares, linhas:linhas, bytes:bytes,
-           familias:Object.keys(fam).length };
+  var r = { fam:fam, pares:pares, linhas:linhas, bytes:bytes,
+            familias:Object.keys(fam).length };
+  // o índice por fornecedor entra na conta do tamanho: ele também vai
+  // para a nuvem, e esconder isso seria mostrar um número menor do que
+  // o que vai ocupar
+  var rev = cfmInverso(r);
+  var bRev = 0;
+  Object.keys(rev).forEach(function(k){ bRev += k.length + rev[k].length + 8; });
+  r.bytesSap = bRev;
+  r.saps = Object.keys(rev).length;
+  r.bytes = bytes + bRev;
+  return r;
 }
 
 function cfmRenderPlano(){
@@ -58601,8 +58719,10 @@ function cfmRenderPlano(){
       + '<button class="btn ' + (f.k === 'aq' ? 'btn-p' : 'btn-s') + '" '
       + 'onclick="cfmGravar(\'' + f.k + '\')" style="font-size:11.5px">⬆ ' + f.rot + '</button>'
       + '<span style="font-size:11.5px;color:var(--tx2)">' + cpNum(s.linhas)
-      + ' linha(s) · ' + cpNum(s.familias) + ' famílias · <strong>~' + cfmMB(s.bytes)
-      + '</strong> <span style="opacity:.75">— ' + f.dica + '</span></span></div>';
+      + ' linha(s) · ' + cpNum(s.familias) + ' famílias · ' + cpNum(s.saps)
+      + ' fornecedores · <strong>~' + cfmMB(s.bytes) + '</strong> '
+      + '<span style="opacity:.75">(' + cfmMB(s.bytesSap) + ' do índice por fornecedor) — '
+      + f.dica + '</span></span></div>';
   });
   h += '</div>';
   el.innerHTML = h;
@@ -58650,9 +58770,32 @@ async function cfmGravar(chave){
     for (var p = 0; p < partes.length; p++) {
       await fbSetGeral('config', 'familias_i' + p, { fams: partes[p] });
     }
+
+    // 27/11 — a busca pelo código SAP é o caminho inverso: o fornecedor
+    // está em que famílias? Varrer os blocos de família para responder
+    // significaria baixar a base inteira, então o inverso tem índice
+    // próprio, também em blocos, com o primeiro código de cada um
+    // guardado na meta para achar o bloco certo sem ler os outros.
+    var rev = cfmInverso(sel);
+    var saps = Object.keys(rev).sort();
+    var sb = [], sAtual = {}, sTam = 0, sInicio = [];
+    saps.forEach(function(k){
+      var t = k.length + rev[k].length + 8;
+      if (sTam && sTam + t > CFM_BLOCO) { sb.push(sAtual); sAtual = {}; sTam = 0; }
+      if (!Object.keys(sAtual).length) sInicio.push(k);
+      sAtual[k] = rev[k]; sTam += t;
+    });
+    if (Object.keys(sAtual).length) sb.push(sAtual);
+    for (var q = 0; q < sb.length; q++) {
+      _cfmSt('⏳ Gravando o índice por fornecedor ' + (q + 1) + ' de ' + sb.length + '...');
+      await fbSetGeral('config', 'familias_s' + q, { saps: sb[q] });
+    }
+    for (var zz = sb.length; zz < (_cfm.sapN || 0); zz++)
+      await fbSetGeral('config', 'familias_s' + zz, { saps:{} });
     var meta = { arquivo:_cfmLido.arquivo, total:sel.linhas, familias:sel.familias,
                  fornecedores:Object.keys(_cfmLido.fornec).length,
                  filtro:f.rot, blocos:blocos.length, indices:partes.length,
+                 sapBlocos:sb.length, sapInicio:sInicio, sapsIndexados:saps.length,
                  bytes:sel.bytes,
                  atualizadoEm:new Date().toISOString(), atualizadoPor:cpQuem() };
     await fbSetGeral('config', 'familias_meta', meta);
@@ -58683,8 +58826,10 @@ async function cfmCarregar(forcar){
       // o de-para do mapa vale sozinho: dá para ver segmento e tipo
       // antes de a planilha de famílias existir
       var so = (await fbGetGeral('config', CFM_MAPA_DOC)) || {};
+      var sf = (await fbGetGeral('config', CFM_FORN_DOC)) || {};
       _cfm.mapa = so.fam || {}; _cfm.mapaArquivo = so.arquivo || '';
       _cfm.mapaEm = so.atualizadoEm || ''; _cfm.mapaPorLetra = so.porLetra || [];
+      _cfm.forn = sf.forn || {}; _cfm.fornArquivo = sf.arquivo || '';
       _cfm.carregada = true;
       return false;
     }
@@ -58696,7 +58841,11 @@ async function cfmCarregar(forcar){
       Object.keys(f).forEach(function(k){ fam[k] = f[k]; });
     });
     var mp = (await fbGetGeral('config', CFM_MAPA_DOC)) || {};
-    _cfm = { fam:fam, blocos:{}, mapa:mp.fam || {}, mapaArquivo:mp.arquivo || '',
+    var fo = (await fbGetGeral('config', CFM_FORN_DOC)) || {};
+    _cfm = { fam:fam, blocos:{}, sapBlocos:{}, forn:fo.forn || {},
+             fornArquivo:fo.arquivo || '',
+             sapN:+m.sapBlocos || 0, sapInicio:m.sapInicio || [],
+             mapa:mp.fam || {}, mapaArquivo:mp.arquivo || '',
              mapaEm:mp.atualizadoEm || '', mapaPorLetra:mp.porLetra || [],
              arquivo:m.arquivo || '', total:+m.total || 0,
              filtro:m.filtro || '', familias:+m.familias || Object.keys(fam).length,
@@ -58713,6 +58862,109 @@ async function cfmBloco(n){
   var d = await fbGetGeral('config', 'familias_b' + n);
   _cfm.blocos[n] = (d || {}).fams || {};
   return _cfm.blocos[n];
+}
+
+// Qual bloco do índice por fornecedor guarda este código: o último
+// cujo primeiro código ainda é menor ou igual ao procurado.
+function cfmSapBloco(sap){
+  var ini = _cfm.sapInicio || [];
+  if (!ini.length) return -1;
+  var achado = -1;
+  for (var i = 0; i < ini.length; i++) { if (ini[i] <= sap) achado = i; else break; }
+  return achado === -1 ? 0 : achado;
+}
+async function cfmSapLista(sap){
+  var n = cfmSapBloco(sap);
+  if (n < 0) return null;
+  if (!_cfm.sapBlocos[n]) {
+    var d = await fbGetGeral('config', 'familias_s' + n);
+    _cfm.sapBlocos[n] = (d || {}).saps || {};
+  }
+  var txt = _cfm.sapBlocos[n][sap];
+  if (!txt) return null;
+  return String(txt).split(',').map(function(p){
+    var x = p.split(':');
+    return { fam:x[0], st:x[1] || '?' };
+  });
+}
+
+async function cfmBuscarSap(){
+  var el = document.getElementById('cfm-resultado');
+  if (!el) return;
+  var cru = (document.getElementById('cfm-sap') || {}).value || '';
+  var sap = cfmSap(cru);
+  if (!sap) { el.innerHTML = ''; return; }
+  if (!_cfm.carregada) {
+    el.innerHTML = '<div style="padding:.9rem 1rem;background:var(--amc);border-radius:8px;'
+      + 'color:var(--am);font-size:12.5px">⏳ Carregando...</div>';
+    await cfmCarregar();
+  }
+  if (!(_cfm.sapN || 0)) {
+    el.innerHTML = '<div style="padding:.9rem 1rem;background:var(--amc);border-radius:8px;'
+      + 'color:var(--am);font-size:12.5px">⚠️ A base carregada é anterior à busca por '
+      + 'fornecedor. Suba a planilha de famílias de novo que o índice por código SAP é '
+      + 'montado junto.</div>';
+    return;
+  }
+  var lista = await cfmSapLista(sap);
+  var nome = (_cfm.forn || {})[sap] || '';
+  if (!lista) {
+    el.innerHTML = '<div style="padding:.9rem 1rem;background:var(--amc);border-radius:8px;'
+      + 'color:var(--am);font-size:12.5px">⚠️ O fornecedor <strong>' + cfmEsc(cru)
+      + '</strong>' + (nome ? ' (' + cfmEsc(nome) + ')' : '')
+      + ' não está cadastrado em nenhuma família dentro do recorte gravado'
+      + (_cfm.filtro ? ' (' + cfmEsc(_cfm.filtro) + ')' : '') + '.</div>';
+    return;
+  }
+  var porSt = {};
+  lista.forEach(function(x){ porSt[x.st] = (porSt[x.st] || 0) + 1; });
+  var h = '<div style="border:1px solid var(--brd);border-left:4px solid var(--azm);'
+    + 'border-radius:11px;padding:14px 16px;background:var(--bg);margin-bottom:1rem">'
+    + '<div style="font-size:10px;letter-spacing:.5px;color:var(--tx2);font-weight:700">'
+    + 'CÓDIGO DO FORNECEDOR SAP</div>'
+    + '<div style="font-size:26px;font-weight:800;color:var(--azm);line-height:1.2">'
+    + cfmEsc(cru.trim()) + '</div>'
+    + '<div style="font-size:10px;letter-spacing:.5px;color:var(--tx2);font-weight:700;margin-top:10px">'
+    + 'NOME DO FORNECEDOR</div>'
+    + '<div style="font-size:15px;color:' + (nome ? 'var(--tx)' : 'var(--tx2)') + '">'
+    + (nome ? cfmEsc(nome) : '— o nome vem do backlog; suba o backlog em Analista '
+        + 'Automático › Montar base') + '</div>'
+    + '<div style="font-size:11.5px;color:var(--tx2);margin-top:10px">'
+    + '<strong>' + cpNum(lista.length) + '</strong> família(s) cadastrada(s) · '
+    + Object.keys(CFM_STATUS).filter(function(k){ return porSt[k]; })
+        .map(function(k){ return cpNum(porSt[k]) + ' ' + CFM_STATUS[k]; }).join(' · ')
+    + '</div></div>';
+
+  var ordem = { 'A':0, 'Q':1, 'D':2, 'R':3, 'X':4, '?':5 };
+  lista = lista.slice().sort(function(a, b){
+    var d = (ordem[a.st] == null ? 9 : ordem[a.st]) - (ordem[b.st] == null ? 9 : ordem[b.st]);
+    return d || String(a.fam).localeCompare(String(b.fam));
+  });
+  h += '<div style="overflow:auto;max-height:520px"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+    + '<thead><tr style="background:var(--cin)">'
+    + ['CÓDIGO','FAMÍLIA','SEGMENTO','TIPO','STATUS DO FORNECIMENTO']
+        .map(function(t){ return '<th style="text-align:left;padding:8px 10px;font-size:10px;'
+          + 'color:var(--tx2);border-bottom:1.5px solid var(--brd);white-space:nowrap">'
+          + t + '</th>'; }).join('')
+    + '</tr></thead><tbody>';
+  lista.forEach(function(x){
+    var reg = (_cfm.fam || {})[x.fam];
+    var mp = (_cfm.mapa || {})[x.fam] || null;
+    var cor = (x.st === 'A' || x.st === 'Q') ? 'var(--vd)'
+            : (x.st === 'R' || x.st === 'X') ? 'var(--vm)' : 'var(--am)';
+    h += '<tr style="border-bottom:1px solid var(--brd)">'
+      + '<td style="padding:7px 10px;white-space:nowrap"><a href="javascript:void(0)" '
+      +   'onclick="document.getElementById(\'cfm-busca\').value=\'' + x.fam + '\';cfmBuscar()" '
+      +   'style="font-weight:700;color:var(--azm);text-decoration:none">' + cfmEsc(x.fam) + '</a></td>'
+      + '<td style="padding:7px 10px">' + cfmEsc((reg && reg[1]) || '—') + '</td>'
+      + '<td style="padding:7px 10px;color:var(--vm)">' + cfmEsc((mp && mp[0]) || '—') + '</td>'
+      + '<td style="padding:7px 10px;color:var(--vd);font-weight:700">'
+      +   cfmEsc((mp && mp[1]) || '—') + '</td>'
+      + '<td style="padding:7px 10px;white-space:nowrap;color:' + cor + ';font-weight:700">'
+      +   cfmEsc(CFM_STATUS[x.st] || x.st) + '</td>'
+      + '</tr>';
+  });
+  el.innerHTML = h + '</tbody></table></div>';
 }
 
 async function cfmRecarregar(){
@@ -58845,6 +59097,9 @@ async function cfmAbrir(cod){
     +   _campo('TIPO DE FAMÍLIA', mp ? mp[1] : '', 'var(--vd)')
     + '</div></div>'
     + '<div style="font-size:11px;color:var(--tx2);margin-top:10px">'
+    + (Object.keys(_cfm.forn || {}).length ? '' :
+        'A coluna <strong>nome do fornecedor</strong> fica vazia até o <strong>backlog</strong> '
+        + 'subir em Analista Automático › Montar base — é dele que o nome vem, pelo código SAP.<br>')
     + (mp ? 'Segmento e tipo vieram do <strong>mapa diário</strong>'
             + (_cfm.mapaArquivo ? ' (' + cfmEsc(_cfm.mapaArquivo) + ')' : '')
             + ', cruzados pelo número da família.'
@@ -58873,8 +59128,8 @@ async function cfmAbrir(cod){
   });
   h += '<div style="overflow:auto;max-height:520px"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
     + '<thead><tr style="background:var(--cin)">'
-    + ['CÓD. FORNECEDOR','CÓD. SAP','CNPJ','PAÍS','STATUS DO FORNECEDOR',
-       'STATUS DO FORNECIMENTO','REGISTRO']
+    + ['CÓD. FORNECEDOR','CÓD. SAP','NOME DO FORNECEDOR','CNPJ','PAÍS',
+       'STATUS DO FORNECEDOR','STATUS DO FORNECIMENTO','REGISTRO']
         .map(function(t){ return '<th style="text-align:left;padding:8px 10px;font-size:10px;'
           + 'color:var(--tx2);border-bottom:1.5px solid var(--brd);white-space:nowrap">'
           + t + '</th>'; }).join('')
@@ -58885,6 +59140,7 @@ async function cfmAbrir(cod){
     h += '<tr style="border-bottom:1px solid var(--brd)">'
       + '<td style="padding:7px 10px;font-weight:700;color:var(--az);white-space:nowrap">' + cfmEsc(p.c || '—') + '</td>'
       + '<td style="padding:7px 10px;white-space:nowrap">' + cfmEsc(p.s || '—') + '</td>'
+      + '<td style="padding:7px 10px">' + cfmNomeForn(p.s) + '</td>'
       + '<td style="padding:7px 10px;white-space:nowrap">' + cfmEsc(p.j || '—') + '</td>'
       + '<td style="padding:7px 10px">' + cfmEsc(p.p || '—') + '</td>'
       + '<td style="padding:7px 10px;white-space:nowrap">'
@@ -58900,6 +59156,8 @@ async function cfmAbrir(cod){
 
 function cfmLimpar(){
   var b = document.getElementById('cfm-busca');
+  var sp = document.getElementById('cfm-sap');
+  if (sp) sp.value = '';
   if (b) b.value = '';
   var el = document.getElementById('cfm-resultado');
   if (el) el.innerHTML = '';
