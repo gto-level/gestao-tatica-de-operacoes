@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '27/11 23:40';
+var GTO_BUILD = '28/11 09:20';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -6795,8 +6795,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--azm);box
             <table id="aac-tabela">
               <thead><tr>
                 <th>Analista</th><th>Fila</th><th>Analista Auto.</th>
+                <th>Status Fornecimento</th>
                 <th>RC</th><th>Seq</th><th>OP</th><th>Item OP</th>
-                <th>Centro</th><th>Família</th><th>Tipo Família</th>
+                <th>Centro</th><th>Família</th><th>Segmento Família</th><th>Tipo Família</th>
                 <th>Fat. Mín.</th><th>Vlr Pedido</th><th>Vlr Total Julg.</th>
                 <th>ID SAP Forn.</th><th>Posição</th><th>CNPJ</th>
                 <th>Fornecedor</th><th>Aprov/Reprov</th><th>Q18</th>
@@ -48993,6 +48994,11 @@ const _AAC_COLS = {
   centro:       ['CENTRO','Centro','centro'],
   status_patec: ['STATUS_PATEC','Status Patec'],
   familia:      ['Familia ','Familia','Família','familia'],
+  // 28/11 — as duas colunas novas também aqui: esta tela é outra, com
+  // cabeçalho próprio, e sem isto elas não apareceriam no Analista
+  // Completo mesmo estando na base.
+  status_forn:  ['STATUS_FORNECIMENTO','Status do fornecimento','Status fornecimento'],
+  segmento_familia: ['SEGMENTO_FAMILIA','Segmento familia','Segmento família','Segmento'],
   tipo_familia: ['TIPO_FAMILIA','Tipo familia','Tipo família'],
   fat_min:      ['FATURAMENTO_MINIMO','Faturamento_minimo','Faturamento minimo'],
   vlr_pedido:   ['VALOR_PEDIDOFINAL','VALOR_PEDIDO_FINAL','Valor pedido final'],
@@ -49128,12 +49134,14 @@ function aaCompletoRenderTabela(){
       <td style="font-size:11px">${_g(r,'analista')}</td>
       <td style="font-size:11px">${_g(r,'fila')}</td>
       <td style="font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_g(r,'aa')}">${_g(r,'aa')}</td>
+      <td style="font-size:11px;${cor(_g(r,'status_forn'))}" title="${_g(r,'status_forn')}">${_g(r,'status_forn')}</td>
       <td style="font-weight:700;color:var(--az)">${rc}</td>
       <td>${seq}</td>
       <td>${op}</td>
       <td>${iop}</td>
       <td style="font-size:11px">${_g(r,'centro')}</td>
       <td style="font-size:11px">${_g(r,'familia')}</td>
+      <td style="font-size:11px">${_g(r,'segmento_familia')}</td>
       <td style="font-size:11px">${_g(r,'tipo_familia')}</td>
       <td style="font-size:11px">${_g(r,'fat_min')}</td>
       <td style="font-size:11px">${_g(r,'vlr_pedido')}</td>
@@ -49227,13 +49235,14 @@ function aaCompletoVerRC(chave){
 function aaCompletoExportar(){
   if(!_aacFiltrado.length){ alert('Nenhum dado para exportar.'); return; }
   const wb = XLSX.utils.book_new();
-  const colNomes = ['Analista','Fila','Analista Automático','RC','Seq','Oportunidade','Item OP','Centro',
-    'Família','Tipo Família','Faturamento Mínimo','Valor Pedido Final','Valor Total Julgamento',
+  const colNomes = ['Analista','Fila','Analista Automático','Status Fornecimento',
+    'RC','Seq','Oportunidade','Item OP','Centro',
+    'Família','Segmento Família','Tipo Família','Faturamento Mínimo','Valor Pedido Final','Valor Total Julgamento',
     'ID SAP Fornecedor','Posição Fornecedor','CNPJ','Nome Fornecedor','Aprovado/Reprovado',
     'Q18','NM Material','Texto Breve','Material Idêntico','Fabricante (Fornecedor)',
     'Fabricante (Petrobras)','PN (Fornecedor)','PN (Petrobras)','Urgência'];
-  const colCampos = ['analista','fila','aa','rc','seq','op','itemop','centro',
-    'familia','tipo_familia','fat_min','vlr_pedido','vlr_total',
+  const colCampos = ['analista','fila','aa','status_forn','rc','seq','op','itemop','centro',
+    'familia','segmento_familia','tipo_familia','fat_min','vlr_pedido','vlr_total',
     'id_sap','posicao','cnpj','fornecedor','aprovado',
     'q18','nm','texto','identico','fab_forn',
     'fab_pb','pn_forn','pn_pb','urgencia'];
