@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '28/11 09:20';
+var GTO_BUILD = '28/11 11:10';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -52294,6 +52294,7 @@ async function aagCarregarGuardadas(){
 var _aagArq  = {};   // chave -> { nome, linhas:[[...]], cab:[], aviso }
 var _aagBase = null; // { linhas:[], por:{}, geradoEm, contagem }
 var _aagStatusForn = null;   // o retrato do cruzamento família + ID SAP
+var _aagLiberarPorFamilia = null;  // itens que foram ao Tirar do Fluxo por esta regra
 var _aagEscalas = null; // como cada coluna de dinheiro foi lida
 
 // O VALOR_TOTAL_JULGAMENTO da planilha dele está 100x maior do que o
@@ -53580,13 +53581,36 @@ async function aagProcessar(){
         i.statusFornTexto = 'Sem família ou sem ID SAP na linha';
         return;
       }
-      var achou = stf.pares[cfmCod(i.familia) + '|' + cfmSap(i.idSap)];
+      var _kf = cfmCod(i.familia) + '|' + cfmSap(i.idSap);
+      var achou = stf.pares[_kf];
       if (!achou) { i.statusFornTexto = AAG_SEM_CADASTRO; return; }
-      if (String(achou).length > 1) i.statusAmbiguo = true;
+      if (String(achou).length > 1) {
+        i.statusAmbiguo = true;
+        // 28/11 — o double check que o André pediu: antes de mandar o
+        // item para o Tirar do Fluxo por causa desta regra, tento
+        // desempatar com o CNPJ da própria linha do backlog. Só vale
+        // quando sobra UM status: dois CNPJ iguais com status
+        // diferentes continuam sem desempate, e aí o pior manda.
+        var _jc = cfmSap(i.cnpj);
+        if (_jc) {
+          var fino = stf.comCnpj[_kf + '#' + _jc];
+          if (fino && String(fino).length === 1) {
+            i.statusDesempatado = achou + '→' + fino;
+            achou = fino;
+          } else if (fino) {
+            i.statusCnpjAindaAmbiguo = true;
+          } else {
+            i.statusCnpjNaoAchou = true;
+          }
+        } else {
+          i.statusSemCnpj = true;
+        }
+      }
       // com recorte filtrado os reprovados podem nem estar na base: a
       // regra se desliga em vez de dizer que está tudo certo
       i.statusForn = stf.recorteCheio ? achou : '';
       i.statusFornTexto = aagStatusTexto(achou)
+        + (i.statusDesempatado ? ' (pelo CNPJ)' : '')
         + (stf.recorteCheio ? '' : ' (recorte filtrado — regra desligada)');
     });
     // 27/11 — quantas linhas pegaram mais de um status. Testei se o
@@ -53596,15 +53620,21 @@ async function aagProcessar(){
     // Quem desempata de verdade é o cadastro, que o backlog não tem.
     // Então o pior manda — e o número fica à vista para conferência.
     var _amb = itens.filter(function(i){ return i.statusAmbiguo; });
-    var _ambBloq = _amb.filter(function(i){ return aagSegEntraNaRegra(i.segmento)
+    var _desemp = _amb.filter(function(i){ return i.statusDesempatado; });
+    var _semDes = _amb.filter(function(i){ return !i.statusDesempatado; });
+    var _ambBloq = _semDes.filter(function(i){ return aagSegEntraNaRegra(i.segmento)
       && aagStatusBloqueia(i.statusForn); });
     if (_amb.length) {
       aviso.push(cpNum(_amb.length) + ' linha(s) acharam MAIS DE UM status do fornecimento '
         + 'na mesma família — é o mesmo fornecedor em mais de um cadastro (CORP, CORP RD, '
-        + 'Registro Simplificado), e cada cadastro tem o seu status. Nesses casos vale o pior, '
-        + 'e a coluna STATUS_FORNECIMENTO mostra os dois (ex.: "Aprovado + Reprovado"). '
-        + cpNum(_ambBloq.length) + ' dessas caíram em NÃO ANALISAR por causa disso — filtre a '
-        + 'coluna por "+" para conferir à mão.');
+        + 'Registro Simplificado). O CNPJ da linha desempatou ' + cpNum(_desemp.length)
+        + ' (a coluna marca "pelo CNPJ"). '
+        + (_semDes.length
+            ? 'Nas outras ' + cpNum(_semDes.length) + ' o CNPJ é o mesmo nos dois cadastros e '
+              + 'não há como desempatar: vale o pior, e a coluna mostra os dois (ex.: '
+              + '"Aprovado + Reprovado"). ' + cpNum(_ambBloq.length) + ' dessas caíram em NÃO '
+              + 'ANALISAR — filtre a coluna STATUS_FORNECIMENTO por "+" para conferir à mão.'
+            : 'Nenhuma ficou sem desempate.'));
     }
 
     if (!stf.temBase) {
@@ -53648,6 +53678,29 @@ async function aagProcessar(){
       var temAnalisavel = grupos[k].some(function(o){ return !aagEhNaoAnalisar(o.aa); });
       situacao[k] = temAnalisavel ? 'MANTER EM ANÁLISE' : 'LIBERAR ITEM';
     });
+    // 28/11 — "os itens que realmente ficarem neste card eu vou devolver
+    // o processo". Então o item que vai para o Tirar do Fluxo POR CAUSA
+    // desta regra é separado e contado: é o que ele precisa conferir
+    // antes de devolver.
+    var _porFamilia = [], _porFamiliaAmb = [];
+    Object.keys(grupos).forEach(function(k){
+      if (situacao[k] !== 'LIBERAR ITEM') return;
+      var g = grupos[k];
+      var pesou = g.some(function(o){ return /na família$/.test(o.aa); });
+      if (!pesou) return;
+      _porFamilia.push(k);
+      if (g.some(function(o){ return o.statusAmbiguo && !o.statusDesempatado
+            && /na família$/.test(o.aa); })) _porFamiliaAmb.push(k);
+    });
+    _aagLiberarPorFamilia = { itens:_porFamilia, ambiguos:_porFamiliaAmb };
+    if (_porFamilia.length) {
+      aviso.push(cpNum(_porFamilia.length) + ' item(ns) foram para LIBERAR ITEM (Tirar do '
+        + 'Fluxo) com pelo menos um fornecedor barrado por reprovado/cancelado na família. '
+        + (_porFamiliaAmb.length
+            ? cpNum(_porFamiliaAmb.length) + ' deles dependem de um status ambíguo que o CNPJ '
+              + 'não desempatou — confira esses antes de devolver o processo.'
+            : 'Nenhum deles depende de status ambíguo: todos os barrados têm um status só.'));
+    }
 
     // ── a base final, no formato que o Analista Completo já lê ──
     var linhas = itens.map(function(i){
@@ -58890,16 +58943,30 @@ async function cfmGravar(chave){
     // montagem precisa só da letra.
     var qTxt = {};
     codigos.forEach(function(c){
-      var porSap = {};
+      var porSap = {}, porSapCnpj = {};
       sel.pares[c].forEach(function(p){
         var k = cfmSap(p.s);
         if (!k) return;
         var l = String(p.t || '?').charAt(0);
         if (!porSap[k]) porSap[k] = '';
         if (porSap[k].indexOf(l) === -1) porSap[k] += l;
+        // 28/11 — a chave de desempate. Só é gravada para os SAP que
+        // ficam ambíguos, e são 4.914 na planilha inteira: custa quase
+        // nada e resolve os casos em que as duas linhas são CNPJ
+        // diferente (matriz e filial, por exemplo).
+        var j = cfmSap(p.j);
+        if (!j) return;
+        var kc = k + '#' + j;
+        if (!porSapCnpj[kc]) porSapCnpj[kc] = '';
+        if (porSapCnpj[kc].indexOf(l) === -1) porSapCnpj[kc] += l;
       });
       var partes = Object.keys(porSap).map(function(k){
         return k + ':' + porSap[k].split('').sort().join('');
+      });
+      Object.keys(porSapCnpj).forEach(function(kc){
+        var sapDaChave = kc.split('#')[0];
+        if ((porSap[sapDaChave] || '').length < 2) return;   // não ficou ambíguo
+        partes.push(kc + ':' + porSapCnpj[kc].split('').sort().join(''));
       });
       if (partes.length) qTxt[c] = partes.join(',');
     });
@@ -59151,7 +59218,7 @@ async function cfmBuscarSap(){
 // Lê só os blocos das famílias pedidas — não a base inteira.
 var CFM_FILTRO_CHEIO = 'Tudo, sem filtro';
 async function cfmStatusDeFamilias(lista){
-  var r = { pares:{}, familias:0, blocos:0, temBase:false, filtro:'',
+  var r = { pares:{}, comCnpj:{}, familias:0, blocos:0, temBase:false, filtro:'',
             recorteCheio:false, semIndice:false };
   try {
     await cfmCarregar();
@@ -59175,13 +59242,18 @@ async function cfmStatusDeFamilias(lista){
     }));
     docs.forEach(function(d, i){ _cfm.qBlocos[ns[i]] = (d || {}).fams || {}; });
     r.blocos = Object.keys(precisa).length;
+    r.comCnpj = {};
     Object.keys(alvos).forEach(function(k){
       var txt = (_cfm.qBlocos[alvos[k]] || {})[k];
       if (!txt) return;
       r.familias++;
       String(txt).split(',').forEach(function(p){
         var x = p.split(':');
-        if (x[0]) r.pares[k + '|' + x[0]] = x[1] || '?';
+        if (!x[0]) return;
+        // "sap:letras" é a chave normal; "sap#cnpj:letras" é a de
+        // desempate, gravada só para os SAP que ficaram ambíguos
+        if (x[0].indexOf('#') !== -1) r.comCnpj[k + '|' + x[0]] = x[1] || '?';
+        else r.pares[k + '|' + x[0]] = x[1] || '?';
       });
     });
   } catch (e) { console.warn('cfmStatusDeFamilias:', e); }
