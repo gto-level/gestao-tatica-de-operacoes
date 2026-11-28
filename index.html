@@ -8,7 +8,7 @@
 // Carimbo da versão: aparece embaixo do login e no console. Serve para
 // saber, sem adivinhar, qual arquivo está realmente no ar — o navegador
 // guarda o index antigo em cache e isso confunde o diagnóstico.
-var GTO_BUILD = '27/11 21:40';
+var GTO_BUILD = '27/11 23:40';
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
@@ -52183,8 +52183,16 @@ function pcpAbrir(){
 
 // A ordem e o nome das colunas são os mesmos da planilha que o Analista
 // Completo já lê hoje — por isso a base entra lá sem nenhuma conversão.
-var AAG_CAB = ['Analista ','Fila ','ANALISTA AUTOMATICO ','RC','SEQ','OPORTUNIDADE','ITEM OP',
-  'CENTRO','STATUS_PATEC','Familia ','TIPO_FAMILIA','FATURAMENTO_MINIMO','VALOR_PEDIDOFINAL',
+// 27/11 — duas colunas novas, nos lugares que ele pediu:
+// STATUS_FORNECIMENTO entre o Analista Automático e a RC, e
+// SEGMENTO_FAMILIA entre Familia e TIPO_FAMILIA.
+// O layout do Upload Backlog (AAG_CAB_BACKLOG) NÃO mudou de propósito:
+// lá a coluna 31 é o TIRAR DO FLUXO, e a Planilha Crítica lê por
+// posição — acrescentar coluna no meio quebraria aquela aba.
+var AAG_CAB = ['Analista ','Fila ','ANALISTA AUTOMATICO ','STATUS_FORNECIMENTO',
+  'RC','SEQ','OPORTUNIDADE','ITEM OP',
+  'CENTRO','STATUS_PATEC','Familia ','SEGMENTO_FAMILIA','TIPO_FAMILIA',
+  'FATURAMENTO_MINIMO','VALOR_PEDIDOFINAL',
   'VALOR_TOTAL_JULGAMENTO','ID_SAP_FORNECEDOR','POSICAO_FORNECEDOR','CNPJ','NOME_FORNECEDOR',
   'Aprovado/ Reprovado ','Q18','NM_MATERIAL','TEXTO_BREVE_1','MATERIAL_IDENTICO',
   'FABRICANTE  ( Fornecedor)','FABRICANTE - ( Petrobras)','PARTNUMBER ( Fornecedor)',
@@ -52276,6 +52284,7 @@ async function aagCarregarGuardadas(){
 
 var _aagArq  = {};   // chave -> { nome, linhas:[[...]], cab:[], aviso }
 var _aagBase = null; // { linhas:[], por:{}, geradoEm, contagem }
+var _aagStatusForn = null;   // o retrato do cruzamento família + ID SAP
 var _aagEscalas = null; // como cada coluna de dinheiro foi lida
 
 // O VALOR_TOTAL_JULGAMENTO da planilha dele está 100x maior do que o
@@ -53292,6 +53301,15 @@ function aagClassificar(r, ae){
   if (aagIgual(T, 'Cancelado'))    return 'NÃO ANALISAR-PATEC Cancelado';
   if (aagTxt(T) === '')            return 'VERIFICAR APROVAÇÃO-COLUNA S';
   if (aagIgual(U, 'Impedido'))     return 'NÃO ANALISAR-Fornecedor na Q18';
+  // 27/11 — entra logo depois da Q18 porque é da mesma natureza: este
+  // fornecedor não pode fornecer ESTA família, independe de preço.
+  // Só vale para crítica, estratégica e operacional, e só quando o
+  // cruzamento achou a chave: "falta cadastro" não bloqueia ninguém.
+  if (aagSegEntraNaRegra(r.segmento) && aagStatusBloqueia(r.statusForn)) {
+    return String(r.statusForn).indexOf('R') !== -1
+      ? 'NÃO ANALISAR-Fornecedor reprovado na família'
+      : 'NÃO ANALISAR-Fornecedor cancelado na família';
+  }
   if (N > 92500)                   return 'NÃO ANALISAR-Valor acima do limite DPV';
   if (M > N)                       return 'NÃO ANALISAR-Faturamento mínimo';
   if (Q === 1) {
@@ -53311,7 +53329,7 @@ function aagEhNaoAnalisar(d){
 }
 
 // ── o processamento ───────────────────────────────────────────────
-function aagProcessar(){
+async function aagProcessar(){
   var st = document.getElementById('aag-status');
   var faltam = AAG_ARQUIVOS.filter(function(a){ return a.preciso && !_aagArq[a.chave]; });
   if (faltam.length) {
@@ -53386,6 +53404,16 @@ function aagProcessar(){
     var mapaPor = aagIndiceOpcional('mapa',
       ['ANALISTA_AUTOMATICO','STATUS MAPA','ANALISTA AUTOMATICO'], aviso, 'Mapa diário',
       AAG_CHAVE4);
+    // 27/11 — família, segmento e tipo também saem do mapa. O segmento
+    // é coluna nova da base e é ele que decide se a condição nova vale
+    // para a linha.
+    var mapaFamPor = aagIndiceOpcionalMulti('mapa', {
+      familia:  ['FAMILIA','FAMÍLIA'],
+      segmento: ['SEGMENTO_FAMILIA','SEGMENTO FAMILIA','SEGMENTO'],
+      tipo:     ['TIPO_FAMILIA','TIPO FAMILIA']
+      // avisos próprios: um mapa antigo, sem essas três colunas, não
+      // precisa reclamar aqui — quem cobra isso é a conferência do upload
+    }, [], 'Mapa diário', AAG_CHAVE4);
     // O levelboard é a fonte de quase tudo que não está no backlog. Os nomes
     // abaixo são exatamente os cabeçalhos do levelboard dele.
     var levelPor = aagIndiceOpcionalMulti('level', {
@@ -53520,6 +53548,72 @@ function aagProcessar(){
       });
     });
 
+    // ── família, segmento e o STATUS DO FORNECIMENTO (27/11) ─────
+    // A chave é família + ID SAP, conferida contra as planilhas reais
+    // antes de entrar: 97,7% dos pares acharam. O que não acha vira
+    // "Falta cadastro na família" — informação, não bloqueio.
+    itens.forEach(function(i){
+      var lv = aagBusca(levelPor, i) || {};
+      var mf = aagBusca(mapaFamPor, i) || {};
+      i.familia  = aagTxt(lv.familia || mf.familia || '');
+      i.segmento = aagTxt(mf.segmento || lv.segmento || '');
+      i.tipoFam  = aagTxt(lv.tipo || mf.tipo || '');
+    });
+    var famUsadas = {};
+    itens.forEach(function(i){ if (i.familia) famUsadas[i.familia] = 1; });
+    var stf = await cfmStatusDeFamilias(Object.keys(famUsadas));
+    _aagStatusForn = stf;
+    itens.forEach(function(i){
+      i.statusForn = '';
+      i.statusFornTexto = '';
+      if (!stf.temBase || stf.semIndice) { i.statusFornTexto = ''; return; }
+      if (!i.familia || !i.idSap) {
+        i.statusFornTexto = 'Sem família ou sem ID SAP na linha';
+        return;
+      }
+      var achou = stf.pares[cfmCod(i.familia) + '|' + cfmSap(i.idSap)];
+      if (!achou) { i.statusFornTexto = AAG_SEM_CADASTRO; return; }
+      if (String(achou).length > 1) i.statusAmbiguo = true;
+      // com recorte filtrado os reprovados podem nem estar na base: a
+      // regra se desliga em vez de dizer que está tudo certo
+      i.statusForn = stf.recorteCheio ? achou : '';
+      i.statusFornTexto = aagStatusTexto(achou)
+        + (stf.recorteCheio ? '' : ' (recorte filtrado — regra desligada)');
+    });
+    // 27/11 — quantas linhas pegaram mais de um status. Testei se o
+    // CNPJ desempataria: não desempata nenhuma (é o mesmo CNPJ nas duas
+    // linhas, o mesmo fornecedor em dois cadastros) e ainda derrubaria
+    // o cruzamento, porque 70% das linhas do backlog vêm sem CNPJ.
+    // Quem desempata de verdade é o cadastro, que o backlog não tem.
+    // Então o pior manda — e o número fica à vista para conferência.
+    var _amb = itens.filter(function(i){ return i.statusAmbiguo; });
+    var _ambBloq = _amb.filter(function(i){ return aagSegEntraNaRegra(i.segmento)
+      && aagStatusBloqueia(i.statusForn); });
+    if (_amb.length) {
+      aviso.push(cpNum(_amb.length) + ' linha(s) acharam MAIS DE UM status do fornecimento '
+        + 'na mesma família — é o mesmo fornecedor em mais de um cadastro (CORP, CORP RD, '
+        + 'Registro Simplificado), e cada cadastro tem o seu status. Nesses casos vale o pior, '
+        + 'e a coluna STATUS_FORNECIMENTO mostra os dois (ex.: "Aprovado + Reprovado"). '
+        + cpNum(_ambBloq.length) + ' dessas caíram em NÃO ANALISAR por causa disso — filtre a '
+        + 'coluna por "+" para conferir à mão.');
+    }
+
+    if (!stf.temBase) {
+      aviso.push('Sem a planilha de famílias (Consulta Família) eu não sei o status do '
+        + 'fornecimento de cada fornecedor na família — a coluna STATUS_FORNECIMENTO fica '
+        + 'vazia e a condição "reprovado/cancelado na família" não é aplicada.');
+    } else if (stf.semIndice) {
+      aviso.push('A base de famílias é anterior ao índice de status. Suba a planilha de '
+        + 'famílias de novo na Consulta Família para a condição "reprovado/cancelado na '
+        + 'família" passar a valer.');
+    } else if (!stf.recorteCheio) {
+      aviso.push('A base de famílias foi gravada com o recorte "' + (stf.filtro || '—')
+        + '", que não traz os reprovados nem os cancelados. A condição '
+        + '"reprovado/cancelado na família" ficou DESLIGADA — com esse recorte ela diria '
+        + 'que está tudo certo justamente nos itens que deveria barrar. Regrave a Consulta '
+        + 'Família com "Tudo, sem filtro".');
+    }
+
     // ── a classificação do fornecedor dentro do item (coluna AE) ──
     // Conta quantos fornecedores elegíveis estão à frente dele na posição.
     var grupos = {};
@@ -53556,9 +53650,11 @@ function aagProcessar(){
         'Analista ': i._analista,
         'Fila ': lv.fila || '',
         'ANALISTA AUTOMATICO ': i.aa,
+        'STATUS_FORNECIMENTO': i.statusFornTexto || '',
         'RC': i.rc, 'SEQ': i.seq, 'OPORTUNIDADE': i.op, 'ITEM OP': i.iop,
         'CENTRO': i.centro, 'STATUS_PATEC': i.statusPatec,
-        'Familia ': lv.familia || '', 'TIPO_FAMILIA': lv.tipo || '',
+        'Familia ': i.familia || '', 'SEGMENTO_FAMILIA': i.segmento || '',
+        'TIPO_FAMILIA': i.tipoFam || '',
         'FATURAMENTO_MINIMO': i.fatMin, 'VALOR_PEDIDOFINAL': i.vlrPedido,
         'VALOR_TOTAL_JULGAMENTO': i.vlrTotal,
         'ID_SAP_FORNECEDOR': i.idSap, 'POSICAO_FORNECEDOR': i.posicao,
@@ -54216,6 +54312,39 @@ function aagPintarContaSemAnalista(){
 // A distribuição é só do que está em PATEC finalizado — é o que a coluna A
 // do mapa diário diz e é o mesmo item que a Governança coloca no MAPA com
 // AG. TRATAMENTO. Os outros status não precisam de analista.
+// ── A CONDIÇÃO NOVA DO NÃO ANALISAR (27/11) ──────────────────────
+// André: "depois que fizer o cruzamento, vamos precisar analisar tudo
+// que é de família crítica, estratégica e operacional. Se o fornecedor
+// daquela RC estiver com o status do fornecimento R e/ou X (reprovado
+// ou cancelado), aquele fornecedor deve trazer a informação NÃO
+// ANALISAR."
+//
+// Fora dessa lista fica a Página amarela, que é o quarto segmento da
+// planilha dele — nela a condição não vale.
+var AAG_SEG_ANALISA = ['CRITICA', 'ESTRATEGICA', 'OPERACIONAL'];
+function aagSegEntraNaRegra(seg){
+  return AAG_SEG_ANALISA.indexOf(cpNormCab(seg)) !== -1;
+}
+// A chave família + ID SAP pode trazer MAIS DE UM status: o mesmo
+// fornecedor está em mais de um cadastro (CORP, CORP RD, Registro
+// Simplificado) e cada um tem o seu status naquela família. Na planilha
+// dele são 4.914 chaves assim. Nesses casos o pior manda — foi o que
+// a regra pede: "estiver com o status R e/ou X".
+function aagStatusBloqueia(letras){
+  var t = String(letras || '').toUpperCase();
+  return t.indexOf('R') !== -1 || t.indexOf('X') !== -1;
+}
+// As letras viram texto para a coluna da base.
+var AAG_ST_FORN = { 'A':'Aprovado', 'Q':'Qualificado tecnicamente',
+                    'D':'Declaração de Interesse', 'R':'Reprovado',
+                    'X':'Cancelado', '?':'sem status' };
+var AAG_SEM_CADASTRO = 'Falta cadastro na família';
+function aagStatusTexto(letras){
+  var t = String(letras || '');
+  if (!t) return '';
+  return t.split('').map(function(l){ return AAG_ST_FORN[l] || l; }).join(' + ');
+}
+
 var AAG_STATUS_DISTRIBUI = 'Analisar PATEC Finalizado';
 
 // ── quem entra em cada saída ──────────────────────────────────────
@@ -54743,7 +54872,7 @@ async function aagGravarTratamento(){
     return;
   }
   aagPintarUploads();
-  aagProcessar();
+  await aagProcessar();
   if (st) st.innerHTML = '<span style="color:var(--vd)">✓ RC em tratamento gravada: '
     + cpNum(r.novas) + ' novo(s), ' + cpNum(r.trocadas) + ' trocado(s), '
     + cpNum(r.linhas.length) + ' linhas no total.</span>';
@@ -58744,11 +58873,50 @@ async function cfmGravar(chave){
     // Blocos de ~600 KB, cada um com famílias inteiras: consultar uma
     // família lê o índice e UM bloco, nunca a base toda.
     var codigos = Object.keys(sel.pares).sort();
+
+    // 27/11 — um índice SÓ DE STATUS, por família: "sap:A,sap:QR".
+    // É ele que o Analista Automático lê na montagem para aplicar a
+    // condição nova. Separado do bloco cheio de propósito: o bloco
+    // cheio tem CNPJ, país e registro e pesa dez vezes mais; a
+    // montagem precisa só da letra.
+    var qTxt = {};
+    codigos.forEach(function(c){
+      var porSap = {};
+      sel.pares[c].forEach(function(p){
+        var k = cfmSap(p.s);
+        if (!k) return;
+        var l = String(p.t || '?').charAt(0);
+        if (!porSap[k]) porSap[k] = '';
+        if (porSap[k].indexOf(l) === -1) porSap[k] += l;
+      });
+      var partes = Object.keys(porSap).map(function(k){
+        return k + ':' + porSap[k].split('').sort().join('');
+      });
+      if (partes.length) qTxt[c] = partes.join(',');
+    });
+    var qb = [], qAtual = {}, qTam = 0, qOnde = {};
+    codigos.forEach(function(c){
+      if (!qTxt[c]) return;
+      var t = c.length + qTxt[c].length + 6;
+      if (qTam && qTam + t > CFM_BLOCO) { qb.push(qAtual); qAtual = {}; qTam = 0; }
+      qOnde[c] = qb.length;
+      qAtual[c] = qTxt[c];
+      qTam += t;
+    });
+    if (Object.keys(qAtual).length) qb.push(qAtual);
+    for (var qi = 0; qi < qb.length; qi++) {
+      _cfmSt('⏳ Gravando o índice de status ' + (qi + 1) + ' de ' + qb.length + '...');
+      await fbSetGeral('config', 'familias_q' + qi, { fams: qb[qi] });
+    }
+    for (var qz = qb.length; qz < (_cfm.qN || 0); qz++)
+      await fbSetGeral('config', 'familias_q' + qz, { fams:{} });
+
     var blocos = [], atual = {}, tam = 0, idx = {};
     codigos.forEach(function(c){
       var t = JSON.stringify(sel.pares[c]).length + c.length + 8;
       if (tam && tam + t > CFM_BLOCO) { blocos.push(atual); atual = {}; tam = 0; }
-      idx[c] = [blocos.length, sel.fam[c] || ''];
+      // [bloco cheio, descrição, bloco só de status]
+      idx[c] = [blocos.length, sel.fam[c] || '', qOnde[c] === undefined ? null : qOnde[c]];
       atual[c] = sel.pares[c];
       tam += t;
     });
@@ -58762,7 +58930,7 @@ async function cfmGravar(chave){
     // o índice também pode passar de 1 MB: vai em pedaços
     var chaves = Object.keys(idx).sort(), partes = [], parte = {}, pt = 0;
     chaves.forEach(function(c){
-      var t = c.length + String(idx[c][1]).length + 16;
+      var t = c.length + String(idx[c][1]).length + 20;
       if (pt && pt + t > CFM_BLOCO) { partes.push(parte); parte = {}; pt = 0; }
       parte[c] = idx[c]; pt += t;
     });
@@ -58796,6 +58964,7 @@ async function cfmGravar(chave){
                  fornecedores:Object.keys(_cfmLido.fornec).length,
                  filtro:f.rot, blocos:blocos.length, indices:partes.length,
                  sapBlocos:sb.length, sapInicio:sInicio, sapsIndexados:saps.length,
+                 qBlocos:qb.length,
                  bytes:sel.bytes,
                  atualizadoEm:new Date().toISOString(), atualizadoPor:cpQuem() };
     await fbSetGeral('config', 'familias_meta', meta);
@@ -58845,6 +59014,7 @@ async function cfmCarregar(forcar){
     _cfm = { fam:fam, blocos:{}, sapBlocos:{}, forn:fo.forn || {},
              fornArquivo:fo.arquivo || '',
              sapN:+m.sapBlocos || 0, sapInicio:m.sapInicio || [],
+             qN:+m.qBlocos || 0, qBlocos:{},
              mapa:mp.fam || {}, mapaArquivo:mp.arquivo || '',
              mapaEm:mp.atualizadoEm || '', mapaPorLetra:mp.porLetra || [],
              arquivo:m.arquivo || '', total:+m.total || 0,
@@ -58965,6 +59135,48 @@ async function cfmBuscarSap(){
       + '</tr>';
   });
   el.innerHTML = h + '</tbody></table></div>';
+}
+
+// O que o Analista Automático chama na montagem: dado o conjunto de
+// famílias do backlog, devolve o status de cada par família+SAP.
+// Lê só os blocos das famílias pedidas — não a base inteira.
+var CFM_FILTRO_CHEIO = 'Tudo, sem filtro';
+async function cfmStatusDeFamilias(lista){
+  var r = { pares:{}, familias:0, blocos:0, temBase:false, filtro:'',
+            recorteCheio:false, semIndice:false };
+  try {
+    await cfmCarregar();
+    r.temBase = !!Object.keys(_cfm.fam || {}).length;
+    r.filtro = _cfm.filtro || '';
+    r.recorteCheio = cpNormCab(r.filtro) === cpNormCab(CFM_FILTRO_CHEIO);
+    if (!r.temBase) return r;
+    if (!(_cfm.qN || 0)) { r.semIndice = true; return r; }
+    var precisa = {}, alvos = {};
+    (lista || []).forEach(function(f){
+      var k = cfmCod(f);
+      if (!k || alvos[k]) return;
+      var reg = _cfm.fam[k];
+      if (!reg || reg[2] === null || reg[2] === undefined) return;
+      alvos[k] = reg[2];
+      precisa[reg[2]] = 1;
+    });
+    var ns = Object.keys(precisa).filter(function(n){ return !_cfm.qBlocos[n]; });
+    var docs = await Promise.all(ns.map(function(n){
+      return fbGetGeral('config', 'familias_q' + n);
+    }));
+    docs.forEach(function(d, i){ _cfm.qBlocos[ns[i]] = (d || {}).fams || {}; });
+    r.blocos = Object.keys(precisa).length;
+    Object.keys(alvos).forEach(function(k){
+      var txt = (_cfm.qBlocos[alvos[k]] || {})[k];
+      if (!txt) return;
+      r.familias++;
+      String(txt).split(',').forEach(function(p){
+        var x = p.split(':');
+        if (x[0]) r.pares[k + '|' + x[0]] = x[1] || '?';
+      });
+    });
+  } catch (e) { console.warn('cfmStatusDeFamilias:', e); }
+  return r;
 }
 
 async function cfmRecarregar(){
